@@ -318,7 +318,7 @@ test('HubCore and HubAgent synchronize pins bidirectionally across mobile API an
     assert.equal(hub.getFullState().sessionPinState['codex:desk-pinned-1']?.pinned, false)
     assert.equal(hub.getFullState().sessionPinState['session-dsh-2']?.pinned, false)
   } finally {
-    await rm(tmpRoot, { recursive: true, force: true })
+    await rm(tmpRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 25 })
   }
 })
 
@@ -532,7 +532,7 @@ test('Zero-lag conclusion state: inflightCommands clear immediately on conclusio
     await sseResp.text()
   } finally {
     await new Promise(resolve => server.close(resolve))
-    await rm(tmpRoot, { recursive: true, force: true })
+    await rm(tmpRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 25 })
   }
 })
 

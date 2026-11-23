@@ -195,8 +195,9 @@ describe('conclusion detection & unread badge reliability', () => {
       hostRec.bridgeState.tasks[0].updatedAt = clock + 5000 // actual finish > cmd.createdAt
       const kept = hub.pruneInflightCommands(hostRec, clock + 5500)
       assert.equal(kept.length, 0)
+      await hub._persistInFlight?.catch(() => {})
     } finally {
-      await rm(root, { recursive: true, force: true })
+      await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
     }
   })
 })

@@ -1,5 +1,5 @@
 import { createHmac, randomBytes, randomInt, timingSafeEqual } from 'node:crypto'
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { generateOrLoadVapidKeys, sendWebPushNotification } from './web-push.js'
 import { formatWebPushNotification, shouldSuppressTaskPush } from './push-formatter.js'
@@ -1004,9 +1004,15 @@ export class HubCore {
       return this._persistInFlight
     }
     this._persistInFlight = (async () => {
+      // Coalesce synchronous mutations within the same tick into a single atomic write
+      await Promise.resolve()
       do {
+        let tmpPath = ''
         try {
-          await mkdir(dirname(this.stateFile), { recursive: true })
+          if (!this._stateDirPrepared) {
+            await mkdir(dirname(this.stateFile), { recursive: true })
+            this._stateDirPrepared = true
+          }
           // Clear queued flag right before reading the in-memory snapshot so
           // multiple synchronous mutations in the same tick coalesce into one write.
           this._persistQueued = false
@@ -1043,11 +1049,12 @@ export class HubCore {
             trustedDevices: [...this.trustedDevices.values()],
             enrollment: this.enrollment,
           }
-          const tmpPath = `${this.stateFile}.tmp.${process.pid}`
+          tmpPath = `${this.stateFile}.tmp.${process.pid}`
           await writeFile(tmpPath, JSON.stringify(payload), { encoding: 'utf8', mode: 0o600 })
           await rename(tmpPath, this.stateFile)
         } catch {
           this._persistQueued = false
+          if (tmpPath) await unlink(tmpPath).catch(() => {})
           // best effort persistence
         }
       } while (this._persistQueued)

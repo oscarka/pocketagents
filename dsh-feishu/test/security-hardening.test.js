@@ -225,7 +225,7 @@ test('Security Hardening: forged hst_<48hex> token cannot bypass /api/heartbeat,
     assert.equal(cleanIpOk.status, 200)
   } finally {
     await new Promise(resolve => server.close(resolve))
-    await rm(root, { recursive: true, force: true })
+    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 25 })
   }
 })
 

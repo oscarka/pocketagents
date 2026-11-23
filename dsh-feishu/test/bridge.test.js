@@ -564,7 +564,7 @@ test('media paths cannot escape the session directory through a symlink', async 
     assert.ok(!JSON.stringify(sentCards.at(-1).card).includes('img-key'))
     await bridge.dispose()
   } finally {
-    await rm(root, { recursive: true, force: true })
+    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 25 })
     await rm(outside, { recursive: true, force: true })
   }
 })
@@ -626,7 +626,7 @@ test('presented deliverables are sent even when the assistant text omits the pat
     assert.match(JSON.stringify(sentCards.at(-1).card), /视频已单独发送/)
     await bridge.dispose()
   } finally {
-    await rm(root, { recursive: true, force: true })
+    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 25 })
   }
 })
 
@@ -706,7 +706,7 @@ test('dsh disk sessions are idle-resumable (never observe-only) and HubCore reco
     const patchPath = buildDshHeadlessPatchFile(root)
     assert.ok(patchPath.endsWith('headless-remote-patch.yml'))
   } finally {
-    await rm(root, { recursive: true, force: true })
+    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 25 })
   }
 
   // Verify turn-level assistant step merging, full reply preservation (>4000 chars), and tool argument/result extraction
@@ -846,8 +846,9 @@ test('persistCommandAttachments saves mobile screenshots to workspace and enrich
     assert.equal(hbRes.commands.length, 1)
     assert.equal(hbRes.commands[0].attachments.length, 1)
     assert.equal(hbRes.commands[0].attachments[0].dataBase64, samplePngBase64)
+    await hub._persistInFlight?.catch(() => {})
   } finally {
-    await rm(root, { recursive: true, force: true })
+    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
   }
 })
 
@@ -1011,7 +1012,7 @@ test('approval lifecycle closure: 45s TTL expiry, dedupe, cancel cleanup, action
     assert.equal(fallbackList[0].id, 'codex:sess-1')
     assert.match(fallbackList[0].stateMeta.lastScanError, /EBUSY/)
   } finally {
-    await rm(root, { recursive: true, force: true })
+    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 25 })
   }
 })
 
@@ -1240,7 +1241,7 @@ test('real DSH v4 zstd active lock guard, 409 approval conflict, disk transcript
     assert.equal(badInfo.savedFiles.length, 0)
     assert.ok(badInfo.error.length > 0)
   } finally {
-    await rm(root, { recursive: true, force: true })
+    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 25 })
   }
 })
 
@@ -1354,8 +1355,9 @@ test('45s mid-turn DSH lock window, stale 0-byte lock recovery & server-authorit
     })
     assert.equal(tooManyAtt.ok, false)
     assert.equal(tooManyAtt.statusCode, 413)
+    await hub._persistInFlight?.catch(() => {})
   } finally {
-    await rm(root, { recursive: true, force: true })
+    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
   }
 })
 
@@ -1683,7 +1685,7 @@ test('P1 & P2 Onboarding Loop: multi-use enrollment code, per-host independent t
     assert.match(qrSvg, /^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg"/)
     assert.match(qrSvg, /<path d="M/)
   } finally {
-    await rm(root, { recursive: true, force: true })
+    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 25 })
   }
 })
 
@@ -1854,7 +1856,7 @@ test('DSH workspace.json bidirectional sync: filters archived sessions & registe
     assert.equal(telemetry.network.quality, 'excellent')
     assert.match(telemetry.network.label, /42ms/)
   } finally {
-    await rm(root, { recursive: true, force: true })
+    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 25 })
   }
 })
 
@@ -1999,7 +2001,7 @@ test('Antigravity background task mid-turn push suppression & persistent session
       'conclusion:2:✅ Cloud Run 部署已完成！',
     )
   } finally {
-    await rm(root, { recursive: true, force: true })
+    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 25 })
   }
 })
 
@@ -2211,7 +2213,7 @@ test('DSH Selection Popups (ask_user_question & exit_plan_mode) and Disk-Logged 
       ],
     })
   } finally {
-    await rm(root, { recursive: true, force: true })
+    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 25 })
   }
 })
 
@@ -2313,7 +2315,7 @@ test('first-time user deployment & onboarding: stateFile fallback, LAN QR origin
       'dsh-feishu/index.js should not top-level import FeishuTransport so zero-Feishu users do not need @larksuiteoapi/node-sdk installed',
     )
   } finally {
-    await rm(root, { recursive: true, force: true })
+    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 25 })
   }
 })
 
