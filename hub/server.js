@@ -429,8 +429,11 @@ export function createHubServer({
     }
 
     if (readMethod === 'GET' && (pathname === '/healthz' || pathname === '/ready' || pathname === '/api/health')) {
-      const cleanSock = String(remoteAddress || '').replace(/^::ffff:/i, '')
-      const isLocalProbe = cleanSock === '127.0.0.1' || cleanSock === '::1'
+      const cleanClient = resolveClientIp(headers, remoteAddress, {
+        ...(trustProxy !== undefined ? { trustProxy } : {}),
+      })
+      const hasProxyHeaders = Boolean(headers['x-forwarded-for'] || headers['x-real-ip'] || headers['cf-connecting-ip'])
+      const isLocalProbe = !hasProxyHeaders && (cleanClient === '127.0.0.1' || cleanClient === '::1')
       const showExtended = isLocalProbe || checkAuth(headers, urlObj)
       return {
         status: 200,
