@@ -1,5 +1,5 @@
 import { createHmac, randomBytes, randomInt, timingSafeEqual } from 'node:crypto'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { generateOrLoadVapidKeys, sendWebPushNotification } from './web-push.js'
 import { formatWebPushNotification, shouldSuppressTaskPush } from './push-formatter.js'
@@ -133,24 +133,39 @@ export class HubCore {
       return { recorded: false, alerted: false, burstCount: prevHits.length }
     }
 
-    const entry = {
-      id: `sec-${now.toString(36)}-${randomBytes(3).toString('hex')}`,
-      at: now,
-      kind: cleanKind,
-      severity: highSignalKind ? 'high' : severity,
-      ip: cleanIp,
-      method: String(method || 'GET').toUpperCase().slice(0, 12),
-      path: cleanPath,
-      status: Number(status) || 401,
-      detail: cleanDetail,
-      burstCount: prevHits.length,
+    const cleanMethod = String(method || 'GET').toUpperCase().slice(0, 12)
+    const lastEntry = this.securityEvents[this.securityEvents.length - 1]
+    let entry
+    if (
+      !pushImmediately &&
+      lastEntry &&
+      lastEntry.ip === cleanIp &&
+      lastEntry.kind === cleanKind &&
+      lastEntry.path === cleanPath &&
+      now - lastEntry.at < 30_000
+    ) {
+      lastEntry.at = now
+      lastEntry.burstCount = prevHits.length
+      if (cleanDetail) lastEntry.detail = cleanDetail
+      entry = lastEntry
+    } else {
+      entry = {
+        id: `sec-${now.toString(36)}-${randomBytes(3).toString('hex')}`,
+        at: now,
+        kind: cleanKind,
+        severity: highSignalKind ? 'high' : severity,
+        ip: cleanIp,
+        method: cleanMethod,
+        path: cleanPath,
+        status: Number(status) || 401,
+        detail: cleanDetail,
+        burstCount: prevHits.length,
+      }
+      this.securityEvents.push(entry)
+      if (this.securityEvents.length > 100) {
+        this.securityEvents.splice(0, this.securityEvents.length - 100)
+      }
     }
-    this.securityEvents.push(entry)
-    if (this.securityEvents.length > 100) {
-      this.securityEvents.splice(0, this.securityEvents.length - 100)
-    }
-    void this.persist()
-    this.emitStateChange('security_alert')
 
     const cooldownKey = `${cleanIp}:${cleanKind}`
     const cooldownMs = 5 * 60_000
@@ -183,6 +198,14 @@ export class HubCore {
           url: '/#settings',
         },
       })
+    }
+    if (alerted || pushImmediately || now - (this._lastSecurityPersistAt || 0) >= 30_000) {
+      this._lastSecurityPersistAt = now
+      void this.persist()
+    }
+    if (alerted || pushImmediately || now - (this._lastSecurityEmitAt || 0) >= 5_000) {
+      this._lastSecurityEmitAt = now
+      this.emitStateChange('security_alert')
     }
     return { recorded: true, alerted, event: entry }
   }
@@ -1020,7 +1043,9 @@ export class HubCore {
             trustedDevices: [...this.trustedDevices.values()],
             enrollment: this.enrollment,
           }
-          await writeFile(this.stateFile, JSON.stringify(payload), 'utf8')
+          const tmpPath = `${this.stateFile}.tmp.${process.pid}`
+          await writeFile(tmpPath, JSON.stringify(payload), { encoding: 'utf8', mode: 0o600 })
+          await rename(tmpPath, this.stateFile)
         } catch {
           this._persistQueued = false
           // best effort persistence
