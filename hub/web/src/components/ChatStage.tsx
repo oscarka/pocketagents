@@ -70,7 +70,7 @@ export function ChatStage() {
       ></div>
 
       <div class="running-control-bar" id="runningControlBar">
-        <span>🟢 AI 正在电脑上执行任务...</span>
+        <span id="runningControlBarLabel">🟢 AI 正在电脑上执行任务...</span>
         <button
           type="button"
           class="stop-task-btn"

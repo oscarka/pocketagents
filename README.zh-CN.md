@@ -235,8 +235,11 @@ HUB_TOKEN="自定义一个安全密码" \
 > 💡 按**自然日**折叠汇总，每条内保留完整子版本号；逐版本详细变更请见 [`CHANGELOG.md`](CHANGELOG.md)。
 
 <details open>
-<summary><strong><code>2026-11-23 · v0.9.9–v0.9.11</code> — 子智能体审批冒泡、第二轮纵深安全加固、零信任手机审批门禁与 BYOK 语音总管</strong></summary>
+<summary><strong><code>2026-11-23 · v0.9.9–v0.9.12</code> — 子智能体运行态与审批冒泡、第二轮纵深安全加固、零信任手机审批门禁与 BYOK 语音总管</strong></summary>
 
+- **Antigravity 子智能体「运行中」实时冒泡、防误判护栏与联动停止（`v0.9.12`）**：
+  - 手机端批准浏览器/研究子智能体弹窗后，即使父会话自身仍处于 `IDLE` 等待子智能体汇报，只要任一子智能体在后台 `CASCADE_RUN_STATUS_RUNNING`，父会话列表卡片与聊天底部绿色运行条都会持续显示 **`🟢 运行中`** 与子智能体实时步数进度（如 `🌐 子智能体「...」正在后台执行 (第 N 步)...`）。
+  - 严格防误判护栏（`isSubagentActivelyRunning`）仅采信 LanguageServer RPC 实时状态（`CASCADE_RUN_STATUS_RUNNING`、`!killed`、无等待弹窗且最近 15 分钟内有步数推进），空闲常驻浏览器标签、已完成或僵死子会话绝不误报；点击父会话「⏹ 立即停止」时同步取消活跃运行中的子智能体。
 - **Antigravity 子智能体审批冒泡与第二轮全栈安全加固（`v0.9.11`）**：
   - **子智能体审批冒泡与手机直达批准**：当父会话已处于 `IDLE`、但后台浏览器/研究子智能体（如文件上传或权限确认）卡在 `WAITING_FOR_USER` 时，自动将子智能体待审批弹窗冒泡到父会话与手机锁屏推送，并在手机点击允许/拒绝时自动将 `HandleCascadeUserInteraction` 精准路由至被阻塞的子智能体 `cascadeId`（兼容 2 选项浏览器弹窗与 4 选项终端弹窗）。
   - **第二轮全栈纵深安全加固**：`mediaTicket` 与零信任 `hst_` 令牌绑定持久化 `mediaSeed` 防离线伪造、新增已删除主机令牌墓碑集、`POST /api/heartbeat` 彻底封堵裸 `HUB_TOKEN`（`403`）、全部跨主机共享接口按 `authHostId` 严格隔离、`/fs/rtc-offer` 收紧为管理员鉴权并核验 DTLS SHA-256 指纹、全局 `/api/*` 防爆破与防预认证 gzip 炸弹、Voice SSRF 升级 IPv4/IPv6/DNS 全拦截与 L2 高危 `commandLine` 识别 + 3 次 PIN 失败持久化锁定、宿主机 `Range:` 脱敏与路径遍历修复、无 shell 剪贴板、前端 `escJsStr` 与沙箱 CSP 加固、只读部署目录与最小权限拆分 CI/OIDC 发布。

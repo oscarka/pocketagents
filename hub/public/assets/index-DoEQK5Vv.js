@@ -528,7 +528,7 @@ function ChatStage() {
 	}), /* @__PURE__ */ k$1("div", {
 		class: "running-control-bar",
 		id: "runningControlBar"
-	}, /* @__PURE__ */ k$1("span", null, "🟢 AI 正在电脑上执行任务..."), /* @__PURE__ */ k$1("button", {
+	}, /* @__PURE__ */ k$1("span", { id: "runningControlBarLabel" }, "🟢 AI 正在电脑上执行任务..."), /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: "stop-task-btn",
 		onClick: () => window.stopActiveSession?.()
@@ -11864,6 +11864,8 @@ function initHubController() {
 					isStalledMidTurn,
 					lastPreview: cleanPrev,
 					rawLastPreview: rawPreview,
+					runningSummary: String(t.runningSummary || ""),
+					activeSubagents: Array.isArray(t.activeSubagents) ? t.activeSubagents : [],
 					transcript,
 					_wireTranscript: wireTranscript,
 					_wireTotalCount: serverWireTotalCount,
@@ -13052,6 +13054,11 @@ function initHubController() {
 			if (chatInput) chatInput.dataset.origPlaceholder = chatInput.placeholder;
 			if (voiceBtn) voiceBtn.style.opacity = chatInput.disabled ? "0.52" : "";
 			syncWechatHoldBtnState();
+		}
+		const runningBarLabelEl = document.getElementById("runningControlBarLabel");
+		if (runningBarLabelEl && s.status === "running") {
+			const nextRunningLabel = Array.isArray(s.activeSubagents) && s.activeSubagents.length > 0 && s.runningSummary ? `🟢 ${String(s.runningSummary).slice(0, 120)}` : langPref === "en" ? "🟢 AI is working on your computer..." : "🟢 AI 正在电脑上执行任务...";
+			if (runningBarLabelEl.textContent !== nextRunningLabel) runningBarLabelEl.textContent = nextRunningLabel;
 		}
 		const trSig = s.transcript.slice(-6).map((m) => `${m.role}:${m.queuedCmdId || ""}:${m.expiredCmdId || ""}:${(m.text || "").length}:${(m.text || "").slice(-32)}:${(m.thinking || "").length}:${(m.tools || []).length}:${(m.artifacts || []).length}:${m.waitingForInput ? 1 : 0}`).join("|");
 		const fcMeta = computeChangedFilesMeta(s.changedFiles);

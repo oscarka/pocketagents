@@ -1270,6 +1270,8 @@ export function initHubController() {
           isStalledMidTurn,
           lastPreview: cleanPrev,
           rawLastPreview: rawPreview,
+          runningSummary: String(t.runningSummary || ''),
+          activeSubagents: Array.isArray(t.activeSubagents) ? t.activeSubagents : [],
           transcript,
           _wireTranscript: wireTranscript,
           _wireTotalCount: serverWireTotalCount,
@@ -2783,6 +2785,16 @@ export function initHubController() {
         voiceBtn.style.opacity = chatInput.disabled ? '0.52' : '';
       }
       syncWechatHoldBtnState();
+    }
+    const runningBarLabelEl = document.getElementById('runningControlBarLabel');
+    if (runningBarLabelEl && s.status === 'running') {
+      const hasSubagentRunning = Array.isArray(s.activeSubagents) && s.activeSubagents.length > 0;
+      const nextRunningLabel = hasSubagentRunning && s.runningSummary
+        ? `🟢 ${String(s.runningSummary).slice(0, 120)}`
+        : (langPref === 'en' ? '🟢 AI is working on your computer...' : '🟢 AI 正在电脑上执行任务...');
+      if (runningBarLabelEl.textContent !== nextRunningLabel) {
+        runningBarLabelEl.textContent = nextRunningLabel;
+      }
     }
 
     // DOM Diffing：如果会话内容和状态没变，不重绘 #chatMessages，保留用户展开的思考过程与滚动位置！

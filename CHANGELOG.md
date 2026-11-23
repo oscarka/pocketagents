@@ -2,6 +2,16 @@
 
 本项目的重要变更都记录在这里。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [0.9.12] - 2026-11-23
+
+### Fixed & Improved
+
+- **Antigravity IDE 子智能体「运行中 (`RUNNING`)」状态精准冒泡、防误判护栏与一键联动停止（`dsh-feishu/lib/antigravity-ide.js` / `hub/web/src/components/ChatStage.tsx` / `hub/web/src/controller.js`）**：
+  - 修复手机端批准子智能体弹窗（如浏览器上传确认）后，子智能体恢复 `CASCADE_RUN_STATUS_RUNNING` 在后台执行、但父会话处于 `IDLE` 等待汇报，导致父会话卡片瞬间落回 `🔵 已出结论` 且子智能体工具行被误标为 `已完成` 的问题；
+  - 新增严格防误判校验 `isSubagentActivelyRunning`：仅采信 Antigravity LanguageServer RPC 实时上报的 `CASCADE_RUN_STATUS_RUNNING` 且 `!killed`、无 `waitingSteps`、且 `lastModifiedTime` 距今 `< 15 分钟` 的子轨迹；空闲常驻浏览器子智能体（`CASCADE_RUN_STATUS_IDLE`）、已终止子会话及超过 15 分钟无进展的僵死轨迹均不会误判，且子智能体结束或超时后立即自动回落 `🔵 已出结论`；
+  - 父会话实时冒泡 `status: 'running'`、`activeSubagents` 与动态 `runningSummary`（如 `🌐 子智能体「Tripo Studio 3D Generator」正在后台执行 (第 146 步)...`），手机端会话卡片与详情页底部绿色运行条同步实时展示步数进展；
+  - 在父会话点击 `⏹ 立即停止` 时，同步通过 `CancelCascadeInvocation` 取消该会话下所有仍在活跃运行/等待中的子智能体（不影响空闲常驻浏览器标签），同时确保活跃子智能体的父会话不会被历史列表上限裁掉。
+
 ## [0.9.11] - 2026-11-23
 
 ### Added & Fixed

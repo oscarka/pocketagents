@@ -714,6 +714,24 @@ async function loadTruncatedStepContents(compactPath, rawCompactText) {
   }
 }
 
+const SUBAGENT_RUNNING_STALE_MS = 15 * 60_000
+
+/**
+ * Strict authoritative check for whether a child subagent trajectory is genuinely running right now.
+ * Prevents false positives from idle browser tabs, completed/killed subagents, waiting-for-user popups,
+ * or zombie/abandoned trajectories whose `lastModifiedTime` has been frozen for >= 15 minutes.
+ */
+export function isSubagentActivelyRunning(subSum, now = Date.now()) {
+  if (!subSum || typeof subSum !== 'object') return false
+  if (subSum.killed) return false
+  if (subSum.status !== 'CASCADE_RUN_STATUS_RUNNING') return false
+  const subWaitingSteps = Array.isArray(subSum.waitingSteps) ? subSum.waitingSteps : []
+  if (subWaitingSteps.length > 0) return false
+  const subModMs = parseSummaryModifiedMs(subSum)
+  if (subModMs > 0 && now - subModMs >= SUBAGENT_RUNNING_STALE_MS) return false
+  return true
+}
+
 /**
  * Parse a single Antigravity `transcript.jsonl` content string into a normalized session object.
  */
@@ -736,6 +754,7 @@ export function parseAntigravityTranscript(jsonlText, {
   liveTrajectoryMeta = null,
   liveSummariesMap = null,
   blockedSubagents = [],
+  runningSubagents = [],
   fullContentByStepIndex = null,
   diskArtifacts = [],
 } = {}) {
@@ -1311,6 +1330,18 @@ export function parseAntigravityTranscript(jsonlText, {
     for (const item of blockedSubagents) pushBlockedSubagent(item)
   }
 
+  const effectiveRunningSubagents = []
+  const seenRunningSubIds = new Set()
+  const pushRunningSubagent = entry => {
+    if (!entry?.convId || seenRunningSubIds.has(entry.convId) || seenBlockedSubIds.has(entry.convId)) return
+    if (!isSubagentActivelyRunning(entry.summary, now)) return
+    seenRunningSubIds.add(entry.convId)
+    effectiveRunningSubagents.push(entry)
+  }
+  if (Array.isArray(runningSubagents)) {
+    for (const item of runningSubagents) pushRunningSubagent(item)
+  }
+
   for (const [subConvId, subTool] of subagentToolByConvId.entries()) {
     const subLive = liveSummariesMap instanceof Map ? liveSummariesMap.get(subConvId) : null
     const subWaitingSteps = Array.isArray(subLive?.waitingSteps) ? subLive.waitingSteps : []
@@ -1330,11 +1361,26 @@ export function parseAntigravityTranscript(jsonlText, {
       })
       continue
     }
+    if (isSubagentActivelyRunning(subLive, now)) {
+      subTool.subagentStatus = 'running'
+      const stepPart = subLive?.stepCount ? ` (已执行 ${subLive.stepCount} 步)` : ''
+      subTool.summary = `🟢 子智能体运行中: ${subTool.subagentRole || subConvId.slice(0, 8)}${stepPart}`
+      const baseCmd = String(subTool.commandLine || '').replace(/\n*\[子智能体状态\][^\n]*/g, '').trim()
+      subTool.commandLine = `${baseCmd}\n\n[子智能体状态] 🟢 正在后台执行 (${subConvId.slice(0, 8)})`.trim()
+      pushRunningSubagent({
+        convId: subConvId,
+        role: subTool.subagentRole || subLive?.trajectoryMetadata?.subagentSpec?.role || subLive?.summary || 'Subagent',
+        typeName: String(subLive?.trajectoryMetadata?.subagentSpec?.typeName || '').trim(),
+        summary: subLive,
+      })
+      continue
+    }
     if (subTool.subagentStatus !== 'running') continue
     const subFinished = Boolean(
       subLive?.status === 'CASCADE_RUN_STATUS_IDLE'
       || subLive?.killed
-      || liveStatus === 'CASCADE_RUN_STATUS_IDLE',
+      || (!subLive && liveStatus === 'CASCADE_RUN_STATUS_IDLE')
+      || (subLive?.status === 'CASCADE_RUN_STATUS_RUNNING' && !isSubagentActivelyRunning(subLive, now)),
     )
     if (subFinished) {
       pendingBackgroundTaskIds.delete(subConvId)
@@ -1534,11 +1580,49 @@ export function parseAntigravityTranscript(jsonlText, {
     }
   }
 
+  const activeSubagents = !isSubagent
+    ? effectiveRunningSubagents.map(sub => {
+      const subTool = subagentToolByConvId.get(sub.convId)
+      const subRole = String(
+        sub.role
+        || subTool?.subagentRole
+        || sub.summary?.trajectoryMetadata?.subagentSpec?.role
+        || sub.summary?.summary
+        || 'Subagent',
+      ).trim()
+      const typeName = String(
+        sub.typeName
+        || sub.summary?.trajectoryMetadata?.subagentSpec?.typeName
+        || '',
+      ).trim()
+      return {
+        id: sub.convId,
+        role: subRole,
+        ...(typeName ? { typeName } : {}),
+        status: 'running',
+        stepCount: Number(sub.summary?.stepCount) || 0,
+      }
+    })
+    : []
+  const hasRunningSubagent = !isSubagent && !pendingApproval && activeSubagents.length > 0
+
   const lastStep = lines.at(-1) || {}
   const lastStepType = String(lastStep.type || '')
   const lastStepTools = Array.isArray(lastStep.tool_calls) ? lastStep.tool_calls : []
-  const hasActiveBackgroundTask = pendingBackgroundTaskIds.size > 0 && (now - lastActivity < 15 * 60_000)
+  const hasActiveBackgroundTask = hasRunningSubagent || (pendingBackgroundTaskIds.size > 0 && (now - lastActivity < 15 * 60_000))
   const isLsRunning = liveStatus === 'CASCADE_RUN_STATUS_RUNNING'
+  if (hasRunningSubagent && !isLsRunning) {
+    const primarySub = activeSubagents[activeSubagents.length - 1]
+    const isBrowserSub = /browser/i.test(`${primarySub?.typeName || ''} ${primarySub?.role || ''}`)
+    const subIcon = isBrowserSub ? '🌐' : '🤖'
+    if (activeSubagents.length === 1) {
+      const stepPart = primarySub.stepCount > 0 ? ` (第 ${primarySub.stepCount} 步)` : ''
+      runningSummary = `${subIcon} 子智能体「${primarySub.role}」正在后台执行${stepPart}...`
+    } else {
+      const names = activeSubagents.slice(0, 2).map(s => s.role).join('、')
+      runningSummary = `${subIcon} ${activeSubagents.length} 个子智能体正在后台执行：${names}${activeSubagents.length > 2 ? ' 等' : ''}...`
+    }
+  }
   const isConcludedStep = !hasActiveBackgroundTask
     && !isLsRunning
     && lastStepType === 'PLANNER_RESPONSE'
@@ -1589,7 +1673,7 @@ export function parseAntigravityTranscript(jsonlText, {
           : '已完成'
 
   const lastStepIndex = typeof lastStep.step_index === 'number' ? lastStep.step_index : lines.length - 1
-  const stateSource = hasLiveSummary
+  const stateSource = (hasLiveSummary || hasRunningSubagent || effectiveBlockedSubagents.length > 0)
     ? 'ls-rpc'
     : (isConcludedStep || isErrorStep || Boolean(pendingApproval))
       ? 'jsonl-tail'
@@ -1604,7 +1688,10 @@ export function parseAntigravityTranscript(jsonlText, {
     observedAt: now,
     confidence: stateConfidence,
   }
-  const sessionRev = `${transcript.length}:${lastStepIndex}:${status}:${turnState}:${pendingApproval?.code || ''}`
+  const activeSubRev = activeSubagents.length > 0
+    ? `:${activeSubagents.map(s => `${String(s.id).slice(0, 6)}-${s.stepCount}`).join(',')}`
+    : ''
+  const sessionRev = `${transcript.length}:${lastStepIndex}:${status}:${turnState}:${pendingApproval?.code || ''}${activeSubRev}`
   const resolvedModel = resolveAntigravityModelLabel(liveModel)
 
   return {
@@ -1616,6 +1703,7 @@ export function parseAntigravityTranscript(jsonlText, {
     ...(isSubagent ? { isSubagent: true } : {}),
     ...(parentConversationId ? { parentConversationId } : {}),
     ...(resolvedModel ? { model: resolvedModel } : {}),
+    ...(activeSubagents.length > 0 ? { activeSubagents } : {}),
     controlMode: hasLiveSummary ? 'managed' : 'idle-resumable',
     capabilities: {
       canCreateSession: true,
@@ -2012,14 +2100,17 @@ export async function loadAntigravityIdeSessions({
   ])
 
   const settledKey = settledApprovals ? [...settledApprovals].join(',') : ''
-  // Collect all live subagents currently blocked on a user approval popup, indexed by parent/root conversation ID
+  // Collect all live subagents currently blocked on a user approval popup OR actively running,
+  // indexed by parent/root conversation ID.
   const blockedSubagentsByParent = new Map()
+  const runningSubagentsByParent = new Map()
   if (liveSummariesMap instanceof Map) {
     for (const [subConvId, subSum] of liveSummariesMap.entries()) {
       if (!subSum || typeof subSum !== 'object') continue
       const subWaitingSteps = Array.isArray(subSum.waitingSteps) ? subSum.waitingSteps : []
       const isWaiting = subSum.status === 'CASCADE_RUN_STATUS_WAITING_FOR_USER' || subWaitingSteps.length > 0
-      if (!isWaiting) continue
+      const isRunning = !isWaiting && isSubagentActivelyRunning(subSum, now)
+      if (!isWaiting && !isRunning) continue
       const subMeta = subSum.trajectoryMetadata || null
       const parentIds = new Set()
       const parentConvId = String(subMeta?.parentConversationId || subSum.parentConversationId || '').trim()
@@ -2032,19 +2123,53 @@ export async function loadAntigravityIdeSessions({
       }
       if (parentIds.size === 0) continue
       const role = String(subMeta?.subagentSpec?.role || subSum.summary || 'Subagent').trim()
-      const entry = {
-        convId: subConvId,
-        role,
-        summary: subSum,
-        waitingSteps: subWaitingSteps,
-      }
-      for (const pid of parentIds) {
-        const list = blockedSubagentsByParent.get(pid) || []
-        list.push(entry)
-        blockedSubagentsByParent.set(pid, list)
+      const typeName = String(subMeta?.subagentSpec?.typeName || '').trim()
+      if (isWaiting) {
+        const entry = {
+          convId: subConvId,
+          role,
+          typeName,
+          summary: subSum,
+          waitingSteps: subWaitingSteps,
+        }
+        for (const pid of parentIds) {
+          const list = blockedSubagentsByParent.get(pid) || []
+          list.push(entry)
+          blockedSubagentsByParent.set(pid, list)
+        }
+      } else if (isRunning) {
+        const entry = {
+          convId: subConvId,
+          role,
+          typeName,
+          summary: subSum,
+        }
+        for (const pid of parentIds) {
+          const list = runningSubagentsByParent.get(pid) || []
+          list.push(entry)
+          runningSubagentsByParent.set(pid, list)
+        }
       }
     }
   }
+
+  // Ensure any parent conversation that currently has a blocked or actively running child subagent
+  // is included in `topCandidates` even if the parent's own transcript mtime is older than the top-60 cutoff.
+  const topCandidateIds = new Set(topCandidates.map(c => c.convId))
+  const activeParentIds = new Set([...blockedSubagentsByParent.keys(), ...runningSubagentsByParent.keys()])
+  if (activeParentIds.size > 0) {
+    const promoted = []
+    for (const cand of candidateFiles) {
+      if (activeParentIds.has(cand.convId) && !topCandidateIds.has(cand.convId)) {
+        topCandidateIds.add(cand.convId)
+        promoted.push(cand)
+      }
+    }
+    if (promoted.length > 0) {
+      topCandidates.unshift(...promoted)
+    }
+  }
+
   const sessions = []
   for (const item of topCandidates) {
     if (sessions.length >= maxSessions * 2) break
@@ -2089,14 +2214,20 @@ export async function loadAntigravityIdeSessions({
       const blockedSubKey = blockedSubagents
         .map(s => `${s.convId}:${(s.waitingSteps || []).map(w => w?.stepIndex ?? '').join(',')}:${s.summary?.status || ''}`)
         .join('|')
+      const runningSubagents = runningSubagentsByParent.get(item.convId) || []
+      const runningSubKey = runningSubagents
+        .map(s => `${s.convId}:${s.summary?.status || ''}:${s.summary?.stepCount ?? ''}:${parseSummaryModifiedMs(s.summary)}`)
+        .join('|')
       const sessionId = `${AGY_IDE_PREFIX}${item.convId}`
       const customTitle = extractCustomTitleValue(customTitles[sessionId]) || extractCustomTitleValue(customTitles[item.convId]) || ''
-      const cacheKey = `${item.convId}:${item.mtimeMs}:${item.size || 0}:${maxMessages}:${customTitle}:${effectiveNativeTitle}:${effectivePinned ? 1 : 0}:${settledKey}:${liveStepCount ?? ''}:${liveLastUserInputStepIndex ?? ''}:${liveStatus}:${liveModel}:${liveLastModifiedMs}:${hasLiveSummary ? 1 : 0}:${waitingKey}:${blockedSubKey}`
+      const cacheKey = `${item.convId}:${item.mtimeMs}:${item.size || 0}:${maxMessages}:${customTitle}:${effectiveNativeTitle}:${effectivePinned ? 1 : 0}:${settledKey}:${liveStepCount ?? ''}:${liveLastUserInputStepIndex ?? ''}:${liveStatus}:${liveModel}:${liveLastModifiedMs}:${hasLiveSummary ? 1 : 0}:${waitingKey}:${blockedSubKey}:${runningSubKey}`
       const cached = sessionParseCache.get(item.convId)
       if (cached && cached.cacheKey === cacheKey && cached.session) {
         if (cached.session.isSubagent) continue
         // Recompute dynamic running/idle status against current `now` while skipping disk read & JSONL parse
-        const hasBgTask = Boolean(cached.session.hasActiveBackgroundTask) && (now - cached.session.lastActivity <= 15 * 60_000)
+        const hasFreshRunningSub = runningSubagents.some(s => isSubagentActivelyRunning(s.summary, now))
+        const hasBgTask = hasFreshRunningSub
+          || (Boolean(cached.session.hasActiveBackgroundTask) && (now - cached.session.lastActivity <= 15 * 60_000))
         const isRecentlyActive = liveStatus === 'CASCADE_RUN_STATUS_RUNNING'
           || hasBgTask
           || (Boolean(cached.session.isMidTurn) && (now - cached.session.lastActivity <= 300_000) && liveStatus !== 'CASCADE_RUN_STATUS_IDLE')
@@ -2157,6 +2288,7 @@ export async function loadAntigravityIdeSessions({
         liveTrajectoryMeta: liveTrajMeta,
         liveSummariesMap,
         blockedSubagents,
+        runningSubagents,
         fullContentByStepIndex,
         diskArtifacts,
       })
@@ -2223,7 +2355,20 @@ export async function loadAntigravityIdeSessions({
 
   const stabilized = sessions.map(s => applyStateHysteresis(s, highConfidenceSessionStates, now))
   stabilized.sort((a, b) => (b.lastActivity || 0) - (a.lastActivity || 0))
-  return stabilized.slice(0, maxSessions)
+  if (stabilized.length <= maxSessions) {
+    return stabilized
+  }
+  const topSlice = stabilized.slice(0, maxSessions)
+  const topIds = new Set(topSlice.map(s => s.id))
+  const overflowActive = stabilized
+    .slice(maxSessions)
+    .filter(s => (s.status === 'approval' || s.status === 'running') && !topIds.has(s.id))
+  if (overflowActive.length === 0) {
+    return topSlice
+  }
+  const keptIdleCount = Math.max(0, maxSessions - overflowActive.length)
+  return [...overflowActive, ...topSlice.slice(0, keptIdleCount)]
+    .sort((a, b) => (b.lastActivity || 0) - (a.lastActivity || 0))
 }
 
 let cachedPsNorm = ''
@@ -3362,28 +3507,63 @@ export async function executeAntigravityIdeAction(action, {
       const hubs = rawHubs.length > 1
         ? await probeHubsForTrajectory(rawHubs, rawConvId, fetchImpl)
         : rawHubs
-      for (const hub of hubs) {
-        try {
-          const resp = await fetchImpl(
-            `http://${hub.address}/exa.language_server_pb.LanguageServerService/CancelCascadeInvocation`,
-            {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'x-codeium-csrf-token': hub.csrfToken,
-              },
-              body: JSON.stringify({ cascadeId: rawConvId }),
-            },
-          )
-          if (resp.ok) {
-            return {
-              ok: true,
-              engine: 'connect-rpc',
-              message: '⏹️ 已通过 Antigravity RPC 停止当前任务',
+      // Also find any actively running or waiting child subagents owned by this parent session
+      // so stopping a parent whose child subagent is running in the background cancels the child too.
+      const activeChildIds = []
+      try {
+        const liveSummaries = await loadLiveTrajectorySummaries({ execImpl, fetchImpl })
+        if (liveSummaries instanceof Map) {
+          const stopNow = Date.now()
+          for (const [subCid, subSum] of liveSummaries.entries()) {
+            if (!subCid || subCid === rawConvId || !subSum || subSum.killed) continue
+            const subMeta = subSum.trajectoryMetadata || null
+            const pId = String(subMeta?.parentConversationId || subSum.parentConversationId || '').trim()
+            const rId = String(subMeta?.rootConversationId || subSum.rootConversationId || '').trim()
+            if (pId !== rawConvId && rId !== rawConvId) continue
+            const isChildWaiting = subSum.status === 'CASCADE_RUN_STATUS_WAITING_FOR_USER'
+              || (Array.isArray(subSum.waitingSteps) && subSum.waitingSteps.length > 0)
+            if (isChildWaiting || isSubagentActivelyRunning(subSum, stopNow)) {
+              activeChildIds.push(subCid)
             }
           }
-        } catch {
-          // try next hub or fallback
+        }
+      } catch {
+        // best-effort child lookup
+      }
+      let cancelledAny = false
+      let cancelledChildCount = 0
+      const targetIds = [rawConvId, ...activeChildIds]
+      for (const targetId of targetIds) {
+        for (const hub of hubs) {
+          try {
+            const resp = await fetchImpl(
+              `http://${hub.address}/exa.language_server_pb.LanguageServerService/CancelCascadeInvocation`,
+              {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'x-codeium-csrf-token': hub.csrfToken,
+                },
+                body: JSON.stringify({ cascadeId: targetId }),
+              },
+            )
+            if (resp.ok) {
+              cancelledAny = true
+              if (targetId !== rawConvId) cancelledChildCount += 1
+              break
+            }
+          } catch {
+            // try next hub or fallback
+          }
+        }
+      }
+      if (cancelledAny) {
+        return {
+          ok: true,
+          engine: 'connect-rpc',
+          message: cancelledChildCount > 0
+            ? `⏹️ 已通过 Antigravity RPC 停止当前任务及 ${cancelledChildCount} 个后台子智能体`
+            : '⏹️ 已通过 Antigravity RPC 停止当前任务',
         }
       }
     }
