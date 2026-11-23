@@ -8629,9 +8629,9 @@ export function initHubController() {
                 </div>
                 <div style="display:flex;gap:8px;flex-wrap:wrap;">
                   <button class="pill-action-btn primary" onclick="openWalkMode()">🎧 进入随行模式</button>
-                  <button class="pill-action-btn" onclick="openVoiceLab('profiles')">⚙️ 方案与开关</button>
-                  <button class="pill-action-btn" onclick="openVoiceLab('keys')">🔑 密钥池 (BYOK)</button>
-                  <button class="pill-action-btn" onclick="openVoiceLab('bench')">🧪 调试台</button>
+                  <button class="pill-action-btn" onclick="openVoiceLab('keys')">① 密钥池</button>
+                  <button class="pill-action-btn" onclick="openVoiceLab('profiles')">② 方案与开关</button>
+                  <button class="pill-action-btn" onclick="openVoiceLab('bench')">③ 测一测</button>
                 </div>
               </div>
             </div>

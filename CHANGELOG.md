@@ -2,6 +2,15 @@
 
 本项目的重要变更都记录在这里。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [0.9.13] - 2026-11-23
+
+### Improved
+
+- **手机端「随行语音总管 & BYOK 配置」交互彻底重构（`hub/web/src/components/VoiceCopilotSheets.tsx` / `hub/web/src/styles/app.css` / `hub/web/src/controller.js` / `hub/web/src/utils/i18n.js`）**：
+  - **1-2-3 引导流程重排**：顶部标签改为 **`① 密钥` → `② 方案` → `③ 测一测`**，首次未存 Key 时自动落在 `① 密钥` 并展示顶部 3 步引导条；
+  - **极简存密钥与一键推荐方案**：`① 密钥` 升级 2x2 厂商卡片（Google Gemini / DeepSeek·方舟·OpenAI / 火山豆包识别 / 火山豆包播报），火山语音新增「方式 A：API Key / 方式 B：AppID + Token」二选一切换，备注名支持留空自动命名，接口地址/资源 ID/默认模型音色等收进折叠「⚙️ 高级参数（已填好）」；存完任一 Key 后立刻出现 **「⚡ 一键生成并启用推荐方案」**（如 1 把 Gemini Key 全包、免费原生听/说 + Gemini/DeepSeek 大脑、豆包+Gemini 旗舰混搭），点一下自动建好启用并直达试跑页；
+  - **全中文清晰字段标签与缺 Key 直达跳转**：方案列表和 `③ 测一测` 用直观胶囊展示 `👂 耳朵` / `🧠 大脑` / `🗣️ 嘴巴`（告别晦涩内部代号）；「自定义混搭」根据已有 Key 智能预填，且每个下拉框/输入框均补齐明确中文标题、一句话白话说明、大模型/音色快捷点选标签与折叠高级参数；若缺少某服务商密钥，直接显示黄色 `去 ① 添加 →` 按钮一键跳转并预选对应厂商。
+
 ## [0.9.12] - 2026-11-23
 
 ### Fixed & Improved

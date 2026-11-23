@@ -235,8 +235,11 @@ The background daemon automatically discovers local sessions across all 6 suppor
 > 💡 Grouped **one drawer per day** with every exact version tag preserved inside; see [`CHANGELOG.md`](CHANGELOG.md) for granular per-release notes.
 
 <details open>
-<summary><strong><code>2026-11-23 · v0.9.9–v0.9.12</code> — Subagent Running/Approval Bubbling, Round-2 Security Hardening, Zero-Trust Phone Approval &amp; BYOK OLED Voice Copilot</strong></summary>
+<summary><strong><code>2026-11-23 · v0.9.9–v0.9.13</code> — Mobile-First Guided BYOK Voice Setup, Subagent Running/Approval Bubbling &amp; Round-2 Security Hardening</strong></summary>
 
+- **Guided 3-Step Mobile Voice &amp; BYOK Configuration UX (`v0.9.13`)**:
+  - Reordered the mobile Voice Copilot setup drawer into a true **`① Keys` → `② Profiles` → `③ Test`** flow with a 2×2 visual provider picker (`Google Gemini`, `DeepSeek / Ark / OpenAI`, `Volcengine ASR`, `Volcengine TTS`), auto-naming blank key labels, Volcengine API Key vs AppID+Token auth toggle, and collapsible `⚙️ Advanced` parameters so first-time setup requires pasting only 1 key.
+  - Added **1-Tap Recommended Profiles** right after saving a key (e.g. *All-Gemini 1-Key Setup*, *Free Native Speech + Gemini/DeepSeek Brain*, or *Volcengine + Gemini Flagship Mix*), clear human labels &amp; quick model/voice chips for every field in custom mixing, plain-language `👂 Ear / 🧠 Brain / 🗣️ Mouth` summary pills, and inline missing-key jump buttons.
 - **Antigravity Subagent Live Running-State Bubbling &amp; Coordinated Stop (`v0.9.12`)**:
   - After approving a child subagent popup on mobile, parent sessions whose own trajectory is `IDLE` now accurately stay **`🟢 Running`** with live step progress (`🌐 Subagent "..." running in background (step N)...`) in both the session list and the bottom green control bar while any child subagent is actively `CASCADE_RUN_STATUS_RUNNING`.
   - Strict anti-false-positive guards (`isSubagentActivelyRunning`) rely exclusively on live LanguageServer RPC (`status === CASCADE_RUN_STATUS_RUNNING`, `!killed`, no pending `waitingSteps`, and `lastModifiedTime` freshness `< 15 min`), ensuring idle browser subagent tabs, completed subagents, and stale/zombie trajectories never falsely show as running. Tapping **Stop** on the parent also cancels actively running child subagents via `CancelCascadeInvocation`.

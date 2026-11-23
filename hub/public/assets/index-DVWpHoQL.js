@@ -1708,40 +1708,364 @@ function summarizeHubState(state) {
 		completedKeys
 	};
 }
-function createEmptyProfileDraft() {
+var PROVIDER_DISPLAY_NAMES = {
+	native: "系统免费原生",
+	gemini: "Google Gemini",
+	openai_compat: "OpenAI 兼容",
+	volcengine_asr: "火山豆包识别",
+	volcengine_tts: "火山豆包播报"
+};
+var PROVIDER_PICKER_CARDS = [
+	{
+		id: "gemini",
+		icon: "✨",
+		title: "Google Gemini",
+		sub: "1 把 Key 全包听+想+说，最省事"
+	},
+	{
+		id: "openai_compat",
+		icon: "🤖",
+		title: "DeepSeek / 方舟 / OpenAI",
+		sub: "兼容接口，做语音大脑超稳"
+	},
+	{
+		id: "volcengine_asr",
+		icon: "👂",
+		title: "火山豆包识别",
+		sub: "Flash ASR 中文极速听写"
+	},
+	{
+		id: "volcengine_tts",
+		icon: "🗣️",
+		title: "火山豆包播报",
+		sub: "Seed-TTS 2.0 拟人自然音色"
+	}
+];
+var BRAIN_MODEL_CHIPS = {
+	gemini: [{
+		label: "gemini-2.5-flash (极速推荐)",
+		value: "gemini-2.5-flash"
+	}, {
+		label: "gemini-3.8-flash",
+		value: "gemini-3.8-flash"
+	}],
+	openai_compat: [
+		{
+			label: "deepseek-chat",
+			value: "deepseek-chat"
+		},
+		{
+			label: "gpt-4o-mini",
+			value: "gpt-4o-mini"
+		},
+		{
+			label: "doubao-seed-2-0-lite-260215",
+			value: "doubao-seed-2-0-lite-260215"
+		}
+	]
+};
+var TTS_VOICE_CHIPS = {
+	gemini: [
+		{
+			label: "Kore (知性女声)",
+			value: "Kore"
+		},
+		{
+			label: "Puck (轻快)",
+			value: "Puck"
+		},
+		{
+			label: "Aoede (柔和)",
+			value: "Aoede"
+		},
+		{
+			label: "Zephyr (清亮)",
+			value: "Zephyr"
+		}
+	],
+	volcengine_tts: [
+		{
+			label: "vv 自然女声",
+			value: "zh_female_vv_uranus_bigtts"
+		},
+		{
+			label: "小荷 温柔女声",
+			value: "zh_female_xiaohe_uranus_bigtts"
+		},
+		{
+			label: "阳光男声",
+			value: "zh_male_m191_uranus_bigtts"
+		},
+		{
+			label: "涛诚 稳重男声",
+			value: "zh_male_taocheng_uranus_bigtts"
+		}
+	],
+	openai_compat: [
+		{
+			label: "alloy (中性)",
+			value: "alloy"
+		},
+		{
+			label: "nova (清晰女声)",
+			value: "nova"
+		},
+		{
+			label: "shimmer (柔和)",
+			value: "shimmer"
+		},
+		{
+			label: "coral (自然)",
+			value: "coral"
+		}
+	]
+};
+function formatStageSummary(provider, model, stage) {
+	if (provider === "native") return stage === "brain" ? "本地基础口令" : "系统免费原生";
+	const base = PROVIDER_DISPLAY_NAMES[provider] || provider;
+	const m = String(model || "").trim();
+	if (!m || m === "default" || m === "browser-web-speech" || m === "browser-speech-synthesis" || m === "rule-router") return base;
+	if (stage === "brain") return `${base} (${m})`;
+	return base;
+}
+function inferOpenAiCompatModel(cred) {
+	if (cred?.defaultModel) return cred.defaultModel;
+	const u = String(cred?.baseUrl || "").toLowerCase();
+	if (u.includes("deepseek")) return "deepseek-chat";
+	if (u.includes("volces.com") || u.includes("ark.")) return "doubao-seed-2-0-lite-260215";
+	if (u.includes("groq.com")) return "llama-3.3-70b-versatile";
+	if (u.includes("siliconflow")) return "deepseek-ai/DeepSeek-V3";
+	if (u.includes("11434") || u.includes("ollama")) return "qwen2.5:7b";
+	return "gpt-4o-mini";
+}
+function inferDefaultCredLabel(provider, baseUrl) {
+	if (provider === "gemini") return "Google Gemini 主密钥";
+	if (provider === "volcengine_asr") return "火山豆包识别 (ASR)";
+	if (provider === "volcengine_tts") return "火山豆包播报 (TTS)";
+	const u = String(baseUrl || "").toLowerCase();
+	if (u.includes("deepseek")) return "DeepSeek 官方";
+	if (u.includes("volces.com") || u.includes("ark.")) return "火山方舟 Ark";
+	if (u.includes("openrouter")) return "OpenRouter";
+	if (u.includes("siliconflow")) return "SiliconFlow";
+	if (u.includes("groq.com")) return "Groq";
+	if (u.includes("11434")) return "本机 Ollama";
+	return "OpenAI 兼容密钥";
+}
+function getMissingProvidersForProfile(profile, credentials) {
+	const missing = /* @__PURE__ */ new Set();
+	for (const prov of [
+		profile.stt?.provider,
+		profile.brain?.provider,
+		profile.tts?.provider
+	]) {
+		if (!prov || prov === "native") continue;
+		if (!credentials.some((c) => c.provider === prov)) missing.add(prov);
+	}
+	return [...missing];
+}
+function createSmartProfileDraft(credentials) {
+	const hasAsr = credentials.some((c) => c.provider === "volcengine_asr");
+	const hasTts = credentials.some((c) => c.provider === "volcengine_tts");
+	const hasGemini = credentials.some((c) => c.provider === "gemini");
+	const oaiCred = credentials.find((c) => c.provider === "openai_compat" && c.active) || credentials.find((c) => c.provider === "openai_compat");
+	const sttProv = hasAsr ? "volcengine_asr" : hasGemini ? "gemini" : "native";
+	const brainProv = hasGemini ? "gemini" : oaiCred ? "openai_compat" : "gemini";
+	const ttsProv = hasTts ? "volcengine_tts" : hasGemini ? "gemini" : "native";
 	return {
 		id: "",
-		name: "自定义随行方案",
+		name: hasAsr && hasTts ? `豆包极速听/说 + ${brainProv === "gemini" ? "Gemini" : oaiCred?.label || "OpenAI"} 大脑` : hasGemini ? "全 Gemini 极速随行" : oaiCred ? `免费原生听/说 + ${oaiCred.label} 大脑` : "自定义随行方案",
 		builtin: false,
 		stt: {
-			provider: "volcengine_asr",
+			provider: sttProv,
 			credId: "",
-			model: "volc.bigasr.auc_turbo",
+			model: sttProv === "volcengine_asr" ? "volc.bigasr.auc_turbo" : sttProv === "gemini" ? "gemini-2.5-flash" : "browser-web-speech",
 			language: "zh-CN",
 			thinkingLevel: "low",
 			fallbackChain: []
 		},
 		brain: {
-			provider: "gemini",
+			provider: brainProv,
 			credId: "",
-			model: "gemini-2.5-flash",
+			model: brainProv === "gemini" ? "gemini-2.5-flash" : inferOpenAiCompatModel(oaiCred),
 			thinkingLevel: "off",
 			maxTokens: 320
 		},
 		tts: {
-			provider: "volcengine_tts",
+			provider: ttsProv,
 			credId: "",
-			model: "seed-tts-2.0",
-			voice: "zh_female_vv_uranus_bigtts",
+			model: ttsProv === "volcengine_tts" ? "seed-tts-2.0" : ttsProv === "gemini" ? "gemini-2.5-flash-preview-tts" : "browser-speech-synthesis",
+			voice: ttsProv === "volcengine_tts" ? "zh_female_vv_uranus_bigtts" : ttsProv === "gemini" ? "Kore" : "system-default",
 			format: "mp3",
 			speed: 1
 		}
 	};
 }
+function buildRecommendedQuickProfiles(credentials) {
+	const presets = [];
+	const geminiCred = credentials.find((c) => c.provider === "gemini" && c.active) || credentials.find((c) => c.provider === "gemini");
+	const oaiCred = credentials.find((c) => c.provider === "openai_compat" && c.active) || credentials.find((c) => c.provider === "openai_compat");
+	const asrCred = credentials.find((c) => c.provider === "volcengine_asr" && c.active) || credentials.find((c) => c.provider === "volcengine_asr");
+	const ttsCred = credentials.find((c) => c.provider === "volcengine_tts" && c.active) || credentials.find((c) => c.provider === "volcengine_tts");
+	if (asrCred && ttsCred && (geminiCred || oaiCred)) {
+		const useGemini = Boolean(geminiCred);
+		const brainModel = useGemini ? geminiCred?.defaultModel || "gemini-2.5-flash" : inferOpenAiCompatModel(oaiCred);
+		const brainName = useGemini ? "Gemini" : oaiCred?.label || "OpenAI 兼容";
+		presets.push({
+			key: "flagship-volc-mix",
+			badge: "🏆 旗舰混搭",
+			title: `豆包极速听/说 + ${brainName} 大脑`,
+			sub: `耳朵：火山 ASR · 大脑：${brainModel} · 嘴巴：火山 Seed-TTS`,
+			profile: {
+				id: "",
+				name: `豆包极速听/说 + ${brainName} 大脑`,
+				builtin: false,
+				stt: {
+					provider: "volcengine_asr",
+					credId: "",
+					model: asrCred.resourceId || "volc.bigasr.auc_turbo",
+					language: "zh-CN",
+					thinkingLevel: "low",
+					fallbackChain: useGemini ? [{
+						provider: "gemini",
+						credId: "",
+						model: "gemini-2.5-flash",
+						thinkingLevel: "low"
+					}] : []
+				},
+				brain: {
+					provider: useGemini ? "gemini" : "openai_compat",
+					credId: "",
+					model: brainModel,
+					thinkingLevel: "off",
+					maxTokens: 320
+				},
+				tts: {
+					provider: "volcengine_tts",
+					credId: "",
+					model: ttsCred.resourceId || "seed-tts-2.0",
+					voice: ttsCred.defaultVoice || "zh_female_vv_uranus_bigtts",
+					format: "mp3",
+					speed: 1
+				}
+			}
+		});
+	}
+	if (geminiCred) {
+		const model = geminiCred.defaultModel || "gemini-2.5-flash";
+		const voice = geminiCred.defaultVoice || "Kore";
+		presets.push({
+			key: "all-gemini",
+			badge: "✨ 1 把 Key 全包",
+			title: "全 Gemini 极速随行",
+			sub: `耳朵 + 大脑 + 嘴巴全用 Gemini（${model}），省心零混搭`,
+			profile: {
+				id: "",
+				name: "全 Gemini 极速随行",
+				builtin: false,
+				stt: {
+					provider: "gemini",
+					credId: "",
+					model,
+					language: "zh-CN",
+					thinkingLevel: "low",
+					fallbackChain: []
+				},
+				brain: {
+					provider: "gemini",
+					credId: "",
+					model,
+					thinkingLevel: "off",
+					maxTokens: 320
+				},
+				tts: {
+					provider: "gemini",
+					credId: "",
+					model: "gemini-2.5-flash-preview-tts",
+					voice,
+					format: "mp3",
+					speed: 1
+				}
+			}
+		});
+		presets.push({
+			key: "native-plus-gemini",
+			badge: "💸 最省额度",
+			title: "免费系统听/说 + Gemini 大脑",
+			sub: `手机自带听写播报（免费）+ Gemini 大脑（${model}）`,
+			profile: {
+				id: "",
+				name: "免费系统听/说 + Gemini 大脑",
+				builtin: false,
+				stt: {
+					provider: "native",
+					credId: "",
+					model: "browser-web-speech",
+					language: "zh-CN",
+					thinkingLevel: "default",
+					fallbackChain: []
+				},
+				brain: {
+					provider: "gemini",
+					credId: "",
+					model,
+					thinkingLevel: "off",
+					maxTokens: 320
+				},
+				tts: {
+					provider: "native",
+					credId: "",
+					model: "browser-speech-synthesis",
+					voice: "system-default",
+					format: "mp3",
+					speed: 1
+				}
+			}
+		});
+	}
+	if (oaiCred) {
+		const model = inferOpenAiCompatModel(oaiCred);
+		const shortName = oaiCred.label || "OpenAI 兼容";
+		presets.push({
+			key: `native-plus-oai-${oaiCred.id}`,
+			badge: "🤖 1 把 Key 省心配",
+			title: `免费系统听/说 + ${shortName} 大脑`,
+			sub: `手机自带听写播报（免费）+ ${shortName}（${model}）`,
+			profile: {
+				id: "",
+				name: `免费系统听/说 + ${shortName} 大脑`,
+				builtin: false,
+				stt: {
+					provider: "native",
+					credId: "",
+					model: "browser-web-speech",
+					language: "zh-CN",
+					thinkingLevel: "default",
+					fallbackChain: []
+				},
+				brain: {
+					provider: "openai_compat",
+					credId: oaiCred.id,
+					model,
+					thinkingLevel: "off",
+					maxTokens: 320
+				},
+				tts: {
+					provider: "native",
+					credId: "",
+					model: "browser-speech-synthesis",
+					voice: "system-default",
+					format: "mp3",
+					speed: 1
+				}
+			}
+		});
+	}
+	return presets.slice(0, 3);
+}
 function VoiceCopilotSheets() {
 	const [walkOpen, setWalkOpen] = d(false);
 	const [labOpen, setLabOpen] = d(false);
-	const [labTab, setLabTab] = d("profiles");
+	const [labTab, setLabTab] = d("keys");
 	const [config, setConfig] = d(DEFAULT_CONFIG);
 	const [loadingCfg, setLoadingCfg] = d(false);
 	const [walkPhase, setWalkPhase] = d("idle");
@@ -1758,7 +2082,9 @@ function VoiceCopilotSheets() {
 	const [hubSummary, setHubSummary] = d(() => summarizeHubState(window.__dshLastHubState));
 	const [editingProfile, setEditingProfile] = d(null);
 	const [savingProfile, setSavingProfile] = d(false);
+	const [applyingPresetKey, setApplyingPresetKey] = d("");
 	const [keyProvider, setKeyProvider] = d("gemini");
+	const [volcAuthMode, setVolcAuthMode] = d("apiKey");
 	const [keyLabel, setKeyLabel] = d("");
 	const [keyBaseUrl, setKeyBaseUrl] = d("https://generativelanguage.googleapis.com/v1beta");
 	const [keyApiKey, setKeyApiKey] = d("");
@@ -1832,8 +2158,9 @@ function VoiceCopilotSheets() {
 		window.closeWalkMode = () => {
 			setWalkOpen(false);
 		};
-		window.openVoiceLab = (tab = "profiles") => {
-			setLabTab(tab);
+		window.openVoiceLab = (tab) => {
+			const targetTab = tab || (configRef.current.credentials.length > 0 ? "profiles" : "keys");
+			setLabTab(targetTab);
 			setLabOpen(true);
 			refreshConfig(false);
 		};
@@ -2266,17 +2593,26 @@ function VoiceCopilotSheets() {
 		} else toast(`❌ ${data?.error || "保存失败"}`);
 	};
 	const handleSaveCredential = async () => {
+		const isVolc = keyProvider === "volcengine_asr" || keyProvider === "volcengine_tts";
+		const effectiveApiKey = isVolc && volcAuthMode === "appToken" ? "" : keyApiKey.trim();
+		const effectiveAppId = isVolc && volcAuthMode === "appToken" ? keyAppId.trim() : "";
+		const effectiveAccessToken = isVolc && volcAuthMode === "appToken" ? keyAccessToken.trim() : "";
+		if (!effectiveApiKey && !(effectiveAppId && effectiveAccessToken)) {
+			toast(isVolc && volcAuthMode === "appToken" ? "⚠️ 请同时填写 AppID 和 Access Token" : "⚠️ 请先粘贴 API Key");
+			return;
+		}
 		setSavingKey(true);
 		try {
+			const autoLabel = keyLabel.trim() || inferDefaultCredLabel(keyProvider, keyBaseUrl);
 			const res = await apiCall("/api/voice/credentials", {
 				method: "POST",
 				body: JSON.stringify({
 					provider: keyProvider,
-					label: keyLabel,
+					label: autoLabel,
 					baseUrl: keyBaseUrl,
-					apiKey: keyApiKey,
-					appId: keyAppId,
-					accessToken: keyAccessToken,
+					apiKey: effectiveApiKey,
+					appId: effectiveAppId,
+					accessToken: effectiveAccessToken,
 					resourceId: keyResourceId,
 					defaultModel: keyDefaultModel,
 					defaultVoice: keyDefaultVoice,
@@ -2296,9 +2632,45 @@ function VoiceCopilotSheets() {
 			setKeyApiKey("");
 			setKeyAppId("");
 			setKeyAccessToken("");
-			toast("🔐 密钥已加密存入 Vault（不再回显明文）");
+			try {
+				const bodyEl = document.querySelector("#voiceLabSheet .voice-lab-body");
+				if (bodyEl) bodyEl.scrollTo({
+					top: 0,
+					behavior: "smooth"
+				});
+			} catch {}
+			toast("🔐 密钥已加密保存！点「⚡ 一键启用」即可使用");
 		} finally {
 			setSavingKey(false);
+		}
+	};
+	const handleApplyQuickPreset = async (preset) => {
+		setApplyingPresetKey(preset.key);
+		try {
+			const existing = config.profiles.find((p) => !p.builtin && p.name === preset.profile.name);
+			const payload = {
+				...preset.profile,
+				id: existing ? existing.id : "",
+				activate: true
+			};
+			const res = await apiCall("/api/voice/profiles", {
+				method: "POST",
+				body: JSON.stringify(payload)
+			});
+			const data = await res.json().catch(() => null);
+			if (!res.ok || !data?.ok) {
+				toast(`❌ ${data?.error || "启用方案失败"}`);
+				return;
+			}
+			setConfig((prev) => ({
+				...prev,
+				...data.config
+			}));
+			setEditingProfile(null);
+			setLabTab("bench");
+			toast(`✅ 已启用「${preset.title}」，点下方按钮即可试跑测速`);
+		} finally {
+			setApplyingPresetKey("");
 		}
 	};
 	const handleTestCredential = async (credId) => {
@@ -2486,24 +2858,37 @@ function VoiceCopilotSheets() {
 	const onSelectKeyProvider = (prov) => {
 		setKeyProvider(prov);
 		const item = config.catalog.find((c) => c.id === prov);
-		setKeyBaseUrl(item?.defaultBaseUrl || "");
-		setKeyResourceId(item?.defaultResourceId || "");
+		const fallbackUrl = prov === "gemini" ? "https://generativelanguage.googleapis.com/v1beta" : prov === "volcengine_asr" ? "https://openspeech.bytedance.com/api/v3/auc/bigmodel/recognize/flash" : prov === "volcengine_tts" ? "https://openspeech.bytedance.com/api/v3/tts/unidirectional" : "https://api.openai.com/v1";
+		const fallbackResId = prov === "volcengine_asr" ? "volc.bigasr.auc_turbo" : prov === "volcengine_tts" ? "seed-tts-2.0" : "";
+		setKeyBaseUrl(item?.defaultBaseUrl || fallbackUrl);
+		setKeyResourceId(item?.defaultResourceId || fallbackResId);
 		setKeyDefaultModel("");
 		setKeyDefaultVoice("");
+	};
+	const jumpToAddKey = (prov) => {
+		onSelectKeyProvider(prov);
+		setLabTab("keys");
 	};
 	const renderCredSelect = (provider, value, onChange) => {
 		if (provider === "native") return null;
 		const matched = config.credentials.filter((c) => c.provider === provider);
-		return /* @__PURE__ */ k$1("select", {
+		const provTitle = PROVIDER_DISPLAY_NAMES[provider] || provider;
+		return /* @__PURE__ */ k$1(M, null, /* @__PURE__ */ k$1("label", { class: "voice-field-label" }, "使用密钥"), matched.length === 0 ? /* @__PURE__ */ k$1("button", {
+			type: "button",
+			class: "voice-missing-key-cta",
+			onClick: () => jumpToAddKey(provider)
+		}, /* @__PURE__ */ k$1("span", null, "⚠️ 还没有「", provTitle, "」密钥"), /* @__PURE__ */ k$1("span", null, "去 ① 密钥添加 →")) : /* @__PURE__ */ k$1("select", {
 			class: "voice-field-input",
 			value,
 			onChange: (e) => onChange(e.target.value)
-		}, /* @__PURE__ */ k$1("option", { value: "" }, "自动跟随该服务商当前默认密钥 (", matched.length, " 个可用)"), matched.map((c) => /* @__PURE__ */ k$1("option", {
+		}, /* @__PURE__ */ k$1("option", { value: "" }, "自动用默认密钥（当前 ", matched.length, " 把可用）"), matched.map((c) => /* @__PURE__ */ k$1("option", {
 			key: c.id,
 			value: c.id
-		}, c.label, " (", c.authSummary, ")", c.active ? " ★" : "")));
+		}, c.label, " (", c.authSummary, ")", c.active ? " ★默认" : ""))));
 	};
 	const activeProf = config.activeProfile || DEFAULT_CONFIG.activeProfile;
+	const recommendedPresets = buildRecommendedQuickProfiles(config.credentials);
+	const activeMissingProviders = getMissingProvidersForProfile(activeProf, config.credentials);
 	const orbScale = walkPhase === "listening" ? 1 + Math.min(.18, micLevel * .22) : 1;
 	return /* @__PURE__ */ k$1(M, null, walkOpen && /* @__PURE__ */ k$1("div", {
 		id: "walkModeOverlay",
@@ -2523,7 +2908,7 @@ function VoiceCopilotSheets() {
 		class: "walk-top-btn",
 		id: "walkOpenLabBtn",
 		onClick: () => {
-			setLabTab("profiles");
+			setLabTab(config.credentials.length > 0 ? "profiles" : "keys");
 			setLabOpen(true);
 		}
 	}, "⚙️ 配置"), /* @__PURE__ */ k$1("button", {
@@ -2624,29 +3009,152 @@ function VoiceCopilotSheets() {
 		onClick: () => setLabOpen(false)
 	}, "✕")), /* @__PURE__ */ k$1("div", { class: "voice-lab-tabs" }, /* @__PURE__ */ k$1("button", {
 		type: "button",
-		class: `voice-lab-tab ${labTab === "profiles" ? "active" : ""}`,
-		onClick: () => setLabTab("profiles")
-	}, "🎛️ 方案与开关"), /* @__PURE__ */ k$1("button", {
-		type: "button",
 		class: `voice-lab-tab ${labTab === "keys" ? "active" : ""}`,
 		onClick: () => setLabTab("keys")
-	}, "🔑 密钥池 (", config.credentials.length, ")"), /* @__PURE__ */ k$1("button", {
+	}, "① 密钥 (", config.credentials.length, ")"), /* @__PURE__ */ k$1("button", {
+		type: "button",
+		class: `voice-lab-tab ${labTab === "profiles" ? "active" : ""}`,
+		onClick: () => setLabTab("profiles")
+	}, "② 方案"), /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: `voice-lab-tab ${labTab === "bench" ? "active" : ""}`,
 		onClick: () => setLabTab("bench")
-	}, "🧪 调试台")), /* @__PURE__ */ k$1("div", { class: "voice-lab-body" }, loadingCfg && /* @__PURE__ */ k$1("div", { class: "voice-muted-note" }, "正在读取加密配置…"), labTab === "profiles" && /* @__PURE__ */ k$1("div", { class: "voice-tab-stack" }, /* @__PURE__ */ k$1("div", { class: "voice-card" }, /* @__PURE__ */ k$1("div", { class: "voice-card-head" }, /* @__PURE__ */ k$1("span", { class: "voice-card-title" }, "当前生效语音方案"), /* @__PURE__ */ k$1("button", {
+	}, "③ 测一测")), /* @__PURE__ */ k$1("div", { class: "voice-guide-strip" }, config.credentials.length === 0 ? /* @__PURE__ */ k$1("span", null, /* @__PURE__ */ k$1("strong", null, "3 步上手："), "先在 ① 存 1 把密钥（推荐 Gemini 1 把全包） → ② 一键启用方案 → ③ 试跑出声") : activeProf.id === "native" ? /* @__PURE__ */ k$1(M, null, /* @__PURE__ */ k$1("span", null, labTab === "profiles" ? `✅ 已存 ${config.credentials.length} 把密钥 · 在下方直接点「一键启用」即可` : `✅ 已存 ${config.credentials.length} 把密钥 · 下一步：一键启用方案`), labTab !== "profiles" && /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: "voice-pill-btn primary",
-		onClick: () => setEditingProfile(createEmptyProfileDraft())
-	}, "＋ 新建混搭方案")), /* @__PURE__ */ k$1("div", { class: "voice-profile-list" }, config.profiles.map((p) => {
+		onClick: () => setLabTab("profiles")
+	}, "去 ② 启用 →")) : /* @__PURE__ */ k$1(M, null, /* @__PURE__ */ k$1("span", null, "✅ 当前生效：", /* @__PURE__ */ k$1("strong", null, activeProf.name)), labTab !== "bench" && /* @__PURE__ */ k$1("button", {
+		type: "button",
+		class: "voice-pill-btn",
+		onClick: () => setLabTab("bench")
+	}, "去 ③ 试跑 →"))), /* @__PURE__ */ k$1("div", { class: "voice-lab-body" }, loadingCfg && /* @__PURE__ */ k$1("div", { class: "voice-muted-note" }, "正在读取加密配置…"), labTab === "keys" && /* @__PURE__ */ k$1("div", { class: "voice-tab-stack" }, config.credentials.length > 0 && /* @__PURE__ */ k$1("div", { class: "voice-card" }, /* @__PURE__ */ k$1("div", {
+		class: "voice-card-title",
+		style: "margin-bottom:8px;"
+	}, "已保存密钥 (", config.credentials.length, ")"), config.credentials.map((c) => /* @__PURE__ */ k$1("div", {
+		key: c.id,
+		class: "voice-cred-item"
+	}, /* @__PURE__ */ k$1("div", { style: "flex:1;min-width:0;" }, /* @__PURE__ */ k$1("div", { class: "voice-cred-title" }, /* @__PURE__ */ k$1("span", { class: "voice-prov-tag" }, PROVIDER_DISPLAY_NAMES[c.provider] || c.provider), /* @__PURE__ */ k$1("span", null, c.label), c.active && /* @__PURE__ */ k$1("span", { class: "voice-active-tag" }, "默认")), /* @__PURE__ */ k$1("div", { class: "voice-cred-sub" }, c.authSummary, c.baseUrl ? ` · ${c.baseUrl.replace(/^https?:\/\//, "").slice(0, 38)}` : ""), testResults[c.id] && /* @__PURE__ */ k$1("div", { class: `voice-test-msg ${testResults[c.id].ok ? "ok" : "err"}` }, testResults[c.id].summary)), /* @__PURE__ */ k$1("div", { class: "voice-cred-actions" }, /* @__PURE__ */ k$1("button", {
+		type: "button",
+		class: "voice-pill-btn",
+		disabled: testingCredId === c.id,
+		onClick: () => void handleTestCredential(c.id)
+	}, testingCredId === c.id ? "测速中…" : "🔌 测速"), !c.active && /* @__PURE__ */ k$1("button", {
+		type: "button",
+		class: "voice-pill-btn",
+		onClick: () => void handleActivateCredential(c.id)
+	}, "设为默认"), /* @__PURE__ */ k$1("button", {
+		type: "button",
+		class: "voice-pill-btn danger",
+		onClick: () => void handleDeleteCredential(c.id)
+	}, "删"))))), recommendedPresets.length > 0 && /* @__PURE__ */ k$1("div", { class: "voice-card" }, /* @__PURE__ */ k$1("div", { class: "voice-card-title" }, "⚡ 下一步：一键生成并启用方案（免手填）"), /* @__PURE__ */ k$1("div", { class: "voice-muted-note" }, "根据你已存的密钥自动配好耳朵 / 大脑 / 嘴巴，点一下直接生效："), /* @__PURE__ */ k$1("div", { class: "voice-quick-preset-list" }, recommendedPresets.map((preset) => /* @__PURE__ */ k$1("button", {
+		key: preset.key,
+		type: "button",
+		class: "voice-quick-preset-btn",
+		disabled: applyingPresetKey === preset.key,
+		onClick: () => void handleApplyQuickPreset(preset)
+	}, /* @__PURE__ */ k$1("div", { style: "min-width:0;" }, /* @__PURE__ */ k$1("div", { class: "voice-quick-preset-title" }, preset.badge, " · ", preset.title), /* @__PURE__ */ k$1("div", { class: "voice-quick-preset-sub" }, preset.sub)), /* @__PURE__ */ k$1("span", { class: "voice-quick-preset-go" }, applyingPresetKey === preset.key ? "启用中…" : "一键启用 ›"))))), /* @__PURE__ */ k$1("div", { class: "voice-card" }, /* @__PURE__ */ k$1("div", {
+		class: "voice-card-title",
+		style: "margin-bottom:4px;"
+	}, "添加 API 密钥"), /* @__PURE__ */ k$1("div", {
+		class: "voice-muted-note",
+		style: "margin-bottom:10px;"
+	}, "🔐 密钥在服务端 ", /* @__PURE__ */ k$1("strong", null, "AES-256-GCM"), " 加密落盘，保存后永不回显明文。先选你要填哪家："), /* @__PURE__ */ k$1("div", { class: "voice-provider-grid" }, PROVIDER_PICKER_CARDS.map((card) => {
+		const cnt = config.credentials.filter((c) => c.provider === card.id).length;
+		return /* @__PURE__ */ k$1("button", {
+			key: card.id,
+			type: "button",
+			class: `voice-provider-card ${keyProvider === card.id ? "active" : ""}`,
+			onClick: () => onSelectKeyProvider(card.id)
+		}, /* @__PURE__ */ k$1("div", { class: "voice-provider-card-title" }, /* @__PURE__ */ k$1("span", null, card.icon, " ", card.title), cnt > 0 && /* @__PURE__ */ k$1("span", { class: "voice-provider-badge" }, cnt, "把")), /* @__PURE__ */ k$1("div", { class: "voice-provider-card-sub" }, card.sub));
+	})), keyProvider === "openai_compat" && selectedCatalog?.baseUrlExamples && /* @__PURE__ */ k$1(M, null, /* @__PURE__ */ k$1("label", { class: "voice-field-label" }, "快捷选厂商（自动填接口地址）"), /* @__PURE__ */ k$1("div", {
+		class: "voice-chip-row",
+		style: "margin-top:0;margin-bottom:4px;"
+	}, selectedCatalog.baseUrlExamples.map((ex) => /* @__PURE__ */ k$1("button", {
+		key: ex.url,
+		type: "button",
+		class: `voice-quick-chip ${keyBaseUrl === ex.url ? "active" : ""}`,
+		onClick: () => setKeyBaseUrl(ex.url)
+	}, ex.label))), /* @__PURE__ */ k$1("label", { class: "voice-field-label" }, "接口地址 (Base URL)"), /* @__PURE__ */ k$1("input", {
+		class: "voice-field-input",
+		value: keyBaseUrl,
+		placeholder: "https://api.deepseek.com/v1",
+		onInput: (e) => setKeyBaseUrl(e.target.value)
+	})), (keyProvider === "volcengine_asr" || keyProvider === "volcengine_tts") && /* @__PURE__ */ k$1(M, null, /* @__PURE__ */ k$1("label", { class: "voice-field-label" }, "火山鉴权方式（二选一，看你控制台给的是哪种）"), /* @__PURE__ */ k$1("div", { class: "voice-subseg" }, /* @__PURE__ */ k$1("button", {
+		type: "button",
+		class: `voice-subseg-btn ${volcAuthMode === "apiKey" ? "active" : ""}`,
+		onClick: () => setVolcAuthMode("apiKey")
+	}, "方式 A：单把 API Key"), /* @__PURE__ */ k$1("button", {
+		type: "button",
+		class: `voice-subseg-btn ${volcAuthMode === "appToken" ? "active" : ""}`,
+		onClick: () => setVolcAuthMode("appToken")
+	}, "方式 B：AppID + Token"))), !(keyProvider === "volcengine_asr" || keyProvider === "volcengine_tts") || volcAuthMode === "apiKey" ? /* @__PURE__ */ k$1(M, null, /* @__PURE__ */ k$1("label", { class: "voice-field-label" }, "API Key（必填）"), /* @__PURE__ */ k$1("input", {
+		type: "password",
+		class: "voice-field-input",
+		value: keyApiKey,
+		placeholder: keyProvider === "gemini" ? "粘贴 Gemini Key（AIza... 或 AQ.Ab...）" : keyProvider === "openai_compat" ? "粘贴 sk-... / ark-... 密钥" : "粘贴火山语音 API Key",
+		onInput: (e) => setKeyApiKey(e.target.value)
+	})) : /* @__PURE__ */ k$1("div", { class: "voice-two-col" }, /* @__PURE__ */ k$1("div", null, /* @__PURE__ */ k$1("label", { class: "voice-field-label" }, "AppID（必填）"), /* @__PURE__ */ k$1("input", {
+		class: "voice-field-input",
+		value: keyAppId,
+		placeholder: "火山语音 AppID",
+		onInput: (e) => setKeyAppId(e.target.value)
+	})), /* @__PURE__ */ k$1("div", null, /* @__PURE__ */ k$1("label", { class: "voice-field-label" }, "Access Token（必填）"), /* @__PURE__ */ k$1("input", {
+		type: "password",
+		class: "voice-field-input",
+		value: keyAccessToken,
+		placeholder: "火山 Access Token",
+		onInput: (e) => setKeyAccessToken(e.target.value)
+	}))), /* @__PURE__ */ k$1("label", { class: "voice-field-label" }, "备注名（可选，留空自动命名）"), /* @__PURE__ */ k$1("input", {
+		class: "voice-field-input",
+		value: keyLabel,
+		placeholder: `留空自动命名为「${inferDefaultCredLabel(keyProvider, keyBaseUrl)}」`,
+		onInput: (e) => setKeyLabel(e.target.value)
+	}), /* @__PURE__ */ k$1("details", { class: "voice-adv-details" }, /* @__PURE__ */ k$1("summary", null, "⚙️ 高级参数（接口 / 模型 / 音色 · 已填好）"), /* @__PURE__ */ k$1("div", { class: "voice-adv-body" }, keyProvider !== "openai_compat" && /* @__PURE__ */ k$1(M, null, /* @__PURE__ */ k$1("label", { class: "voice-field-label" }, "接口 Base URL（默认官方地址）"), /* @__PURE__ */ k$1("input", {
+		class: "voice-field-input",
+		value: keyBaseUrl,
+		placeholder: "https://...",
+		onInput: (e) => setKeyBaseUrl(e.target.value)
+	})), (keyProvider === "volcengine_asr" || keyProvider === "volcengine_tts") && /* @__PURE__ */ k$1(M, null, /* @__PURE__ */ k$1("label", { class: "voice-field-label" }, "火山 Resource ID（一般保持默认）"), /* @__PURE__ */ k$1("input", {
+		class: "voice-field-input",
+		value: keyResourceId,
+		placeholder: keyProvider === "volcengine_asr" ? "volc.bigasr.auc_turbo" : "seed-tts-2.0",
+		onInput: (e) => setKeyResourceId(e.target.value)
+	})), /* @__PURE__ */ k$1("div", { class: "voice-two-col" }, /* @__PURE__ */ k$1("div", null, /* @__PURE__ */ k$1("label", { class: "voice-field-label" }, "默认模型（可留空）"), /* @__PURE__ */ k$1("input", {
+		class: "voice-field-input",
+		value: keyDefaultModel,
+		placeholder: "留空按方案自动选",
+		onInput: (e) => setKeyDefaultModel(e.target.value)
+	})), /* @__PURE__ */ k$1("div", null, /* @__PURE__ */ k$1("label", { class: "voice-field-label" }, "默认音色（可留空）"), /* @__PURE__ */ k$1("input", {
+		class: "voice-field-input",
+		value: keyDefaultVoice,
+		placeholder: "如 Kore / alloy / vv",
+		onInput: (e) => setKeyDefaultVoice(e.target.value)
+	}))))), /* @__PURE__ */ k$1("button", {
+		type: "button",
+		class: "primary-block-btn",
+		disabled: savingKey,
+		onClick: () => void handleSaveCredential()
+	}, savingKey ? "正在加密保存…" : "🔐 加密存入密钥池"))), labTab === "profiles" && /* @__PURE__ */ k$1("div", { class: "voice-tab-stack" }, recommendedPresets.length > 0 && !editingProfile && /* @__PURE__ */ k$1("div", { class: "voice-card" }, /* @__PURE__ */ k$1("div", { class: "voice-card-title" }, "⚡ 一键推荐方案（免手动逐格填写）"), /* @__PURE__ */ k$1("div", { class: "voice-quick-preset-list" }, recommendedPresets.map((preset) => /* @__PURE__ */ k$1("button", {
+		key: preset.key,
+		type: "button",
+		class: "voice-quick-preset-btn",
+		disabled: applyingPresetKey === preset.key,
+		onClick: () => void handleApplyQuickPreset(preset)
+	}, /* @__PURE__ */ k$1("div", { style: "min-width:0;" }, /* @__PURE__ */ k$1("div", { class: "voice-quick-preset-title" }, preset.badge, " · ", preset.title), /* @__PURE__ */ k$1("div", { class: "voice-quick-preset-sub" }, preset.sub)), /* @__PURE__ */ k$1("span", { class: "voice-quick-preset-go" }, applyingPresetKey === preset.key ? "启用中…" : "一键启用 ›"))))), /* @__PURE__ */ k$1("div", { class: "voice-card" }, /* @__PURE__ */ k$1("div", { class: "voice-card-head" }, /* @__PURE__ */ k$1("span", { class: "voice-card-title" }, "当前生效语音方案"), /* @__PURE__ */ k$1("button", {
+		type: "button",
+		class: "voice-pill-btn primary",
+		onClick: () => setEditingProfile(createSmartProfileDraft(config.credentials))
+	}, "＋ 自定义混搭")), /* @__PURE__ */ k$1("div", { class: "voice-profile-list" }, config.profiles.map((p) => {
 		const isActive = p.id === config.prefs.activeProfileId;
+		const missingProvs = getMissingProvidersForProfile(p, config.credentials);
 		return /* @__PURE__ */ k$1("div", {
 			key: p.id,
-			class: `voice-profile-row ${isActive ? "active" : ""}`
-		}, /* @__PURE__ */ k$1("div", {
+			class: `voice-profile-row ${isActive ? "active" : ""}`,
+			style: "flex-direction:column;align-items:stretch;"
+		}, /* @__PURE__ */ k$1("div", { style: "display:flex;align-items:center;gap:8px;" }, /* @__PURE__ */ k$1("div", {
 			style: "flex:1;min-width:0;cursor:pointer;",
 			onClick: () => void updatePrefPatch({ activeProfileId: p.id })
-		}, /* @__PURE__ */ k$1("div", { class: "voice-profile-row-title" }, /* @__PURE__ */ k$1("span", null, isActive ? "✅ " : "⚪ ", p.name)), /* @__PURE__ */ k$1("div", { class: "voice-profile-row-sub" }, "👂 ", p.stt.provider, "/", p.stt.model || "默认", " · 🧠 ", p.brain.provider, "/", p.brain.model || "默认", " · 🗣️ ", p.tts.provider, "/", p.tts.model || "默认")), !p.builtin && /* @__PURE__ */ k$1("div", { style: "display:flex;gap:6px;flex-shrink:0;" }, /* @__PURE__ */ k$1("button", {
+		}, /* @__PURE__ */ k$1("div", { class: "voice-profile-row-title" }, /* @__PURE__ */ k$1("span", null, isActive ? "✅ " : "⚪ ", p.name)), /* @__PURE__ */ k$1("div", { class: "voice-summary-pills" }, /* @__PURE__ */ k$1("span", { class: "voice-summary-pill" }, "👂 耳朵：", formatStageSummary(p.stt.provider, p.stt.model, "stt")), /* @__PURE__ */ k$1("span", { class: "voice-summary-pill" }, "🧠 大脑：", formatStageSummary(p.brain.provider, p.brain.model, "brain")), /* @__PURE__ */ k$1("span", { class: "voice-summary-pill" }, "🗣️ 嘴巴：", formatStageSummary(p.tts.provider, p.tts.model, "tts")))), !p.builtin && /* @__PURE__ */ k$1("div", { style: "display:flex;gap:6px;flex-shrink:0;" }, /* @__PURE__ */ k$1("button", {
 			type: "button",
 			class: "voice-pill-btn",
 			onClick: () => setEditingProfile(JSON.parse(JSON.stringify(p)))
@@ -2654,20 +3162,24 @@ function VoiceCopilotSheets() {
 			type: "button",
 			class: "voice-pill-btn danger",
 			onClick: () => void handleDeleteProfile(p.id)
-		}, "删")));
-	}))), editingProfile && /* @__PURE__ */ k$1("div", { class: "voice-card voice-editor-card" }, /* @__PURE__ */ k$1("div", { class: "voice-card-head" }, /* @__PURE__ */ k$1("span", { class: "voice-card-title" }, editingProfile.id ? "编辑混搭方案" : "新建自由混搭方案（耳朵 / 大脑 / 嘴巴独立可选）"), /* @__PURE__ */ k$1("button", {
+		}, "删"))), missingProvs.length > 0 && /* @__PURE__ */ k$1("button", {
+			type: "button",
+			class: "voice-missing-key-cta",
+			onClick: () => jumpToAddKey(missingProvs[0])
+		}, /* @__PURE__ */ k$1("span", null, "⚠️ 缺少 ", missingProvs.map((pr) => PROVIDER_DISPLAY_NAMES[pr] || pr).join("、"), " 密钥"), /* @__PURE__ */ k$1("span", null, "去 ① 添加 →")));
+	}))), editingProfile && /* @__PURE__ */ k$1("div", { class: "voice-card voice-editor-card" }, /* @__PURE__ */ k$1("div", { class: "voice-card-head" }, /* @__PURE__ */ k$1("span", { class: "voice-card-title" }, editingProfile.id ? "编辑语音方案" : "自定义混搭方案（耳朵 / 大脑 / 嘴巴自由选）"), /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: "voice-pill-btn",
 		onClick: () => setEditingProfile(null)
-	}, "取消")), /* @__PURE__ */ k$1("label", { class: "voice-field-label" }, "方案名称"), /* @__PURE__ */ k$1("input", {
+	}, "取消")), /* @__PURE__ */ k$1("label", { class: "voice-field-label" }, "方案名称（方便自己辨认）"), /* @__PURE__ */ k$1("input", {
 		class: "voice-field-input",
 		value: editingProfile.name,
-		placeholder: "例如：豆包耳朵嘴巴 + Gemini 大脑",
+		placeholder: "例如：全 Gemini 随行 / 豆包听写 + DeepSeek 大脑",
 		onInput: (e) => setEditingProfile({
 			...editingProfile,
 			name: e.target.value
 		})
-	}), /* @__PURE__ */ k$1("div", { class: "voice-stage-box" }, /* @__PURE__ */ k$1("div", { class: "voice-stage-title" }, "👂 1. 语音识别 (STT · 耳朵)"), /* @__PURE__ */ k$1("select", {
+	}), /* @__PURE__ */ k$1("div", { class: "voice-stage-box" }, /* @__PURE__ */ k$1("div", { class: "voice-stage-title" }, "👂 1. 语音识别（耳朵）"), /* @__PURE__ */ k$1("div", { class: "voice-stage-sub" }, "负责把你说的话转成文字；省事可选「系统免费原生」"), /* @__PURE__ */ k$1("label", { class: "voice-field-label" }, "用哪家服务商听写"), /* @__PURE__ */ k$1("select", {
 		class: "voice-field-input",
 		value: editingProfile.stt.provider,
 		onChange: (e) => {
@@ -2683,16 +3195,16 @@ function VoiceCopilotSheets() {
 				}
 			});
 		}
-	}, /* @__PURE__ */ k$1("option", { value: "native" }, "系统原生浏览器识别（免 Key 免费）"), /* @__PURE__ */ k$1("option", { value: "volcengine_asr" }, "火山豆包 Flash ASR"), /* @__PURE__ */ k$1("option", { value: "gemini" }, "Google Gemini（音频直识）"), /* @__PURE__ */ k$1("option", { value: "openai_compat" }, "OpenAI 兼容接口（Whisper / Transcribe）")), renderCredSelect(editingProfile.stt.provider, editingProfile.stt.credId, (v) => setEditingProfile({
+	}, /* @__PURE__ */ k$1("option", { value: "native" }, "系统免费原生（免 Key，直接用手机听写）"), /* @__PURE__ */ k$1("option", { value: "gemini" }, "Google Gemini（1 把 Key 通用）"), /* @__PURE__ */ k$1("option", { value: "volcengine_asr" }, "火山豆包 Flash ASR（极速中文听写）"), /* @__PURE__ */ k$1("option", { value: "openai_compat" }, "OpenAI 兼容接口（Whisper）")), renderCredSelect(editingProfile.stt.provider, editingProfile.stt.credId, (v) => setEditingProfile({
 		...editingProfile,
 		stt: {
 			...editingProfile.stt,
 			credId: v
 		}
-	})), editingProfile.stt.provider !== "native" && /* @__PURE__ */ k$1("input", {
+	})), editingProfile.stt.provider !== "native" && /* @__PURE__ */ k$1("details", { class: "voice-adv-details" }, /* @__PURE__ */ k$1("summary", null, "⚙️ 高级参数（识别模型 / 备用兜底 · 已填好）"), /* @__PURE__ */ k$1("div", { class: "voice-adv-body" }, /* @__PURE__ */ k$1("label", { class: "voice-field-label" }, "识别模型名 / 火山资源 ID"), /* @__PURE__ */ k$1("input", {
 		class: "voice-field-input",
 		value: editingProfile.stt.model,
-		placeholder: "模型 / Resource ID（如 volc.bigasr.auc_turbo）",
+		placeholder: "如 gemini-2.5-flash / volc.bigasr.auc_turbo",
 		onInput: (e) => setEditingProfile({
 			...editingProfile,
 			stt: {
@@ -2700,7 +3212,7 @@ function VoiceCopilotSheets() {
 				model: e.target.value
 			}
 		})
-	}), editingProfile.stt.provider === "gemini" && /* @__PURE__ */ k$1("select", {
+	}), editingProfile.stt.provider === "gemini" && /* @__PURE__ */ k$1(M, null, /* @__PURE__ */ k$1("label", { class: "voice-field-label" }, "听写思考档位"), /* @__PURE__ */ k$1("select", {
 		class: "voice-field-input",
 		value: editingProfile.stt.thinkingLevel || "low",
 		onChange: (e) => setEditingProfile({
@@ -2710,7 +3222,7 @@ function VoiceCopilotSheets() {
 				thinkingLevel: e.target.value
 			}
 		})
-	}, /* @__PURE__ */ k$1("option", { value: "low" }, "思考档位：low（推荐，防漏字且低延迟）"), /* @__PURE__ */ k$1("option", { value: "default" }, "思考档位：模型默认"), /* @__PURE__ */ k$1("option", { value: "medium" }, "思考档位：medium")), editingProfile.stt.provider !== "native" && /* @__PURE__ */ k$1("select", {
+	}, /* @__PURE__ */ k$1("option", { value: "low" }, "low（推荐，防漏字且低延迟）"), /* @__PURE__ */ k$1("option", { value: "default" }, "模型默认"), /* @__PURE__ */ k$1("option", { value: "medium" }, "medium"))), /* @__PURE__ */ k$1("label", { class: "voice-field-label" }, "主引擎失败时的备用听写"), /* @__PURE__ */ k$1("select", {
 		class: "voice-field-input",
 		value: editingProfile.stt.fallbackChain?.[0]?.provider || "",
 		onChange: (e) => {
@@ -2729,12 +3241,13 @@ function VoiceCopilotSheets() {
 				}
 			});
 		}
-	}, /* @__PURE__ */ k$1("option", { value: "" }, "备用降级 STT：无（主引擎失败直接报错）"), /* @__PURE__ */ k$1("option", { value: "gemini" }, "备用降级 STT：Google Gemini"), /* @__PURE__ */ k$1("option", { value: "volcengine_asr" }, "备用降级 STT：火山 Flash ASR"), /* @__PURE__ */ k$1("option", { value: "openai_compat" }, "备用降级 STT：OpenAI 兼容 Whisper"))), /* @__PURE__ */ k$1("div", { class: "voice-stage-box" }, /* @__PURE__ */ k$1("div", { class: "voice-stage-title" }, "🧠 2. 语音总管大脑 (Brain · 理解与工具调度)"), /* @__PURE__ */ k$1("select", {
+	}, /* @__PURE__ */ k$1("option", { value: "" }, "无（主引擎失败直接提示）"), /* @__PURE__ */ k$1("option", { value: "gemini" }, "备用：Google Gemini"), /* @__PURE__ */ k$1("option", { value: "volcengine_asr" }, "备用：火山 Flash ASR"), /* @__PURE__ */ k$1("option", { value: "openai_compat" }, "备用：OpenAI 兼容 Whisper"))))), /* @__PURE__ */ k$1("div", { class: "voice-stage-box" }, /* @__PURE__ */ k$1("div", { class: "voice-stage-title" }, "🧠 2. 语音大脑（核心）"), /* @__PURE__ */ k$1("div", { class: "voice-stage-sub" }, "负责听懂你想干嘛、决定查进度 / 批准 / 遥控哪台电脑"), /* @__PURE__ */ k$1("label", { class: "voice-field-label" }, "用哪家大模型思考"), /* @__PURE__ */ k$1("select", {
 		class: "voice-field-input",
 		value: editingProfile.brain.provider,
 		onChange: (e) => {
 			const prov = e.target.value;
-			const defModel = prov === "gemini" ? "gemini-2.5-flash" : prov === "openai_compat" ? "deepseek-chat" : "rule-router";
+			const oai = config.credentials.find((c) => c.provider === "openai_compat" && c.active) || config.credentials.find((c) => c.provider === "openai_compat");
+			const defModel = prov === "gemini" ? "gemini-2.5-flash" : prov === "openai_compat" ? inferOpenAiCompatModel(oai) : "rule-router";
 			setEditingProfile({
 				...editingProfile,
 				brain: {
@@ -2745,16 +3258,16 @@ function VoiceCopilotSheets() {
 				}
 			});
 		}
-	}, /* @__PURE__ */ k$1("option", { value: "native" }, "本地规则路由（免 Key 基础口令）"), /* @__PURE__ */ k$1("option", { value: "gemini" }, "Google Gemini"), /* @__PURE__ */ k$1("option", { value: "openai_compat" }, "OpenAI 兼容接口（DeepSeek / 方舟 Ark / OpenAI / Ollama）")), renderCredSelect(editingProfile.brain.provider, editingProfile.brain.credId, (v) => setEditingProfile({
+	}, /* @__PURE__ */ k$1("option", { value: "gemini" }, "Google Gemini（速度快、工具调度准）"), /* @__PURE__ */ k$1("option", { value: "openai_compat" }, "OpenAI 兼容接口（DeepSeek / 方舟 Ark / OpenAI）"), /* @__PURE__ */ k$1("option", { value: "native" }, "本地基础口令（免 Key，仅支持固定口令）")), renderCredSelect(editingProfile.brain.provider, editingProfile.brain.credId, (v) => setEditingProfile({
 		...editingProfile,
 		brain: {
 			...editingProfile.brain,
 			credId: v
 		}
-	})), editingProfile.brain.provider !== "native" && /* @__PURE__ */ k$1(M, null, /* @__PURE__ */ k$1("input", {
+	})), editingProfile.brain.provider !== "native" && /* @__PURE__ */ k$1(M, null, /* @__PURE__ */ k$1("label", { class: "voice-field-label" }, "大模型名称（点下方标签可快填）"), /* @__PURE__ */ k$1("input", {
 		class: "voice-field-input",
 		value: editingProfile.brain.model,
-		placeholder: "模型 ID（如 gemini-2.5-flash / deepseek-v4-1-flash-261017）",
+		placeholder: "如 gemini-2.5-flash / deepseek-chat",
 		onInput: (e) => setEditingProfile({
 			...editingProfile,
 			brain: {
@@ -2762,7 +3275,21 @@ function VoiceCopilotSheets() {
 				model: e.target.value
 			}
 		})
-	}), /* @__PURE__ */ k$1("select", {
+	}), BRAIN_MODEL_CHIPS[editingProfile.brain.provider] && /* @__PURE__ */ k$1("div", {
+		class: "voice-chip-row",
+		style: "margin-top:2px;"
+	}, BRAIN_MODEL_CHIPS[editingProfile.brain.provider].map((chip) => /* @__PURE__ */ k$1("button", {
+		key: chip.value,
+		type: "button",
+		class: `voice-quick-chip ${editingProfile.brain.model === chip.value ? "active" : ""}`,
+		onClick: () => setEditingProfile({
+			...editingProfile,
+			brain: {
+				...editingProfile.brain,
+				model: chip.value
+			}
+		})
+	}, chip.label))), /* @__PURE__ */ k$1("details", { class: "voice-adv-details" }, /* @__PURE__ */ k$1("summary", null, "⚙️ 高级参数（思考档位 · 默认极速 ~1 秒）"), /* @__PURE__ */ k$1("div", { class: "voice-adv-body" }, /* @__PURE__ */ k$1("label", { class: "voice-field-label" }, "思考深度（越低说话响应越快）"), /* @__PURE__ */ k$1("select", {
 		class: "voice-field-input",
 		value: editingProfile.brain.thinkingLevel || "off",
 		onChange: (e) => setEditingProfile({
@@ -2772,7 +3299,7 @@ function VoiceCopilotSheets() {
 				thinkingLevel: e.target.value
 			}
 		})
-	}, /* @__PURE__ */ k$1("option", { value: "off" }, "思考档位：关闭思考（极速 ~1s，推荐随行口令）"), /* @__PURE__ */ k$1("option", { value: "low" }, "思考档位：low（轻量思考，3.x/4.x 最低档）"), /* @__PURE__ */ k$1("option", { value: "medium" }, "思考档位：medium"), /* @__PURE__ */ k$1("option", { value: "high" }, "思考档位：high（复杂多任务规划）")))), /* @__PURE__ */ k$1("div", { class: "voice-stage-box" }, /* @__PURE__ */ k$1("div", { class: "voice-stage-title" }, "🗣️ 3. 语音播报 (TTS · 嘴巴)"), /* @__PURE__ */ k$1("select", {
+	}, /* @__PURE__ */ k$1("option", { value: "off" }, "关闭思考（极速 ~1s，推荐随行口令）"), /* @__PURE__ */ k$1("option", { value: "low" }, "low（轻量思考，Gemini 3.x/4.x 最低档）"), /* @__PURE__ */ k$1("option", { value: "medium" }, "medium（均衡）"), /* @__PURE__ */ k$1("option", { value: "high" }, "high（复杂多任务规划）")))))), /* @__PURE__ */ k$1("div", { class: "voice-stage-box" }, /* @__PURE__ */ k$1("div", { class: "voice-stage-title" }, "🗣️ 3. 语音播报（嘴巴）"), /* @__PURE__ */ k$1("div", { class: "voice-stage-sub" }, "负责把回复念到耳机里；省钱选「系统免费原生」，自然人声选云端"), /* @__PURE__ */ k$1("label", { class: "voice-field-label" }, "用哪家语音播报"), /* @__PURE__ */ k$1("select", {
 		class: "voice-field-input",
 		value: editingProfile.tts.provider,
 		onChange: (e) => {
@@ -2790,27 +3317,16 @@ function VoiceCopilotSheets() {
 				}
 			});
 		}
-	}, /* @__PURE__ */ k$1("option", { value: "native" }, "系统原生语音合成（免 Key 免费）"), /* @__PURE__ */ k$1("option", { value: "volcengine_tts" }, "火山豆包 Seed-TTS 2.0"), /* @__PURE__ */ k$1("option", { value: "gemini" }, "Google Gemini TTS（自动转 WAV）"), /* @__PURE__ */ k$1("option", { value: "openai_compat" }, "OpenAI 兼容接口（/audio/speech）")), renderCredSelect(editingProfile.tts.provider, editingProfile.tts.credId, (v) => setEditingProfile({
+	}, /* @__PURE__ */ k$1("option", { value: "native" }, "系统免费原生（免 Key，零延迟）"), /* @__PURE__ */ k$1("option", { value: "gemini" }, "Google Gemini 语音（1 把 Key 通用）"), /* @__PURE__ */ k$1("option", { value: "volcengine_tts" }, "火山豆包 Seed-TTS 2.0（超自然中文）"), /* @__PURE__ */ k$1("option", { value: "openai_compat" }, "OpenAI 兼容接口（/audio/speech）")), renderCredSelect(editingProfile.tts.provider, editingProfile.tts.credId, (v) => setEditingProfile({
 		...editingProfile,
 		tts: {
 			...editingProfile.tts,
 			credId: v
 		}
-	})), editingProfile.tts.provider !== "native" && /* @__PURE__ */ k$1("div", { class: "voice-two-col" }, /* @__PURE__ */ k$1("input", {
-		class: "voice-field-input",
-		value: editingProfile.tts.model,
-		placeholder: "模型 / Resource ID",
-		onInput: (e) => setEditingProfile({
-			...editingProfile,
-			tts: {
-				...editingProfile.tts,
-				model: e.target.value
-			}
-		})
-	}), /* @__PURE__ */ k$1("input", {
+	})), editingProfile.tts.provider !== "native" && /* @__PURE__ */ k$1("details", { class: "voice-adv-details" }, /* @__PURE__ */ k$1("summary", null, "⚙️ 高级参数（播报模型 / 音色选择 · 已填好）"), /* @__PURE__ */ k$1("div", { class: "voice-adv-body" }, /* @__PURE__ */ k$1("label", { class: "voice-field-label" }, "声音音色（点标签快速切换）"), /* @__PURE__ */ k$1("input", {
 		class: "voice-field-input",
 		value: editingProfile.tts.voice || "",
-		placeholder: "音色 Speaker / Voice",
+		placeholder: "如 Kore / alloy / zh_female_vv_uranus_bigtts",
 		onInput: (e) => setEditingProfile({
 			...editingProfile,
 			tts: {
@@ -2818,7 +3334,32 @@ function VoiceCopilotSheets() {
 				voice: e.target.value
 			}
 		})
-	}))), /* @__PURE__ */ k$1("button", {
+	}), TTS_VOICE_CHIPS[editingProfile.tts.provider] && /* @__PURE__ */ k$1("div", {
+		class: "voice-chip-row",
+		style: "margin-top:4px;margin-bottom:4px;"
+	}, TTS_VOICE_CHIPS[editingProfile.tts.provider].map((v) => /* @__PURE__ */ k$1("button", {
+		key: v.value,
+		type: "button",
+		class: `voice-quick-chip ${editingProfile.tts.voice === v.value ? "active" : ""}`,
+		onClick: () => setEditingProfile({
+			...editingProfile,
+			tts: {
+				...editingProfile.tts,
+				voice: v.value
+			}
+		})
+	}, v.label))), /* @__PURE__ */ k$1("label", { class: "voice-field-label" }, "播报模型 / 火山资源 ID（一般不用改）"), /* @__PURE__ */ k$1("input", {
+		class: "voice-field-input",
+		value: editingProfile.tts.model,
+		placeholder: "如 gemini-2.5-flash-preview-tts / seed-tts-2.0",
+		onInput: (e) => setEditingProfile({
+			...editingProfile,
+			tts: {
+				...editingProfile.tts,
+				model: e.target.value
+			}
+		})
+	})))), /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: "primary-block-btn",
 		disabled: savingProfile,
@@ -2830,108 +3371,39 @@ function VoiceCopilotSheets() {
 		class: "voice-mini-select",
 		value: config.prefs.l2Policy,
 		onChange: (e) => void updatePrefPatch({ l2Policy: e.target.value })
-	}, /* @__PURE__ */ k$1("option", { value: "pin" }, "🔢 念出随机 3 位确认码"), /* @__PURE__ */ k$1("option", { value: "screen_only" }, "📱 仅限手机屏幕点按"))), /* @__PURE__ */ k$1("div", { class: "voice-toggle-row" }, /* @__PURE__ */ k$1("div", null, /* @__PURE__ */ k$1("div", { class: "voice-row-main" }, "聊天页「🔊 播报」使用 BYOK 语音合成"), /* @__PURE__ */ k$1("div", { class: "voice-row-sub" }, "默认关闭（保持免费系统语音）；开启后复用当前方案 TTS，失败自动降级")), /* @__PURE__ */ k$1("input", {
+	}, /* @__PURE__ */ k$1("option", { value: "pin" }, "🔢 念出随机 3 位确认码"), /* @__PURE__ */ k$1("option", { value: "screen_only" }, "📱 仅限手机屏幕点按"))), /* @__PURE__ */ k$1("div", { class: "voice-toggle-row" }, /* @__PURE__ */ k$1("div", null, /* @__PURE__ */ k$1("div", { class: "voice-row-main" }, "聊天页「🔊 播报」使用云端音色"), /* @__PURE__ */ k$1("div", { class: "voice-row-sub" }, "默认关闭（保持免费系统语音）；开启后复用当前方案嘴巴，失败自动降级")), /* @__PURE__ */ k$1("input", {
 		type: "checkbox",
 		class: "voice-switch",
 		checked: config.prefs.useByokForChatTts,
 		onChange: (e) => void updatePrefPatch({ useByokForChatTts: e.target.checked })
-	})), /* @__PURE__ */ k$1("div", { class: "voice-toggle-row" }, /* @__PURE__ */ k$1("div", null, /* @__PURE__ */ k$1("div", { class: "voice-row-main" }, "聊天页语音输入优先使用 BYOK 识别"), /* @__PURE__ */ k$1("div", { class: "voice-row-sub" }, "默认关闭（保持免费系统语音）；开启后可在聊天页复用云端 STT")), /* @__PURE__ */ k$1("input", {
+	})), /* @__PURE__ */ k$1("div", { class: "voice-toggle-row" }, /* @__PURE__ */ k$1("div", null, /* @__PURE__ */ k$1("div", { class: "voice-row-main" }, "聊天页语音输入使用云端听写"), /* @__PURE__ */ k$1("div", { class: "voice-row-sub" }, "默认关闭（保持免费系统听写）；开启后可在聊天页复用当前方案耳朵")), /* @__PURE__ */ k$1("input", {
 		type: "checkbox",
 		class: "voice-switch",
 		checked: config.prefs.useByokForChatStt,
 		onChange: (e) => void updatePrefPatch({ useByokForChatStt: e.target.checked })
-	})))), labTab === "keys" && /* @__PURE__ */ k$1("div", { class: "voice-tab-stack" }, /* @__PURE__ */ k$1("div", { class: "voice-security-banner" }, "🔐 所有密钥均在你的 Hub 服务端以 ", /* @__PURE__ */ k$1("strong", null, "AES-256-GCM"), " 加密落盘（权限 ", /* @__PURE__ */ k$1("code", null, "0600"), "），保存后永不回显明文；同一服务商支持存多把 Key 随时热切。"), config.credentials.length > 0 && /* @__PURE__ */ k$1("div", { class: "voice-card" }, /* @__PURE__ */ k$1("div", {
-		class: "voice-card-title",
-		style: "margin-bottom:8px;"
-	}, "已保存密钥池 (", config.credentials.length, ")"), config.credentials.map((c) => /* @__PURE__ */ k$1("div", {
-		key: c.id,
-		class: "voice-cred-item"
-	}, /* @__PURE__ */ k$1("div", { style: "flex:1;min-width:0;" }, /* @__PURE__ */ k$1("div", { class: "voice-cred-title" }, /* @__PURE__ */ k$1("span", { class: "voice-prov-tag" }, c.provider), /* @__PURE__ */ k$1("span", null, c.label), c.active && /* @__PURE__ */ k$1("span", { class: "voice-active-tag" }, "默认")), /* @__PURE__ */ k$1("div", { class: "voice-cred-sub" }, c.authSummary, c.baseUrl ? ` · ${c.baseUrl.replace(/^https?:\/\//, "").slice(0, 42)}` : ""), testResults[c.id] && /* @__PURE__ */ k$1("div", { class: `voice-test-msg ${testResults[c.id].ok ? "ok" : "err"}` }, testResults[c.id].summary)), /* @__PURE__ */ k$1("div", { class: "voice-cred-actions" }, /* @__PURE__ */ k$1("button", {
+	})))), labTab === "bench" && /* @__PURE__ */ k$1("div", { class: "voice-tab-stack" }, /* @__PURE__ */ k$1("div", { class: "voice-card" }, /* @__PURE__ */ k$1("div", {
+		class: "voice-card-head",
+		style: "margin-bottom:4px;"
+	}, /* @__PURE__ */ k$1("span", { class: "voice-card-title" }, "当前被测方案：", activeProf.name), /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: "voice-pill-btn",
-		disabled: testingCredId === c.id,
-		onClick: () => void handleTestCredential(c.id)
-	}, testingCredId === c.id ? "测速中…" : "🔌 测速"), !c.active && /* @__PURE__ */ k$1("button", {
+		onClick: () => setLabTab("profiles")
+	}, "换方案")), /* @__PURE__ */ k$1("div", { class: "voice-summary-pills" }, /* @__PURE__ */ k$1("span", { class: "voice-summary-pill" }, "👂 耳朵：", formatStageSummary(activeProf.stt.provider, activeProf.stt.model, "stt")), /* @__PURE__ */ k$1("span", { class: "voice-summary-pill" }, "🧠 大脑：", formatStageSummary(activeProf.brain.provider, activeProf.brain.model, "brain")), /* @__PURE__ */ k$1("span", { class: "voice-summary-pill" }, "🗣️ 嘴巴：", formatStageSummary(activeProf.tts.provider, activeProf.tts.model, "tts"))), activeMissingProviders.length > 0 && /* @__PURE__ */ k$1("button", {
 		type: "button",
-		class: "voice-pill-btn",
-		onClick: () => void handleActivateCredential(c.id)
-	}, "设为默认"), /* @__PURE__ */ k$1("button", {
-		type: "button",
-		class: "voice-pill-btn danger",
-		onClick: () => void handleDeleteCredential(c.id)
-	}, "删"))))), /* @__PURE__ */ k$1("div", { class: "voice-card" }, /* @__PURE__ */ k$1("div", {
-		class: "voice-card-title",
-		style: "margin-bottom:8px;"
-	}, "添加新密钥（开源中立 · 自由填任意厂商）"), /* @__PURE__ */ k$1("label", { class: "voice-field-label" }, "服务商协议类型"), /* @__PURE__ */ k$1("select", {
-		class: "voice-field-input",
-		value: keyProvider,
-		onChange: (e) => onSelectKeyProvider(e.target.value)
-	}, /* @__PURE__ */ k$1("option", { value: "gemini" }, "Google Gemini API（STT / 大脑 / TTS）"), /* @__PURE__ */ k$1("option", { value: "openai_compat" }, "OpenAI 兼容接口（DeepSeek / 方舟 Ark / OpenAI / Ollama）"), /* @__PURE__ */ k$1("option", { value: "volcengine_asr" }, "火山豆包语音识别 (Flash ASR · 独立权限池)"), /* @__PURE__ */ k$1("option", { value: "volcengine_tts" }, "火山豆包语音合成 (Seed-TTS 2.0 · 独立权限池)")), selectedCatalog?.hint && /* @__PURE__ */ k$1("div", { class: "voice-muted-note" }, selectedCatalog.hint), /* @__PURE__ */ k$1("label", { class: "voice-field-label" }, "自定义备注名"), /* @__PURE__ */ k$1("input", {
-		class: "voice-field-input",
-		value: keyLabel,
-		placeholder: "例如：我的主号 Key / 公司方舟 Key",
-		onInput: (e) => setKeyLabel(e.target.value)
-	}), /* @__PURE__ */ k$1("label", { class: "voice-field-label" }, "接口 Base URL"), /* @__PURE__ */ k$1("input", {
-		class: "voice-field-input",
-		value: keyBaseUrl,
-		placeholder: "https://...",
-		onInput: (e) => setKeyBaseUrl(e.target.value)
-	}), selectedCatalog?.baseUrlExamples && selectedCatalog.baseUrlExamples.length > 1 && /* @__PURE__ */ k$1("div", { class: "voice-chip-row" }, selectedCatalog.baseUrlExamples.map((ex) => /* @__PURE__ */ k$1("button", {
-		key: ex.url,
-		type: "button",
-		class: "voice-quick-chip",
-		onClick: () => setKeyBaseUrl(ex.url)
-	}, ex.label))), /* @__PURE__ */ k$1("label", { class: "voice-field-label" }, "API Key ", keyProvider === "volcengine_asr" || keyProvider === "volcengine_tts" ? "（或留空改填下方 AppID + Access Token）" : "（必填）"), /* @__PURE__ */ k$1("input", {
-		type: "password",
-		class: "voice-field-input",
-		value: keyApiKey,
-		placeholder: "粘贴密钥（只写不回显）",
-		onInput: (e) => setKeyApiKey(e.target.value)
-	}), (keyProvider === "volcengine_asr" || keyProvider === "volcengine_tts") && /* @__PURE__ */ k$1(M, null, /* @__PURE__ */ k$1("div", { class: "voice-two-col" }, /* @__PURE__ */ k$1("div", null, /* @__PURE__ */ k$1("label", { class: "voice-field-label" }, "AppID（可选替代）"), /* @__PURE__ */ k$1("input", {
-		class: "voice-field-input",
-		value: keyAppId,
-		placeholder: "火山语音 AppID",
-		onInput: (e) => setKeyAppId(e.target.value)
-	})), /* @__PURE__ */ k$1("div", null, /* @__PURE__ */ k$1("label", { class: "voice-field-label" }, "Access Token"), /* @__PURE__ */ k$1("input", {
-		type: "password",
-		class: "voice-field-input",
-		value: keyAccessToken,
-		placeholder: "火山 Access Token",
-		onInput: (e) => setKeyAccessToken(e.target.value)
-	}))), /* @__PURE__ */ k$1("label", { class: "voice-field-label" }, "Resource ID"), /* @__PURE__ */ k$1("input", {
-		class: "voice-field-input",
-		value: keyResourceId,
-		placeholder: keyProvider === "volcengine_asr" ? "volc.bigasr.auc_turbo" : "seed-tts-2.0",
-		onInput: (e) => setKeyResourceId(e.target.value)
-	})), /* @__PURE__ */ k$1("div", { class: "voice-two-col" }, /* @__PURE__ */ k$1("div", null, /* @__PURE__ */ k$1("label", { class: "voice-field-label" }, "默认模型（可选）"), /* @__PURE__ */ k$1("input", {
-		class: "voice-field-input",
-		value: keyDefaultModel,
-		placeholder: "留空则按方案指定",
-		onInput: (e) => setKeyDefaultModel(e.target.value)
-	})), /* @__PURE__ */ k$1("div", null, /* @__PURE__ */ k$1("label", { class: "voice-field-label" }, "默认音色（可选）"), /* @__PURE__ */ k$1("input", {
-		class: "voice-field-input",
-		value: keyDefaultVoice,
-		placeholder: "如 Kore / alloy / vv",
-		onInput: (e) => setKeyDefaultVoice(e.target.value)
-	}))), /* @__PURE__ */ k$1("button", {
-		type: "button",
-		class: "primary-block-btn",
-		disabled: savingKey,
-		onClick: () => void handleSaveCredential()
-	}, savingKey ? "正在加密保存…" : "🔐 加密存入密钥池"))), labTab === "bench" && /* @__PURE__ */ k$1("div", { class: "voice-tab-stack" }, /* @__PURE__ */ k$1("div", { class: "voice-card" }, /* @__PURE__ */ k$1("div", {
+		class: "voice-missing-key-cta",
+		style: "margin-top:8px;",
+		onClick: () => jumpToAddKey(activeMissingProviders[0])
+	}, /* @__PURE__ */ k$1("span", null, "⚠️ 当前方案缺少 ", activeMissingProviders.map((pr) => PROVIDER_DISPLAY_NAMES[pr] || pr).join("、"), " 密钥"), /* @__PURE__ */ k$1("span", null, "去 ① 添加 →")), /* @__PURE__ */ k$1("div", {
 		class: "voice-toggle-row",
-		style: "padding-top:0;border-top:none;"
-	}, /* @__PURE__ */ k$1("div", null, /* @__PURE__ */ k$1("div", { class: "voice-row-main" }, "🧪 试跑模式 (Dry-Run)"), /* @__PURE__ */ k$1("div", { class: "voice-row-sub" }, "完整跑通当前方案的模型与耗时打点，但绝不向电脑真实下发任何指令")), /* @__PURE__ */ k$1("input", {
+		style: "margin-top:8px;"
+	}, /* @__PURE__ */ k$1("div", null, /* @__PURE__ */ k$1("div", { class: "voice-row-main" }, "🧪 安全试跑模式 (Dry-Run)"), /* @__PURE__ */ k$1("div", { class: "voice-row-sub" }, "只测模型回复和语音播报速度，绝不会真的遥控你的电脑")), /* @__PURE__ */ k$1("input", {
 		type: "checkbox",
 		class: "voice-switch",
 		checked: benchDryRun,
 		onChange: (e) => setBenchDryRun(e.target.checked)
-	})), /* @__PURE__ */ k$1("div", {
-		class: "voice-muted-note",
-		style: "margin-top:6px;"
-	}, "当前被测方案：", /* @__PURE__ */ k$1("strong", null, activeProf.name)), /* @__PURE__ */ k$1("div", {
+	})), /* @__PURE__ */ k$1("label", { class: "voice-field-label" }, "快捷点一句测试口令"), /* @__PURE__ */ k$1("div", {
 		class: "voice-chip-row",
-		style: "margin-top:8px;"
+		style: "margin-top:0;"
 	}, [
 		"现在有哪些待审批和运行中的任务？",
 		"放行当前审批",
@@ -2940,7 +3412,7 @@ function VoiceCopilotSheets() {
 	].map((sample) => /* @__PURE__ */ k$1("button", {
 		key: sample,
 		type: "button",
-		class: "voice-quick-chip",
+		class: `voice-quick-chip ${benchText === sample ? "active" : ""}`,
 		onClick: () => setBenchText(sample)
 	}, sample))), /* @__PURE__ */ k$1("textarea", {
 		class: "voice-field-input",
@@ -2955,13 +3427,13 @@ function VoiceCopilotSheets() {
 		style: "margin-top:0;flex:1;",
 		disabled: benchRunning,
 		onClick: () => void runBenchTurn()
-	}, benchRunning ? "⏳ 跑分测试中…" : "🚀 跑一轮大脑 + 语音测速"), /* @__PURE__ */ k$1("button", {
+	}, benchRunning ? "⏳ 正在试跑测速…" : "🚀 测一轮回复与出声"), /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: `voice-pill-btn ${benchRecording ? "danger" : ""}`,
 		style: "padding:10px 12px;",
 		disabled: benchRunning,
 		onClick: () => void toggleBenchVoiceCapture()
-	}, benchRecording ? "⏹ 停止并测全链路" : "🎙️ 录真声"))), benchReport && /* @__PURE__ */ k$1("div", { class: "voice-card" }, /* @__PURE__ */ k$1("div", {
+	}, benchRecording ? "⏹ 停止并测试" : "🎙️ 录真声"))), benchReport && /* @__PURE__ */ k$1("div", { class: "voice-card" }, /* @__PURE__ */ k$1("div", {
 		class: "voice-card-title",
 		style: "margin-bottom:8px;"
 	}, "📊 实测耗时与结构化决策"), /* @__PURE__ */ k$1("div", { class: "voice-metrics-grid" }, benchReport.stt && /* @__PURE__ */ k$1("div", { class: "voice-metric-box" }, /* @__PURE__ */ k$1("div", { class: "voice-metric-k" }, "STT (", benchReport.stt.wavKb || 0, "KB)"), /* @__PURE__ */ k$1("div", { class: "voice-metric-v" }, benchReport.stt.latencyMs ?? 0, " ms")), benchReport.turn && /* @__PURE__ */ k$1("div", { class: "voice-metric-box" }, /* @__PURE__ */ k$1("div", { class: "voice-metric-k" }, "大脑 (", benchReport.turn.model || "-", ")"), /* @__PURE__ */ k$1("div", { class: "voice-metric-v" }, benchReport.turn.latencyMs ?? 0, " ms")), benchReport.tts && /* @__PURE__ */ k$1("div", { class: "voice-metric-box" }, /* @__PURE__ */ k$1("div", { class: "voice-metric-k" }, "TTS (", benchReport.tts.provider || "-", ")"), /* @__PURE__ */ k$1("div", { class: "voice-metric-v" }, benchReport.tts.latencyMs ?? 0, " ms"))), benchReport.turn?.spokenReply && /* @__PURE__ */ k$1("div", { class: "voice-bench-reply" }, /* @__PURE__ */ k$1("div", null, /* @__PURE__ */ k$1("strong", null, "口语回复："), benchReport.turn.spokenReply), benchReport.tts?.audioBase64 && /* @__PURE__ */ k$1("button", {
@@ -6051,11 +6523,25 @@ var EXACT_ZH_TO_EN = {
 	"随行耳机语音总管 & BYOK 模型池": "Walk Mode Voice Copilot & BYOK Model Pool",
 	"🎧 边走路边戴耳机控制所有 AI 任务": "🎧 Control All AI Tasks Hands-Free with Headphones",
 	"🎧 进入随行模式": "🎧 Open Walk Mode",
+	"① 密钥池": "① API Keys",
+	"② 方案与开关": "② Profiles",
+	"③ 测一测": "③ Test Lab",
+	"② 方案": "② Profiles",
+	"＋ 自定义混搭": "+ Custom Mix",
 	"⚙️ 方案与开关": "⚙️ Profiles & Switches",
 	"🔑 密钥池 (BYOK)": "🔑 Key Pool (BYOK)",
 	"🧪 调试台": "🧪 Voice Lab",
 	"🎙️ 随行语音总管 & BYOK 配置": "🎙️ Voice Copilot & BYOK Config",
 	"🎛️ 方案与开关": "🎛️ Profiles",
+	"添加 API 密钥": "Add API Key",
+	"使用密钥": "API Key to Use",
+	"方案名称（方便自己辨认）": "Profile Name",
+	"用哪家服务商听写": "Speech Recognition Provider",
+	"用哪家大模型思考": "Voice Brain LLM Provider",
+	"用哪家语音播报": "Voice Synthesis Provider",
+	"大模型名称（点下方标签可快填）": "Model Name (tap chips to fill)",
+	"一键启用 ›": "Enable ›",
+	"🚀 测一轮回复与出声": "🚀 Run Brain + Voice Test",
 	"⚙️ 配置": "⚙️ Config",
 	"退出 ✕": "Exit ✕",
 	"盲点开始说话": "Tap Anywhere to Talk",
@@ -17826,9 +18312,9 @@ function initHubController() {
                 </div>
                 <div style="display:flex;gap:8px;flex-wrap:wrap;">
                   <button class="pill-action-btn primary" onclick="openWalkMode()">🎧 进入随行模式</button>
-                  <button class="pill-action-btn" onclick="openVoiceLab('profiles')">⚙️ 方案与开关</button>
-                  <button class="pill-action-btn" onclick="openVoiceLab('keys')">🔑 密钥池 (BYOK)</button>
-                  <button class="pill-action-btn" onclick="openVoiceLab('bench')">🧪 调试台</button>
+                  <button class="pill-action-btn" onclick="openVoiceLab('keys')">① 密钥池</button>
+                  <button class="pill-action-btn" onclick="openVoiceLab('profiles')">② 方案与开关</button>
+                  <button class="pill-action-btn" onclick="openVoiceLab('bench')">③ 测一测</button>
                 </div>
               </div>
             </div>
