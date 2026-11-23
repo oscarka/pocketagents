@@ -4,6 +4,7 @@ import { BottomTabs } from './components/BottomTabs';
 import { TriageDeck } from './components/TriageDeck';
 import { ChatStage } from './components/ChatStage';
 import { Sheets } from './components/Sheets';
+import { VoiceCopilotSheets } from './components/VoiceCopilotSheets';
 
 const HARNESS_SVG_SPRITE = `<svg id="dshHarnessSvgDefs" width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
   <defs>
@@ -225,6 +226,9 @@ export function App() {
 
         {/* 6 大功能半屏抽屉 */}
         <Sheets />
+
+        {/* 随行耳机模式 + BYOK 语音配置调试台 */}
+        <VoiceCopilotSheets />
 
         {/* 悬浮回到底部按钮 (兼容测试与长对话阅读) */}
         <button

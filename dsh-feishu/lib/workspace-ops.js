@@ -108,7 +108,7 @@ function resolveStreamMime(ext, { download = false, isText = false } = {}) {
     }
     const base =
       docMime &&
-      (docMime.startsWith('text/') || docMime === 'application/json' || docMime === 'application/xml')
+        (docMime.startsWith('text/') || docMime === 'application/json' || docMime === 'application/xml')
         ? docMime
         : 'text/plain'
     return `${base}; charset=utf-8`
@@ -255,8 +255,8 @@ export function mergeTurnAssistantMessages(items) {
         : thoughtList.length === 1
           ? thoughtList[0]
           : thoughtList
-              .map((t, idx) => `【思考 ${idx + 1}】\n${t}`)
-              .join('\n\n')
+            .map((t, idx) => `【思考 ${idx + 1}】\n${t}`)
+            .join('\n\n')
     const textList = pendingAsst._texts.filter(Boolean)
     const combinedText = cleanForChat(textList.join('\n\n').trim(), 48000)
     const tools = pendingAsst._tools
@@ -335,11 +335,11 @@ export function mergeTurnAssistantMessages(items) {
       thinking: m.thinking && m.thinking.length > maxThink ? `${m.thinking.slice(0, maxThink)}\n...(历史思考已折叠)...` : m.thinking,
       tools: Array.isArray(m.tools)
         ? m.tools.slice(0, maxTools).map(t => ({
-            name: t.name || 'tool',
-            id: t.id || '',
-            summary: t.summary ? String(t.summary).slice(0, 160) : '',
-            commandLine: t.commandLine ? String(t.commandLine).slice(0, maxCmd) : '执行完毕',
-          }))
+          name: t.name || 'tool',
+          id: t.id || '',
+          summary: t.summary ? String(t.summary).slice(0, 160) : '',
+          commandLine: t.commandLine ? String(t.commandLine).slice(0, maxCmd) : '执行完毕',
+        }))
         : [],
     }
   })
@@ -655,7 +655,7 @@ export async function syncDshWorkspaceStorage(dshHome, activeSessions = [], prel
       try {
         const realWsPath = await resolveRealRoot(wsPath)
         if (realWsPath) wsByPath.set(realWsPath, [wsId, record])
-      } catch {}
+      } catch { }
     }
     if (Array.isArray(record.sessionIds)) {
       for (const sid of record.sessionIds) {
@@ -701,18 +701,18 @@ export async function syncDshWorkspaceStorage(dshHome, activeSessions = [], prel
       const wsTitle = basename(canonicalCwd) || canonicalCwd
       const newRecord = isV2Schema
         ? {
-            path: canonicalCwd,
-            title: wsTitle,
-            sessionIds: [sid],
-            createdAt: nowIso,
-            updatedAt: nowIso,
-          }
+          path: canonicalCwd,
+          title: wsTitle,
+          sessionIds: [sid],
+          createdAt: nowIso,
+          updatedAt: nowIso,
+        }
         : {
-            id: newWsId,
-            path: canonicalCwd,
-            sessionIds: [sid],
-            createdAt: Date.now(),
-          }
+          id: newWsId,
+          path: canonicalCwd,
+          sessionIds: [sid],
+          createdAt: Date.now(),
+        }
       workspacesTable[newWsId] = newRecord
       if (!raw.global || typeof raw.global !== 'object') {
         raw.global = { workspaceIds: [], archivedSessionIds: [], pinnedSessionIds: [] }
@@ -894,17 +894,17 @@ export function normalizeUserQuestionsList(rawQuestions) {
       const multiSelect = Boolean(q.multi_select ?? q.multiSelect)
       const options = Array.isArray(q.options)
         ? q.options
-            .map(o => {
-              if (typeof o === 'string') return { label: o.trim(), description: '' }
-              if (!o || typeof o !== 'object') return null
-              const label = String(o.label || o.title || '').trim()
-              if (!label) return null
-              return {
-                label,
-                description: String(o.description || o.desc || '').trim(),
-              }
-            })
-            .filter(Boolean)
+          .map(o => {
+            if (typeof o === 'string') return { label: o.trim(), description: '' }
+            if (!o || typeof o !== 'object') return null
+            const label = String(o.label || o.title || '').trim()
+            if (!label) return null
+            return {
+              label,
+              description: String(o.description || o.desc || '').trim(),
+            }
+          })
+          .filter(Boolean)
         : []
       return {
         id,
@@ -1029,10 +1029,10 @@ function extractRawPendingDshInteraction(lines = []) {
         typeof msg?.content === 'string'
           ? msg.content.trim()
           : blocks
-              .filter(b => b?.type === 'text' && typeof b.text === 'string')
-              .map(b => b.text)
-              .join('\n')
-              .trim()
+            .filter(b => b?.type === 'text' && typeof b.text === 'string')
+            .map(b => b.text)
+            .join('\n')
+            .trim()
       let isContinued =
         e.data?.error?.code === 'TOOL_OUTCOME_UNKNOWN' ||
         e.data?.outcome === 'TOOL_OUTCOME_UNKNOWN'
@@ -1042,7 +1042,7 @@ function extractRawPendingDshInteraction(lines = []) {
           if (parsedOut && parsedOut.pending === true) {
             isContinued = true
           }
-        } catch {}
+        } catch { }
       }
       if (isContinued && qEntry.toolName === 'ask_user_question') {
         qEntry.state = 'continued'
@@ -1081,10 +1081,10 @@ function extractRawPendingDshInteraction(lines = []) {
           typeof e.data?.content === 'string'
             ? e.data.content.trim()
             : blocks
-                .filter(b => b?.type === 'text' && typeof b.text === 'string')
-                .map(b => b.text)
-                .join('\n')
-                .trim()
+              .filter(b => b?.type === 'text' && typeof b.text === 'string')
+              .map(b => b.text)
+              .join('\n')
+              .trim()
         if (txt && !isSystemInjectedUserText(txt)) {
           questionsByCallId.clear()
           approvalsById.clear()
@@ -1118,8 +1118,7 @@ function materializePendingDshInteraction(
       const reason = q.questions
         .map(
           item =>
-            `${item.header ? `[${item.header}] ` : ''}${item.question}${
-              item.options?.length ? ` (${item.options.map(o => o.label).join(' / ')})` : ''
+            `${item.header ? `[${item.header}] ` : ''}${item.question}${item.options?.length ? ` (${item.options.map(o => o.label).join(' / ')})` : ''
             }`,
         )
         .join('；')
@@ -1196,7 +1195,7 @@ export async function upsertPendingDshInteraction(dshHome, entry) {
     await writeFile(file, JSON.stringify({ updatedAt: Date.now(), items: filtered }, null, 2), {
       mode: 0o600,
     })
-  } catch {}
+  } catch { }
 }
 
 export async function removePendingDshInteraction(dshHome, { code = '', callId = '', agentId = '' } = {}) {
@@ -1215,7 +1214,7 @@ export async function removePendingDshInteraction(dshHome, { code = '', callId =
         mode: 0o600,
       })
     }
-  } catch {}
+  } catch { }
 }
 
 export async function readPendingDshInteractionResponses(dshHome) {
@@ -1251,7 +1250,7 @@ export async function writePendingDshInteractionResponse(dshHome, respEntry) {
     await writeFile(file, JSON.stringify({ updatedAt: Date.now(), items: filtered }, null, 2), {
       mode: 0o600,
     })
-  } catch {}
+  } catch { }
 }
 
 export async function consumePendingDshInteractionResponse(
@@ -1351,7 +1350,7 @@ export async function loadDiskSessionsFromDshHome(
         try {
           await stat(join(projPath, sessEntry.name, 'session.lock'))
           hasLockNow = true
-        } catch {}
+        } catch { }
         const ageNow = Date.now() - fileStat.mtimeMs
         const isActivelyRunningNow =
           hasLockNow && (ageNow <= 6000 || (ageNow <= 45000 && !cachedEntry.hasConcluded))
@@ -1582,7 +1581,7 @@ export async function loadDiskSessionsFromDshHome(
         try {
           await stat(join(projPath, sessEntry.name, 'session.lock'))
           hasLock = true
-        } catch {}
+        } catch { }
         const ageMs = Date.now() - fileStat.mtimeMs
         const isActivelyRunning =
           hasLock && (ageMs <= 6000 || (ageMs <= 45000 && !hasConcluded))
@@ -1801,7 +1800,7 @@ export async function collectHostSystemTelemetry({
           capStr = await readFile(`/sys/class/power_supply/${batDir}/capacity`, 'utf8')
           statusStr = await readFile(`/sys/class/power_supply/${batDir}/status`, 'utf8')
           break
-        } catch {}
+        } catch { }
       }
       if (capStr) {
         const percent = Math.max(0, Math.min(100, Number(capStr.trim()) || 0))
@@ -1821,7 +1820,7 @@ export async function collectHostSystemTelemetry({
           shortLabel: `${percent}%${acPower ? '⚡' : ''}`,
         }
       }
-    } catch {}
+    } catch { }
   }
 
   // Hardware port mapping on macOS (e.g., en0 -> Wi-Fi, en5 -> LAN)
@@ -1838,7 +1837,7 @@ export async function collectHostSystemTelemetry({
           map.set(devMatch[1].trim(), portMatch[1].trim())
         }
       }
-    } catch {}
+    } catch { }
     cachedHwPortMap = map
     cachedHwPortMapAt = now
   }
@@ -1856,7 +1855,7 @@ export async function collectHostSystemTelemetry({
         primaryIface = m[1].trim()
         localIp = m[2].trim()
       }
-    } catch {}
+    } catch { }
   }
 
   try {
@@ -1875,7 +1874,7 @@ export async function collectHostSystemTelemetry({
         }
       }
     }
-  } catch {}
+  } catch { }
 
   const hwPortName = (cachedHwPortMap && primaryIface && cachedHwPortMap.get(primaryIface)) || ''
   let kind = 'network'
@@ -2076,6 +2075,47 @@ export async function deleteAgentSession(agents, agentId, dshHome = '') {
   return { ok: true, id, removedLive, removedDisk }
 }
 
+const SENSITIVE_HOST_SYSTEM_ROOT_RE = /^(?:\/etc|\/private\/etc|\/proc|\/sys|\/var\/lib\/dsh-hub)(?:\/|$)/i
+const SENSITIVE_HOST_DIR_SEGMENT_RE =
+  /(?:^|\/)(?:\.ssh|\.aws|\.gnupg|\.kube|Library\/Keychains|Library\/LaunchAgents|\.config\/(?:gcloud|gh|op|1password)|\.docker\/config\.json)(?:\/|$)/i
+const SENSITIVE_HOST_DSH_RE =
+  /(?:^|\/)\.dsh(?:$|\/(?:\.credentials\.yaml|feishu\.env|feishu-host\.json|hub-state\.json|dsh-hub-state\.json|hub-daemon\.log|headless-remote-patch\.yml|profiles|sessions|dsh-runtimes|storages|cache)(?:\/|$))/i
+const SENSITIVE_HOST_BASENAME_RE =
+  /^(?:\.credentials\.yaml|feishu\.env|feishu-host\.json|hub-state\.json|dsh-hub-state\.json|session\.v\d+\.jsonl\.zstd|id_rsa|id_ed25519|id_ecdsa|id_dsa|\.netrc|\.npmrc|\.pypirc|\.git-credentials|\.pgpass|\.my\.cnf)$/i
+const SENSITIVE_HOME_REL_RE =
+  /^\.(?:zshenv|zshrc|zprofile|zlogin|zlogout|zsh_history|bashrc|bash_profile|bash_history|profile|local\/bin\/env)$/i
+const SENSITIVE_RAW_STREAM_BASENAME_RE =
+  /^(?:\.env(?:\.(?!example$|sample$|template$|dist$)[^/]+)?|[^/]+\.env|.*\.(?:pem|key|p12|pfx|jks|keystore)|credentials\.json|service-account[^/]*\.json)$/i
+
+export function isSensitiveHostPath(targetPath = '', { isStream = false, homeRoot = '' } = {}) {
+  const norm = String(targetPath || '').replace(/\\/g, '/').replace(/\/{2,}/g, '/').replace(/\/+$/, '')
+  if (!norm) return false
+  if (
+    SENSITIVE_HOST_SYSTEM_ROOT_RE.test(norm) ||
+    SENSITIVE_HOST_DIR_SEGMENT_RE.test(norm) ||
+    SENSITIVE_HOST_DSH_RE.test(norm)
+  ) {
+    return true
+  }
+  const base = norm.split('/').pop() || ''
+  if (base && SENSITIVE_HOST_BASENAME_RE.test(base)) {
+    return true
+  }
+  const normHome = String(homeRoot || homedir() || '').replace(/\\/g, '/').replace(/\/+$/, '')
+  if (normHome && norm.toLowerCase().startsWith(`${normHome.toLowerCase()}/`)) {
+    const relFromHome = norm.slice(normHome.length + 1)
+    if (SENSITIVE_HOME_REL_RE.test(relFromHome)) {
+      return true
+    }
+  } else if (/^\/(?:Users|home)\/[^/]+\/\.(?:zshenv|zshrc|zprofile|zlogin|zlogout|zsh_history|bashrc|bash_profile|bash_history|profile|local\/bin\/env)$/i.test(norm)) {
+    return true
+  }
+  if (isStream && base && SENSITIVE_RAW_STREAM_BASENAME_RE.test(base)) {
+    return true
+  }
+  return false
+}
+
 /**
  * Read-only workspace directory listing (strictly confined inside workspace root).
  */
@@ -2083,18 +2123,23 @@ export async function listWorkspaceFiles(workspaceRoot, subDir = '') {
   try {
     if (!workspaceRoot) return { ok: false, error: '该任务未关联工作区目录' }
     const root = await resolveRealRoot(workspaceRoot)
+    const homeRoot = await resolveRealRoot(homedir())
     const cleanSub = String(subDir || '').replace(/^([/\\])+/, '').trim()
     if (cleanSub.startsWith('..') || cleanSub.includes(`..${sep}`) || cleanSub.includes('../')) {
       return { ok: false, error: '拒绝越界访问工作区以外的目录' }
     }
     const targetDir = cleanSub ? resolve(root, cleanSub) : root
     const realTarget = await resolveSafeTarget(root, targetDir)
+    if (isSensitiveHostPath(realTarget, { homeRoot })) {
+      return { ok: false, status: 403, error: '安全策略拦截：禁止远程浏览敏感凭证或系统密钥目录' }
+    }
 
     const dirEntries = await readdir(realTarget, { withFileTypes: true })
     const entries = []
     for (const entry of dirEntries) {
       if (IGNORED_DIRS.has(entry.name)) continue
       const fullPath = join(realTarget, entry.name)
+      if (isSensitiveHostPath(fullPath, { homeRoot })) continue
       let info
       try {
         info = await lstat(fullPath)
@@ -2105,6 +2150,7 @@ export async function listWorkspaceFiles(workspaceRoot, subDir = '') {
         try {
           const linked = await realpath(fullPath)
           if (linked !== root && !linked.startsWith(root + sep)) continue
+          if (isSensitiveHostPath(linked, { homeRoot })) continue
           info = await stat(linked)
         } catch {
           continue
@@ -2138,12 +2184,12 @@ export async function listWorkspaceFiles(workspaceRoot, subDir = '') {
   }
 }
 
-async function resolveWorkspaceOrArtifactFile(workspaceRoot, relPath = '', { extraRoots = [] } = {}) {
+async function resolveWorkspaceOrArtifactFile(workspaceRoot, relPath = '', { extraRoots = [], isStream = false } = {}) {
   const originalRel = String(relPath || '').trim()
   let cleanedInput = originalRel.replace(/^file:\/\//i, '').replace(/#L\d+(?:-L?\d+)?$/i, '').trim()
   try {
     if (cleanedInput.includes('%')) cleanedInput = decodeURIComponent(cleanedInput)
-  } catch {}
+  } catch { }
   if (cleanedInput.startsWith('~/')) {
     cleanedInput = join(homedir(), cleanedInput.slice(2))
   }
@@ -2153,6 +2199,7 @@ async function resolveWorkspaceOrArtifactFile(workspaceRoot, relPath = '', { ext
     return { ok: false, error: '拒绝越界访问工作区外部文件' }
   }
 
+  const homeRoot = await resolveRealRoot(homedir())
   const root = workspaceRoot ? await resolveRealRoot(workspaceRoot) : ''
   let realFile = ''
   if (cleanedInput.startsWith('/')) {
@@ -2167,7 +2214,6 @@ async function resolveWorkspaceOrArtifactFile(workspaceRoot, relPath = '', { ext
       ...extraResolved,
       await resolveRealRoot(join(homedir(), '.gemini', 'antigravity', 'brain')),
       await resolveRealRoot(join(homedir(), '.gemini', 'antigravity-ide', 'brain')),
-      await resolveRealRoot(join(homedir(), '.dsh')),
     ].filter(Boolean)
     let matchedRoot = null
     for (const ar of allowedArtifactRoots) {
@@ -2245,6 +2291,9 @@ async function resolveWorkspaceOrArtifactFile(workspaceRoot, relPath = '', { ext
   }
   if (!info.isFile()) {
     return { ok: false, error: '目标路径不是普通文件' }
+  }
+  if (isSensitiveHostPath(realFile, { isStream, homeRoot })) {
+    return { ok: false, status: 403, error: '安全策略拦截：禁止远程读取敏感凭证或系统密钥文件' }
   }
   return {
     ok: true,
@@ -2397,13 +2446,13 @@ async function pruneMediaCacheDir(cacheDir, maxFiles = MAX_MEDIA_CACHE_FILES) {
       try {
         const st = await stat(p)
         if (st.isFile()) items.push({ p, mtimeMs: st.mtimeMs })
-      } catch {}
+      } catch { }
     }
     items.sort((a, b) => b.mtimeMs - a.mtimeMs)
     for (const old of items.slice(maxFiles)) {
-      await rm(old.p, { force: true }).catch(() => {})
+      await rm(old.p, { force: true }).catch(() => { })
     }
-  } catch {}
+  } catch { }
 }
 
 async function getOrCreateSmartThumbnail(
@@ -2429,7 +2478,7 @@ async function getOrCreateSmartThumbnail(
     if (cachedInfo.isFile() && cachedInfo.size > 0) {
       return { filePath: outPath, size: cachedInfo.size, mime: 'image/jpeg' }
     }
-  } catch {}
+  } catch { }
 
   return withSingleFlightMediaJob(`thumb:${key}`, async () => {
     try {
@@ -2437,7 +2486,7 @@ async function getOrCreateSmartThumbnail(
       if (cachedInfo.isFile() && cachedInfo.size > 0) {
         return { filePath: outPath, size: cachedInfo.size, mime: 'image/jpeg' }
       }
-    } catch {}
+    } catch { }
 
     let dims = null
     try {
@@ -2450,7 +2499,7 @@ async function getOrCreateSmartThumbnail(
       } finally {
         await fh.close()
       }
-    } catch {}
+    } catch { }
 
     await mkdir(cacheDir, { recursive: true })
     const tmpOut = join(cacheDir, `${key}.tmp-${randomBytes(3).toString('hex')}.jpg`)
@@ -2474,14 +2523,14 @@ async function getOrCreateSmartThumbnail(
       await execImpl('/usr/bin/sips', sipsArgs, { timeout: 8000 })
       const outInfo = await stat(tmpOut)
       if (!outInfo.isFile() || outInfo.size === 0 || (!isHeic && outInfo.size >= info.size)) {
-        await rm(tmpOut, { force: true }).catch(() => {})
+        await rm(tmpOut, { force: true }).catch(() => { })
         return null
       }
       await rename(tmpOut, outPath)
       void pruneMediaCacheDir(cacheDir)
       return { filePath: outPath, size: outInfo.size, mime: 'image/jpeg' }
     } catch {
-      await rm(tmpOut, { force: true }).catch(() => {})
+      await rm(tmpOut, { force: true }).catch(() => { })
       return null
     }
   })
@@ -2805,7 +2854,7 @@ async function getOrCreateFastRemuxMp4(
       if (cachedInfo.isFile() && cachedInfo.size > 0) {
         return { filePath: outPath, size: cachedInfo.size, mime: 'video/mp4' }
       }
-    } catch {}
+    } catch { }
 
     await mkdir(cacheDir, { recursive: true })
     const tmpOut = join(cacheDir, `${key}.tmp-${randomBytes(3).toString('hex')}.mp4`)
@@ -2817,14 +2866,14 @@ async function getOrCreateFastRemuxMp4(
       )
       const outInfo = await stat(tmpOut)
       if (!outInfo.isFile() || outInfo.size === 0) {
-        await rm(tmpOut, { force: true }).catch(() => {})
+        await rm(tmpOut, { force: true }).catch(() => { })
         return null
       }
       await rename(tmpOut, outPath)
       void pruneMediaCacheDir(cacheDir)
       return { filePath: outPath, size: outInfo.size, mime: 'video/mp4' }
     } catch {
-      await rm(tmpOut, { force: true }).catch(() => {})
+      await rm(tmpOut, { force: true }).catch(() => { })
       return null
     }
   })
@@ -2848,7 +2897,7 @@ async function getOrCreateFastPreviewMp4(
       if (cachedInfo.isFile() && cachedInfo.size > 0) {
         return { filePath: outPath, size: cachedInfo.size, mime: 'video/mp4' }
       }
-    } catch {}
+    } catch { }
 
     await mkdir(cacheDir, { recursive: true })
     const tmpOut = join(cacheDir, `${key}.tmp-${randomBytes(3).toString('hex')}.mp4`)
@@ -2889,7 +2938,7 @@ async function getOrCreateFastPreviewMp4(
         )
         converted = true
       } catch {
-        await rm(tmpOut, { force: true }).catch(() => {})
+        await rm(tmpOut, { force: true }).catch(() => { })
       }
     }
 
@@ -2929,25 +2978,25 @@ async function getOrCreateFastPreviewMp4(
         )
         converted = true
       } catch {
-        await rm(tmpOut, { force: true }).catch(() => {})
+        await rm(tmpOut, { force: true }).catch(() => { })
       }
     }
 
     if (!converted) {
-      await rm(tmpOut, { force: true }).catch(() => {})
+      await rm(tmpOut, { force: true }).catch(() => { })
       return null
     }
     try {
       const outInfo = await stat(tmpOut)
       if (!outInfo.isFile() || outInfo.size === 0 || outInfo.size >= info.size * 0.9) {
-        await rm(tmpOut, { force: true }).catch(() => {})
+        await rm(tmpOut, { force: true }).catch(() => { })
         return null
       }
       await rename(tmpOut, outPath)
       void pruneMediaCacheDir(cacheDir)
       return { filePath: outPath, size: outInfo.size, mime: 'video/mp4' }
     } catch {
-      await rm(tmpOut, { force: true }).catch(() => {})
+      await rm(tmpOut, { force: true }).catch(() => { })
       return null
     }
   })
@@ -2971,7 +3020,7 @@ async function getOrCreateCompatibleMp4(
       if (cachedInfo.isFile() && cachedInfo.size > 0) {
         return { filePath: outPath, size: cachedInfo.size, mime: 'video/mp4' }
       }
-    } catch {}
+    } catch { }
 
     await mkdir(cacheDir, { recursive: true })
     const tmpOut = join(cacheDir, `${key}.tmp-${randomBytes(3).toString('hex')}.mp4`)
@@ -3009,7 +3058,7 @@ async function getOrCreateCompatibleMp4(
         )
         converted = true
       } catch {
-        await rm(tmpOut, { force: true }).catch(() => {})
+        await rm(tmpOut, { force: true }).catch(() => { })
       }
     }
 
@@ -3046,7 +3095,7 @@ async function getOrCreateCompatibleMp4(
         )
         converted = true
       } catch {
-        await rm(tmpOut, { force: true }).catch(() => {})
+        await rm(tmpOut, { force: true }).catch(() => { })
       }
     }
 
@@ -3060,25 +3109,25 @@ async function getOrCreateCompatibleMp4(
         )
         converted = true
       } catch {
-        await rm(tmpOut, { force: true }).catch(() => {})
+        await rm(tmpOut, { force: true }).catch(() => { })
       }
     }
 
     if (!converted) {
-      await rm(tmpOut, { force: true }).catch(() => {})
+      await rm(tmpOut, { force: true }).catch(() => { })
       return null
     }
     try {
       const outInfo = await stat(tmpOut)
       if (!outInfo.isFile() || outInfo.size === 0) {
-        await rm(tmpOut, { force: true }).catch(() => {})
+        await rm(tmpOut, { force: true }).catch(() => { })
         return null
       }
       await rename(tmpOut, outPath)
       void pruneMediaCacheDir(cacheDir)
       return { filePath: outPath, size: outInfo.size, mime: 'video/mp4' }
     } catch {
-      await rm(tmpOut, { force: true }).catch(() => {})
+      await rm(tmpOut, { force: true }).catch(() => { })
       return null
     }
   })
@@ -3229,8 +3278,8 @@ export async function prepareWorkspaceFileStream(
     platform = process.platform,
   } = {},
 ) {
-  const resolved = await resolveWorkspaceOrArtifactFile(workspaceRoot, relPath, { extraRoots })
-  if (!resolved.ok) return { ok: false, status: 404, error: resolved.error }
+  const resolved = await resolveWorkspaceOrArtifactFile(workspaceRoot, relPath, { extraRoots, isStream: true })
+  if (!resolved.ok) return { ok: false, status: resolved.status || 404, error: resolved.error }
   const { realFile, info, ext, name } = resolved
 
   let streamFile = realFile
@@ -3749,7 +3798,7 @@ export async function persistCommandAttachments(
         const gitignorePath = join(wsUploadDir, '.gitignore')
         try {
           await writeFile(gitignorePath, '*\n', { flag: 'wx' })
-        } catch {}
+        } catch { }
         const candidate = join(wsUploadDir, fileName)
         await writeFile(candidate, buf, { mode: 0o600 })
         primaryPath = candidate

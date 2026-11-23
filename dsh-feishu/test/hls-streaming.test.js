@@ -87,9 +87,14 @@ test('HLS VOD playlist builder & end-to-end Hub /fs/hls/index.m3u8 + seg_00000.t
     try {
       const mt = hub.getFullState().mediaTicket
 
-      // 1) /fs/read reports hlsAvailable: true
-      const readRes = await fetchAdapter(
+      // 1) /fs/read rejects mediaTicket-only auth and succeeds with Admin HUB_TOKEN reporting hlsAvailable: true
+      const unauthReadWithMt = await fetchAdapter(
         `http://hub.local/api/hosts/linux-box/fs/read?path=render_demo.mp4&cwd=${encodeURIComponent(wsDir)}&mt=${encodeURIComponent(mt)}`,
+      )
+      assert.equal(unauthReadWithMt.status, 401)
+      const readRes = await fetchAdapter(
+        `http://hub.local/api/hosts/linux-box/fs/read?path=render_demo.mp4&cwd=${encodeURIComponent(wsDir)}`,
+        { headers: { authorization: 'Bearer hls-hub-token' } },
       )
       assert.equal(readRes.status, 200)
       const readJson = await readRes.json()

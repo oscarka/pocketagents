@@ -3725,7 +3725,7 @@ test('Fast FS Tunnel & Mobile Media Streaming (Plan 1 + Plan 2): HTTP 206 Range 
     assert.match(stateJson.mediaTicket || '', /^mt1\.\d+\.[A-Za-z0-9_-]+$/)
     const mt = stateJson.mediaTicket
 
-    // Rejects mediaTicket on admin/write endpoints!
+    // Rejects mediaTicket on admin/write AND directory-list/file-read endpoints!
     const forbiddenCmd = await fetchAdapter(`http://hub.local/api/hosts/mac-studio/command?mt=${encodeURIComponent(mt)}`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -3734,10 +3734,19 @@ test('Fast FS Tunnel & Mobile Media Streaming (Plan 1 + Plan 2): HTTP 206 Range 
     assert.equal(forbiddenCmd.status, 401)
     const forbiddenState = await fetchAdapter(`http://hub.local/api/state?mt=${encodeURIComponent(mt)}`)
     assert.equal(forbiddenState.status, 401)
+    const forbiddenListWithMt = await fetchAdapter(
+      `http://hub.local/api/hosts/mac-studio/fs/list?path=assets&cwd=${encodeURIComponent(wsDir)}&mt=${encodeURIComponent(mt)}`,
+    )
+    assert.equal(forbiddenListWithMt.status, 401)
+    const forbiddenReadWithMt = await fetchAdapter(
+      `http://hub.local/api/hosts/mac-studio/fs/read?path=${encodeURIComponent(wtPath)}&cwd=${encodeURIComponent(wsDir)}&mt=${encodeURIComponent(mt)}`,
+    )
+    assert.equal(forbiddenReadWithMt.status, 401)
 
     // 5. Walkthrough prewarm hits Hub hotCache in 0ms WITHOUT needing another hostAgent.tick()!
     const wtReadRes = await fetchAdapter(
-      `http://hub.local/api/hosts/mac-studio/fs/read?path=${encodeURIComponent(wtPath)}&cwd=${encodeURIComponent(wsDir)}&mt=${encodeURIComponent(mt)}`,
+      `http://hub.local/api/hosts/mac-studio/fs/read?path=${encodeURIComponent(wtPath)}&cwd=${encodeURIComponent(wsDir)}`,
+      { headers: { authorization: 'Bearer master-secret-999' } },
     )
     assert.equal(wtReadRes.status, 200)
     const wtReadJson = await wtReadRes.json()
@@ -3745,9 +3754,10 @@ test('Fast FS Tunnel & Mobile Media Streaming (Plan 1 + Plan 2): HTTP 206 Range 
     assert.equal(wtReadJson.hotCache, true)
     assert.match(wtReadJson.content, /Walkthrough Prewarmed/)
 
-    // 6. Fast FS list & video read & HTTP 206 Partial Content Range streaming
+    // 6. Fast FS list & video read (Admin HUB_TOKEN) & HTTP 206 Partial Content Range streaming (mediaTicket)
     const listPromise = fetchAdapter(
-      `http://hub.local/api/hosts/mac-studio/fs/list?path=assets&cwd=${encodeURIComponent(wsDir)}&mt=${encodeURIComponent(mt)}`,
+      `http://hub.local/api/hosts/mac-studio/fs/list?path=assets&cwd=${encodeURIComponent(wsDir)}`,
+      { headers: { authorization: 'Bearer master-secret-999' } },
     )
     await new Promise(r => setTimeout(r, 15))
     await hostAgent.tick()
@@ -3758,7 +3768,8 @@ test('Fast FS Tunnel & Mobile Media Streaming (Plan 1 + Plan 2): HTTP 206 Range 
     assert.ok(listJson.entries.some(e => e.name === 'demo.mp4'))
 
     const videoMetaPromise = fetchAdapter(
-      `http://hub.local/api/hosts/mac-studio/fs/read?path=${encodeURIComponent('assets/demo.mp4')}&cwd=${encodeURIComponent(wsDir)}&mt=${encodeURIComponent(mt)}`,
+      `http://hub.local/api/hosts/mac-studio/fs/read?path=${encodeURIComponent('assets/demo.mp4')}&cwd=${encodeURIComponent(wsDir)}`,
+      { headers: { authorization: 'Bearer master-secret-999' } },
     )
     await new Promise(r => setTimeout(r, 15))
     await hostAgent.tick()
@@ -5854,12 +5865,12 @@ test('v0.6.8: sandboxed mobile HTML live preview, relative mt asset rewriting, C
     meta: { ok: true, name: 'app.js', mime: 'text/javascript; charset=utf-8', etag: '"v1"' },
     buffer: Buffer.from('console.log("sandbox ok")', 'utf8'),
   })
-  const mediaTicket = hub.getFullState().mediaTicket
   const { fetchAdapter } = createHubServer({
     hub,
     token: 'admin-secret-token-v068',
     requireToken: true,
   })
+  const mediaTicket = hub.getFullState().mediaTicket
 
   const mtRes = await fetchAdapter(
     `https://dsh-hub.example.run.app/api/hosts/mac-html/fs/stream?path=app.js&mt=${encodeURIComponent(mediaTicket)}`,

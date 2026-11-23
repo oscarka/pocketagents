@@ -30,31 +30,31 @@
 })();
 // node_modules/.pnpm/preact@11.1.1/node_modules/preact/dist/preact.mjs
 var n;
-var t;
-var i;
-var u;
-var f;
-var e;
-var o;
-var l;
-var c;
-var a;
-var h = Symbol.for("pv");
-var p = {};
-var v = [];
-var y = /^m(i|n|o|s|text|space)$/;
-var w = Array.isArray;
-var d = v.slice;
-var _ = Object.assign;
-function g(n) {
+var t$1;
+var i$1;
+var u$1;
+var f$1;
+var e$1;
+var o$1;
+var l$1;
+var c$1;
+var a$1;
+var h$1 = Symbol.for("pv");
+var p$1 = {};
+var v$1 = [];
+var y$1 = /^m(i|n|o|s|text|space)$/;
+var w$1 = Array.isArray;
+var d$1 = v$1.slice;
+var _$1 = Object.assign;
+function g$1(n) {
 	n && n.parentNode && n.remove();
 }
-function k(n, t, r) {
+function k$1(n, t, r) {
 	var i, u, f, e = {}, o = arguments.length;
 	for (f in t) "key" == f ? i = t[f] : "ref" == f && "function" != typeof n ? u = t[f] : e[f] = t[f];
-	return o > 2 && (e.children = o > 3 ? d.call(arguments, 2) : r), m(n, e, i, u, null);
+	return o > 2 && (e.children = o > 3 ? d$1.call(arguments, 2) : r), m$1(n, e, i, u, null);
 }
-function m(r, i, u, f, e) {
+function m$1(r, i, u, f, e) {
 	var o = {
 		type: r,
 		props: i,
@@ -65,8 +65,8 @@ function m(r, i, u, f, e) {
 		__b: 0,
 		__e: null,
 		__c: null,
-		constructor: h,
-		__v: e || ++t,
+		constructor: h$1,
+		__v: e || ++t$1,
 		__i: -1,
 		__u: 0
 	};
@@ -83,30 +83,30 @@ function S(n, t) {
 	for (var r; t < n.__k.length; t++) if ((r = n.__k[t]) && r.__e) return r.__e;
 	return "function" != typeof n.type || n.props.__P ? null : S(n);
 }
-function C(n) {
+function C$1(n) {
 	if ((n = n.__) && n.__c && !n.props.__P) return n.__e = null, n.__k.some(function(t) {
 		return t && (n.__e = t.__e);
-	}), C(n);
+	}), C$1(n);
 }
 function j(t) {
-	(8 & t.__g || (t.__g |= 8, i.push(t), f++)) && u == n.debounceRendering || ((u = n.debounceRendering) || queueMicrotask)(L);
+	(8 & t.__g || (t.__g |= 8, i$1.push(t), f$1++)) && u$1 == n.debounceRendering || ((u$1 = n.debounceRendering) || queueMicrotask)(L);
 }
 function L() {
 	var t, r, o, l, c, a, s, p, v;
 	try {
-		for (r = 1; i.length;) i.length > r && i.sort(e), t = i.shift(), r = i.length, 8 & t.__g && (l = void 0, c = void 0, a = (c = (o = t).__v).__e, s = [], p = [], (v = o.__P) && ((l = _({ constructor: h }, c)).__v = c.__v + 1, n.vnode && n.vnode(l), V(v, l, c, o.__n, v.namespaceURI, 32 & c.__u ? [a] : null, s, a || S(c), 32 & c.__u, p), l.__v = c.__v, l.__.__k[l.__i] = l, D(s, l, p), c.__ = c.__e = null, l.__e != a && C(l)));
+		for (r = 1; i$1.length;) i$1.length > r && i$1.sort(e$1), t = i$1.shift(), r = i$1.length, 8 & t.__g && (l = void 0, c = void 0, a = (c = (o = t).__v).__e, s = [], p = [], (v = o.__P) && ((l = _$1({ constructor: h$1 }, c)).__v = c.__v + 1, n.vnode && n.vnode(l), V(v, l, c, o.__n, v.namespaceURI, 32 & c.__u ? [a] : null, s, a || S(c), 32 & c.__u, p), l.__v = c.__v, l.__.__k[l.__i] = l, D$1(s, l, p), c.__ = c.__e = null, l.__e != a && C$1(l)));
 	} finally {
-		(f = i.length) && (u || queueMicrotask)(L);
+		(f$1 = i$1.length) && (u$1 || queueMicrotask)(L);
 	}
 }
 function H(n, t, r, i, u, f, e, o, l, c, a) {
-	var s, h, y, w, d, _, g = i.__k || v, k = t.length;
-	for (l = I(r, t, g, l, k), s = 0; s < k; s++) null != (y = r.__k[s]) && (h = ~y.__i && g[y.__i] || p, y.__i = s, _ = V(n, y, h, u, f, e, o, l, c, a), w = y.__e, (h.ref != y.ref || 8 & h.__u) && (h.ref && F(h.ref, null, y, h), y.ref && a.push(y.ref, y.__c || w, y)), d = d || w, 4 & y.__u ? (l = q(y, l, n, !h.__v), h.__e && (h.__e = null)) : "function" == typeof y.type && void 0 !== _ ? l = _ : w && (l = w.nextSibling), y.__u &= -21);
+	var s, h, y, w, d, _, g = i.__k || v$1, k = t.length;
+	for (l = I(r, t, g, l, k), s = 0; s < k; s++) null != (y = r.__k[s]) && (h = ~y.__i && g[y.__i] || p$1, y.__i = s, _ = V(n, y, h, u, f, e, o, l, c, a), w = y.__e, (h.ref != y.ref || 8 & h.__u) && (h.ref && F(h.ref, null, y, h), y.ref && a.push(y.ref, y.__c || w, y)), d = d || w, 4 & y.__u ? (l = q(y, l, n, !h.__v), h.__e && (h.__e = null)) : "function" == typeof y.type && void 0 !== _ ? l = _ : w && (l = w.nextSibling), y.__u &= -21);
 	return r.__e = d, l;
 }
 function I(n, t, r, i, u) {
 	var f, e, o, l, c, a, s, p, v, y = r.length, d = y, _ = 0, g = 0, k = n.__k = Array(u);
-	for (f = 0; f < u; f++) null != (e = t[f]) && "boolean" != typeof e && "function" != typeof e ? ("object" != typeof e || e.constructor === String ? e = k[f] = m(null, e) : w(e) ? e = k[f] = m(M, { children: e }) : e.constructor === h && e.__b ? e = k[f] = m(e.type, e.props, e.key, e.ref, e.__v) : k[f] = e, l = f + _, e.__ = n, e.__b = n.__b + 1, o = null, ~(c = e.__i = O(e, r, l, d)) && (d--, (o = r[c]) && (o.__u |= 2)), o && o.__v ? (e.__u |= 16, c == l - 1 ? _-- : c == l + 1 ? _++ : c != l && (c > l ? _-- : _++, g = 1)) : (~c || (u > y ? _-- : u < y && _++), "function" != typeof e.type && (e.__u |= 4))) : k[f] = null;
+	for (f = 0; f < u; f++) null != (e = t[f]) && "boolean" != typeof e && "function" != typeof e ? ("object" != typeof e || e.constructor === String ? e = k[f] = m$1(null, e) : w$1(e) ? e = k[f] = m$1(M, { children: e }) : e.constructor === h$1 && e.__b ? e = k[f] = m$1(e.type, e.props, e.key, e.ref, e.__v) : k[f] = e, l = f + _, e.__ = n, e.__b = n.__b + 1, o = null, ~(c = e.__i = O(e, r, l, d)) && (d--, (o = r[c]) && (o.__u |= 2)), o && o.__v ? (e.__u |= 16, c == l - 1 ? _-- : c == l + 1 ? _++ : c != l && (c > l ? _-- : _++, g = 1)) : (~c || (u > y ? _-- : u < y && _++), "function" != typeof e.type && (e.__u |= 4))) : k[f] = null;
 	if (g) {
 		for (a = [], s = [], f = 0; f < u; f++) if ((e = k[f]) && 16 & e.__u) {
 			for (_ = 0, p = a.length; _ < p;) a[v = _ + p >> 1] < e.__i ? _ = v + 1 : p = v;
@@ -114,7 +114,7 @@ function I(n, t, r, i, u) {
 		}
 		for (_ = a.length; f--;) s[f] && (s[f] == _ ? _-- : k[f].__u |= 4);
 	}
-	if (d) for (f = 0; f < y; f++) !(o = r[f]) || 2 & o.__u || (o.__e == i && (i = S(o)), G(o, o));
+	if (d) for (f = 0; f < y; f++) !(o = r[f]) || 2 & o.__u || (o.__e == i && (i = S(o)), G$1(o, o));
 	return i;
 }
 function q(n, t, r, i) {
@@ -140,14 +140,14 @@ function O(n, t, r, i) {
 function P(n, t, r) {
 	r ??= "", "-" == t[0] ? n.setProperty(t, r) : n[t] = r;
 }
-function T(n, t, r, i, u) {
+function T$1(n, t, r, i, u) {
 	var f, e;
 	if ("style" == t) if ("string" == typeof r) n.style.cssText = r;
 	else {
 		if ("string" == typeof i && (n.style.cssText = i = ""), i) for (t in i) r && t in r || P(n.style, t);
 		if (r) for (t in r) i && r[t] == i[t] || P(n.style, t, r[t]);
 	}
-	else if ("o" == t[0] && "n" == t[1]) (n.__e || (n.__e = {}))[t] = r, r && i || (e = a[t] || (a[t] = N(t)), (n.__a || (n.__a = {}))[t] = c, f = t != (t = t.replace(l, "$1")), (t = t.slice(2))[0] < "a" && (t = t.toLowerCase()), r ? n.addEventListener(t, e, f) : n.removeEventListener(t, e, f));
+	else if ("o" == t[0] && "n" == t[1]) (n.__e || (n.__e = {}))[t] = r, r && i || (e = a$1[t] || (a$1[t] = N(t)), (n.__a || (n.__a = {}))[t] = c$1, f = t != (t = t.replace(l$1, "$1")), (t = t.slice(2))[0] < "a" && (t = t.toLowerCase()), r ? n.addEventListener(t, e, f) : n.removeEventListener(t, e, f));
 	else {
 		if ("http://www.w3.org/2000/svg" == u) t = t.replace(/xlink(H|:h)/, "h").replace(/sName$/, "s");
 		else if ("width" != t && "height" != t && "href" != t && "list" != t && "form" != t && "tabIndex" != t && "download" != t && "rowSpan" != t && "colSpan" != t && "role" != t && "popover" != t && t in n) try {
@@ -162,37 +162,37 @@ function N(t) {
 	return function(r) {
 		var i = this.__e;
 		if (i) {
-			if (i = i[t], null == r[o]) r[o] = c++;
-			else if (r[o] < this.__a[t]) return;
+			if (i = i[t], null == r[o$1]) r[o$1] = c$1++;
+			else if (r[o$1] < this.__a[t]) return;
 			return i(n.event ? n.event(r) : r);
 		}
 	};
 }
 function V(t, r, i, u, f, e, o, l, c, a) {
 	var s, p, y, d, k, b, m, $, C, j, L, I, q, A, O, P, T, N, V = r.type;
-	if (r.constructor !== h) return null;
-	128 & i.__u && (c = 32 & i.__u, s = i.__c.__z) && (r.__u |= c, p = e = [], 8 == s.nodeType ? l = z(s, e) : e.push(s), l = e[0] || l), (s = n.__b) && s(r);
+	if (r.constructor !== h$1) return null;
+	128 & i.__u && (c = 32 & i.__u, s = i.__c.__z) && (r.__u |= c, p = e = [], 8 == s.nodeType ? l = z$1(s, e) : e.push(s), l = e[0] || l), (s = n.__b) && s(r);
 	n: if ("function" == typeof V) {
 		y = o.length;
 		try {
-			if ($ = r.props, C = (s = V.prototype) && s.render, j = (s = V.contextType) && u[s.__c], L = s ? j ? j.props.value : s.__ : u, (d = i.__c) ? (r.__c = d, 2 & d.__g && (d.__g |= 1)) : (C ? r.__c = d = new V($, L) : (r.__c = d = new x($, L), d.constructor = V, d.render = J), j && j.sub(d), d.state || (d.state = {}), d.__n = u, d.__g |= 8, d.__h = [], d.__k = []), C && (d.__s || (d.__s = d.state), V.getDerivedStateFromProps && (d.__s == d.state && (d.__s = _({}, d.__s)), _(d.__s, V.getDerivedStateFromProps($, d.__s)))), k = d.props, b = d.state, d.__v = r, i.__c) {
+			if ($ = r.props, C = (s = V.prototype) && s.render, j = (s = V.contextType) && u[s.__c], L = s ? j ? j.props.value : s.__ : u, (d = i.__c) ? (r.__c = d, 2 & d.__g && (d.__g |= 1)) : (C ? r.__c = d = new V($, L) : (r.__c = d = new x($, L), d.constructor = V, d.render = J), j && j.sub(d), d.state || (d.state = {}), d.__n = u, d.__g |= 8, d.__h = [], d.__k = []), C && (d.__s || (d.__s = d.state), V.getDerivedStateFromProps && (d.__s == d.state && (d.__s = _$1({}, d.__s)), _$1(d.__s, V.getDerivedStateFromProps($, d.__s)))), k = d.props, b = d.state, d.__v = r, i.__c) {
 				if ($ !== k && C && !V.getDerivedStateFromProps && d.componentWillReceiveProps && d.componentWillReceiveProps($, L), r.__v == i.__v && !(8 & d.__g) || !(4 & d.__g) && d.shouldComponentUpdate && !1 === d.shouldComponentUpdate($, d.__s, L)) {
 					r.__v != i.__v && (d.props = $, d.state = d.__s, d.__g &= -9), r.__e = i.__e, r.__k = i.__k, r.__k.some(function(n) {
 						n && (n.__ = r);
-					}), v.push.apply(d.__h, d.__k), d.__k = [], d.__h.length && o.push(d), l = S(i);
+					}), v$1.push.apply(d.__h, d.__k), d.__k = [], d.__h.length && o.push(d), l = S(i);
 					break n;
 				}
 				d.componentWillUpdate && d.componentWillUpdate($, d.__s, L), C && d.componentDidUpdate && d.__h.push(function() {
 					d.componentDidUpdate(k, b, m);
 				});
 			} else C && !V.getDerivedStateFromProps && d.componentWillMount && d.componentWillMount(), C && d.componentDidMount && d.__h.push(d.componentDidMount);
-			if (d.context = L, d.props = $, d.__P = t, d.__g &= -5, I = n.__r, q = 0, C) d.state = d.__s, d.__g &= -9, I && I(r), s = d.render(d.props, d.state, d.context), v.push.apply(d.__h, d.__k), d.__k = [];
+			if (d.context = L, d.props = $, d.__P = t, d.__g &= -5, I = n.__r, q = 0, C) d.state = d.__s, d.__g &= -9, I && I(r), s = d.render(d.props, d.state, d.context), v$1.push.apply(d.__h, d.__k), d.__k = [];
 			else do
 				d.__g &= -9, I && I(r), s = d.render(d.props, d.state, d.context), d.state = d.__s;
 			while (8 & d.__g && ++q < 25);
-			d.state = d.__s, d.getChildContext && (u = _({}, u, d.getChildContext())), C && i.__c && d.getSnapshotBeforeUpdate && (m = d.getSnapshotBeforeUpdate(k, b)), A = s && s.type === M && null == s.key ? s.props.children : s, $.__P && (s = l, f = (t = $.__P).namespaceURI, c = e = null, i.props && i.props.__P != t && (i.__k.some(function(n) {
-				n && G(n, n);
-			}), i.__k = null), l = i.__k ? S(i, 0) : null), l = H(t, w(A) ? A : [A], r, i, u, f, e, o, l, c, a), $.__P && (r.__e = null, l = s), r.__u &= -161, p && p.some(g), d.__h.length && o.push(d), 1 & d.__g && (d.__g &= -4);
+			d.state = d.__s, d.getChildContext && (u = _$1({}, u, d.getChildContext())), C && i.__c && d.getSnapshotBeforeUpdate && (m = d.getSnapshotBeforeUpdate(k, b)), A = s && s.type === M && null == s.key ? s.props.children : s, $.__P && (s = l, f = (t = $.__P).namespaceURI, c = e = null, i.props && i.props.__P != t && (i.__k.some(function(n) {
+				n && G$1(n, n);
+			}), i.__k = null), l = i.__k ? S(i, 0) : null), l = H(t, w$1(A) ? A : [A], r, i, u, f, e, o, l, c, a), $.__P && (r.__e = null, l = s), r.__u &= -161, p && p.some(g$1), d.__h.length && o.push(d), 1 & d.__g && (d.__g &= -4);
 		} catch (t) {
 			if (o.length = y, r.__v = null, c || e) if (t.then) {
 				if (O = 0, r.__u |= 128 | c, e) {
@@ -208,15 +208,15 @@ function V(t, r, i, u, f, e, o, l, c, a) {
 					for (; l && 8 == l.nodeType && l.nextSibling;) l = l.nextSibling;
 					P = l;
 				}
-				(s = z(P = r.__c.__z || (r.__c.__z = P))) ? (r.__e = P, l = s) : r.__e = l, l = l && l.nextSibling;
-			} else e && e.some(g);
+				(s = z$1(P = r.__c.__z || (r.__c.__z = P))) ? (r.__e = P, l = s) : r.__e = l, l = l && l.nextSibling;
+			} else e && e.some(g$1);
 			else r.__e = i.__e;
-			r.__k || (r.__k = i.__k || []), t.then || B(r), n.__e(t, r, i);
+			r.__k || (r.__k = i.__k || []), t.then || B$1(r), n.__e(t, r, i);
 		}
-	} else l = r.__e = E(i.__e, r, i, u, f, e, o, c, a, t);
+	} else l = r.__e = E$1(i.__e, r, i, u, f, e, o, c, a, t);
 	return (s = n.diffed) && s(r), l;
 }
-function z(n, t) {
+function z$1(n, t) {
 	if (n && 8 == n.nodeType && n.data.startsWith("$s")) for (var r = 1; n = n.nextSibling;) {
 		if (8 == n.nodeType) {
 			if (n.data.startsWith("$s")) r++;
@@ -225,10 +225,10 @@ function z(n, t) {
 		t && t.push(n);
 	}
 }
-function B(n) {
-	n && (n.__c && (n.__c.__g |= 4), n.__k && n.__k.some(B));
+function B$1(n) {
+	n && (n.__c && (n.__c.__g |= 4), n.__k && n.__k.some(B$1));
 }
-function D(t, r, i) {
+function D$1(t, r, i) {
 	for (var u = 0; u < i.length;) F(i[u++], i[u++], i[u++]);
 	n.__c && n.__c(r, t), t.some(function(r) {
 		try {
@@ -240,8 +240,8 @@ function D(t, r, i) {
 		}
 	});
 }
-function E(t, r, i, u, f, e, o, l, c, a) {
-	var s, h, v, _, k, b, m, $, M, x = i.props || p, C = r.props, j = r.type;
+function E$1(t, r, i, u, f, e, o, l, c, a) {
+	var s, h, v, _, k, b, m, $, M, x = i.props || p$1, C = r.props, j = r.type;
 	if ("svg" == j ? f = "http://www.w3.org/2000/svg" : "math" == j ? f = "http://www.w3.org/1998/Math/MathML" : f || (f = "http://www.w3.org/1999/xhtml"), e) {
 		for (s = 0; s < e.length; s++) if ((k = e[s]) && (j ? k.localName == j : 3 == k.nodeType)) {
 			t = k, e[s] = null;
@@ -253,10 +253,10 @@ function E(t, r, i, u, f, e, o, l, c, a) {
 		t = $.createElementNS(f, j, C.is && C), l && (n.__m && n.__m(r, e), l = !1), e = null;
 	}
 	if (j) {
-		if (a = "template" == j && t.content || t, e = "textarea" == j && null != C.defaultValue ? null : e && d.call(a.childNodes), !l && e) for (x = {}, s = 0; s < t.attributes.length; s++) x[(k = t.attributes[s]).name] = k.value;
-		for (s in x) k = x[s], "dangerouslySetInnerHTML" == s ? v = k : "children" == s || s in C || "value" == s && "defaultValue" in C || "checked" == s && "defaultChecked" in C || T(t, s, null, k, f);
-		for (s in M = 1 & i.__u, C) k = C[s], "children" == s ? _ = k : "dangerouslySetInnerHTML" == s ? h = k : "value" == s ? b = k : "checked" == s ? m = k : l && "function" != typeof k || !(x[s] !== k || M && null != k) || T(t, s, k, x[s], f);
-		h ? (l || v && (h.__html == v.__html || h.__html == t.innerHTML) || (t.innerHTML = h.__html), r.__k = []) : (v && (t.textContent = ""), ("foreignObject" == j || "http://www.w3.org/1998/Math/MathML" == f && y.test(j)) && (f = "http://www.w3.org/1999/xhtml"), H(a, w(_) ? _ : [_], r, i, u, f, e, o, e ? e[0] : i.__k && S(i, 0), l, c), e && e.some(g)), l && "textarea" != j || (s = "value", "progress" == j && null == b ? t.removeAttribute(s) : null == b || b === t[s] && ("progress" != j || b) || T(t, s, b, x[s], f), s = "checked", null != m && m != t[s] && T(t, s, m, x[s], f));
+		if (a = "template" == j && t.content || t, e = "textarea" == j && null != C.defaultValue ? null : e && d$1.call(a.childNodes), !l && e) for (x = {}, s = 0; s < t.attributes.length; s++) x[(k = t.attributes[s]).name] = k.value;
+		for (s in x) k = x[s], "dangerouslySetInnerHTML" == s ? v = k : "children" == s || s in C || "value" == s && "defaultValue" in C || "checked" == s && "defaultChecked" in C || T$1(t, s, null, k, f);
+		for (s in M = 1 & i.__u, C) k = C[s], "children" == s ? _ = k : "dangerouslySetInnerHTML" == s ? h = k : "value" == s ? b = k : "checked" == s ? m = k : l && "function" != typeof k || !(x[s] !== k || M && null != k) || T$1(t, s, k, x[s], f);
+		h ? (l || v && (h.__html == v.__html || h.__html == t.innerHTML) || (t.innerHTML = h.__html), r.__k = []) : (v && (t.textContent = ""), ("foreignObject" == j || "http://www.w3.org/1998/Math/MathML" == f && y$1.test(j)) && (f = "http://www.w3.org/1999/xhtml"), H(a, w$1(_) ? _ : [_], r, i, u, f, e, o, e ? e[0] : i.__k && S(i, 0), l, c), e && e.some(g$1)), l && "textarea" != j || (s = "value", "progress" == j && null == b ? t.removeAttribute(s) : null == b || b === t[s] && ("progress" != j || b) || T$1(t, s, b, x[s], f), s = "checked", null != m && m != t[s] && T$1(t, s, m, x[s], f));
 	} else x === C || l && t.data == C || (t.data = C);
 	return t;
 }
@@ -267,7 +267,7 @@ function F(t, r, i, u) {
 		n.__e(t, i);
 	}
 }
-function G(t, r, i) {
+function G$1(t, r, i) {
 	var u, f, e, o;
 	if (n.unmount && n.unmount(t), !(u = t.ref) || u.current && u.current != t.__e || F(u, null, r, t), u = t.__c) {
 		if (u.componentWillUnmount) try {
@@ -277,15 +277,15 @@ function G(t, r, i) {
 		}
 		u.__P = u.__n = null;
 	}
-	if (u = t.__k) for (o = 0; o < u.length; o++) u[o] && G(u[o], r, "function" != typeof t.type || i && !t.props.__P);
-	!i && (u = t.__c) && (u = u.__z) && (f = z(u, e = [])) && (u == t.__e && e.some(g), g(f), g(u)), (u = t.__e) && (i || g(u), u.__e && (u.__e = null)), t.__e = t.__c = t.__ = null;
+	if (u = t.__k) for (o = 0; o < u.length; o++) u[o] && G$1(u[o], r, "function" != typeof t.type || i && !t.props.__P);
+	!i && (u = t.__c) && (u = u.__z) && (f = z$1(u, e = [])) && (u == t.__e && e.some(g$1), g$1(f), g$1(u)), (u = t.__e) && (i || g$1(u), u.__e && (u.__e = null)), t.__e = t.__c = t.__ = null;
 }
 function J(n, t, r) {
 	return this.constructor(n, r);
 }
 function K(t, r) {
 	var i, u, f, e;
-	n.__ && n.__(t, r), 9 == r.nodeType && (r = r.documentElement), u = (i = t && 32 & t.__u) ? null : r.__k, r.__k = m(M, { children: [t] }), f = [], e = [], V(r, r.__k, u || p, p, r.namespaceURI, u ? null : r.firstChild ? d.call(r.childNodes) : null, f, u ? u.__e : r.firstChild, i, e), D(f, r.__k, e), r.__k.props.children = null;
+	n.__ && n.__(t, r), 9 == r.nodeType && (r = r.documentElement), u = (i = t && 32 & t.__u) ? null : r.__k, r.__k = m$1(M, { children: [t] }), f = [], e = [], V(r, r.__k, u || p$1, p$1, r.namespaceURI, u ? null : r.firstChild ? d$1.call(r.childNodes) : null, f, u ? u.__e : r.firstChild, i, e), D$1(f, r.__k, e), r.__k.props.children = null;
 }
 n = { __e: function(n, t, r, i) {
 	for (var u, e, o; t = t.__;) if ((u = t.__c) && !(1 & u.__g)) {
@@ -296,259 +296,265 @@ n = { __e: function(n, t, r, i) {
 			n = t;
 		}
 	}
-	throw f = 0, n;
-} }, t = 0, x.prototype.setState = function(n, t) {
+	throw f$1 = 0, n;
+} }, t$1 = 0, x.prototype.setState = function(n, t) {
 	var r = this.__s;
-	r && r != this.state || (r = this.__s = _({}, this.state)), "function" == typeof n && (n = n(_({}, r), this.props)), n && (_(r, n), this.__v && (t && this.__k.push(t), j(this)));
+	r && r != this.state || (r = this.__s = _$1({}, this.state)), "function" == typeof n && (n = n(_$1({}, r), this.props)), n && (_$1(r, n), this.__v && (t && this.__k.push(t), j(this)));
 }, x.prototype.forceUpdate = function(n) {
 	this.__v && (this.__g |= 4, n && this.__h.push(n), j(this));
-}, x.prototype.render = M, i = [], f = 0, e = function(n, t) {
+}, x.prototype.render = M, i$1 = [], f$1 = 0, e$1 = function(n, t) {
 	return n.__v.__b - t.__v.__b;
-}, o = Symbol(), l = /(PointerCapture)$|Capture$/i, c = 0, a = {};
+}, o$1 = Symbol(), l$1 = /(PointerCapture)$|Capture$/i, c$1 = 0, a$1 = {};
 // hub/web/src/components/TopBar.tsx
 function TopBar() {
-	return /* @__PURE__ */ k(M, null, /* @__PURE__ */ k("header", {
+	return /* @__PURE__ */ k$1(M, null, /* @__PURE__ */ k$1("header", {
 		class: "top-bar",
 		id: "mobileTopHostBtn"
-	}, /* @__PURE__ */ k("div", { class: "top-bar-left" }, /* @__PURE__ */ k("button", {
+	}, /* @__PURE__ */ k$1("div", { class: "top-bar-left" }, /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: "host-switcher-btn",
 		onClick: () => window.openHostSheet?.()
-	}, /* @__PURE__ */ k("span", {
+	}, /* @__PURE__ */ k$1("span", {
 		class: "status-dot",
 		id: "topHostDot"
-	}), /* @__PURE__ */ k("span", {
+	}), /* @__PURE__ */ k$1("span", {
 		class: "host-switcher-name",
 		id: "topHostName"
-	}, "连接中..."), /* @__PURE__ */ k("span", { class: "host-switcher-caret" }, "▾")), /* @__PURE__ */ k("button", {
+	}, "连接中..."), /* @__PURE__ */ k$1("span", { class: "host-switcher-caret" }, "▾")), /* @__PURE__ */ k$1("button", {
 		type: "button",
 		id: "turboBadgeBtn",
 		onClick: () => window.openTurboGuideSheet?.(),
 		style: "border:1px solid #a7f3d0;background:#ecfdf5;color:#059669;border-radius:999px;padding:4px 9px;font-size:11.5px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0;"
-	}, "⚡ 极速")), /* @__PURE__ */ k("div", { style: "display:flex;align-items:center;gap:6px;flex-shrink:0;" }, /* @__PURE__ */ k("button", {
+	}, "⚡ 极速")), /* @__PURE__ */ k$1("div", { style: "display:flex;align-items:center;gap:6px;flex-shrink:0;" }, /* @__PURE__ */ k$1("button", {
+		type: "button",
+		id: "walkModeTopBtn",
+		class: "walk-top-pill-btn",
+		title: "随行耳机模式 (Walk Mode)",
+		onClick: () => window.openWalkMode?.()
+	}, "🎧"), /* @__PURE__ */ k$1("button", {
 		type: "button",
 		"data-lang-toggle": "1",
 		onClick: () => window.toggleLangPreference?.(),
-		style: "border:1px solid var(--border);background:var(--subtle);color:var(--text-secondary);border-radius:999px;padding:4px 9px;font-size:11.5px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0;"
-	}, "🌐 EN"), /* @__PURE__ */ k("button", {
+		style: "border:1px solid var(--border);background:var(--subtle);color:var(--text-secondary);border-radius:999px;padding:4px 8px;font-size:11.5px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0;"
+	}, "🌐 EN"), /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: "new-chat-btn",
 		onClick: () => window.openNewTaskSheet?.()
-	}, /* @__PURE__ */ k("span", null, "＋"), /* @__PURE__ */ k("span", null, "新建对话")))), /* @__PURE__ */ k("div", {
+	}, /* @__PURE__ */ k$1("span", null, "＋"), /* @__PURE__ */ k$1("span", null, "新建对话")))), /* @__PURE__ */ k$1("div", {
 		id: "demoModeBanner",
 		class: "demo-mode-banner",
 		style: "display:none;"
-	}, /* @__PURE__ */ k("div", {
+	}, /* @__PURE__ */ k$1("div", {
 		class: "demo-mode-text",
 		id: "demoModeBannerText"
-	}, "✨ Interactive Demo · Swipe cards or tap Approve"), /* @__PURE__ */ k("div", { class: "demo-mode-actions" }, /* @__PURE__ */ k("button", {
+	}, "✨ Interactive Demo · Swipe cards or tap Approve"), /* @__PURE__ */ k$1("div", { class: "demo-mode-actions" }, /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: "demo-pill-btn demo-pill-primary",
 		onClick: () => window.demoCopyNpx?.(),
 		title: "Copy npx pocketagents"
-	}, "📋 npx"), /* @__PURE__ */ k("button", {
+	}, "📋 npx"), /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: "demo-pill-btn",
 		onClick: () => window.demoResetSandbox?.(),
 		title: "Reset Demo"
-	}, "↻"), /* @__PURE__ */ k("a", {
+	}, "↻"), /* @__PURE__ */ k$1("a", {
 		class: "demo-pill-btn",
 		href: "https://github.com/oscarka/pocketagents",
 		target: "_blank",
 		rel: "noopener noreferrer"
-	}, "⭐ GitHub"))), /* @__PURE__ */ k("div", {
+	}, "⭐ GitHub"))), /* @__PURE__ */ k$1("div", {
 		id: "connectionStatusBanner",
 		class: "connection-status-banner",
 		style: "display:none;",
 		onClick: () => window.manualReconnectNow?.()
-	}, /* @__PURE__ */ k("span", null, "⚠️ 网络连接中断，正在自动重连…"), /* @__PURE__ */ k("span", { style: "text-decoration:underline;margin-left:6px;font-weight:700;" }, "点此立即重试")), /* @__PURE__ */ k("div", {
+	}, /* @__PURE__ */ k$1("span", null, "⚠️ 网络连接中断，正在自动重连…"), /* @__PURE__ */ k$1("span", { style: "text-decoration:underline;margin-left:6px;font-weight:700;" }, "点此立即重试")), /* @__PURE__ */ k$1("div", {
 		class: "search-and-filter",
 		id: "searchAndFilterBox"
-	}, /* @__PURE__ */ k("div", { class: "search-box-wrap" }, /* @__PURE__ */ k("div", { class: "search-box" }, /* @__PURE__ */ k("span", { style: "font-size:13px;color:#94a3b8;" }, "🔍"), /* @__PURE__ */ k("input", {
+	}, /* @__PURE__ */ k$1("div", { class: "search-box-wrap" }, /* @__PURE__ */ k$1("div", { class: "search-box" }, /* @__PURE__ */ k$1("span", { style: "font-size:13px;color:#94a3b8;" }, "🔍"), /* @__PURE__ */ k$1("input", {
 		id: "searchInput",
 		placeholder: "搜索对话标题、项目或内容...",
 		onInput: () => window.onSearchInput?.()
-	}), /* @__PURE__ */ k("button", {
+	}), /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: "search-clear",
 		id: "searchClearBtn",
 		onClick: () => window.clearSearch?.()
-	}, "✕"))), /* @__PURE__ */ k("nav", {
+	}, "✕"))), /* @__PURE__ */ k$1("nav", {
 		class: "filter-strip",
 		id: "projectStrip"
 	})));
 }
 // hub/web/src/components/BottomTabs.tsx
 function BottomTabs() {
-	return /* @__PURE__ */ k("footer", { class: "bottom-tabs" }, /* @__PURE__ */ k("button", {
+	return /* @__PURE__ */ k$1("footer", { class: "bottom-tabs" }, /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: "tab-btn active",
 		id: "tab-chats",
 		onClick: () => window.switchTab?.("chats")
-	}, /* @__PURE__ */ k("span", { class: "icon" }, "💬"), /* @__PURE__ */ k("span", null, "对话")), /* @__PURE__ */ k("button", {
+	}, /* @__PURE__ */ k$1("span", { class: "icon" }, "💬"), /* @__PURE__ */ k$1("span", null, "对话")), /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: "tab-btn",
 		id: "tab-files",
 		onClick: () => window.switchTab?.("files")
-	}, /* @__PURE__ */ k("span", { class: "icon" }, "📂"), /* @__PURE__ */ k("span", null, "项目文件")), /* @__PURE__ */ k("button", {
+	}, /* @__PURE__ */ k$1("span", { class: "icon" }, "📂"), /* @__PURE__ */ k$1("span", null, "项目文件")), /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: "tab-btn",
 		id: "tab-settings",
 		onClick: () => window.switchTab?.("settings")
-	}, /* @__PURE__ */ k("span", { class: "icon" }, "⚙️"), /* @__PURE__ */ k("span", null, "设备与设置")));
+	}, /* @__PURE__ */ k$1("span", { class: "icon" }, "⚙️"), /* @__PURE__ */ k$1("span", null, "设备与设置")));
 }
 // hub/web/src/components/TriageDeck.tsx
 function TriageDeck() {
-	return /* @__PURE__ */ k("section", {
+	return /* @__PURE__ */ k$1("section", {
 		class: "dsh-triage-overlay",
 		id: "triageDeckOverlay",
 		"aria-label": "滑卡批阅模式"
-	}, /* @__PURE__ */ k("div", {
+	}, /* @__PURE__ */ k$1("div", {
 		class: "dsh-triage-drag-pill",
 		id: "triageDragPill"
-	}), /* @__PURE__ */ k("header", { class: "dsh-triage-topbar" }, /* @__PURE__ */ k("button", {
+	}), /* @__PURE__ */ k$1("header", { class: "dsh-triage-topbar" }, /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: "dsh-triage-top-pill",
 		id: "triageUndoBtn",
 		disabled: true,
 		onClick: () => window.triageUndoLast?.()
-	}, "↩ 撤回"), /* @__PURE__ */ k("div", { class: "dsh-triage-center-title" }, /* @__PURE__ */ k("span", { id: "triageCenterTitleText" }, "滑卡批阅"), /* @__PURE__ */ k("span", {
+	}, "↩ 撤回"), /* @__PURE__ */ k$1("div", { class: "dsh-triage-center-title" }, /* @__PURE__ */ k$1("span", { id: "triageCenterTitleText" }, "滑卡批阅"), /* @__PURE__ */ k$1("span", {
 		class: "dsh-triage-count-chip",
 		id: "triageCountChip"
-	}, "0")), /* @__PURE__ */ k("button", {
+	}, "0")), /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: "dsh-triage-top-pill",
 		id: "triageBackToListBtn",
 		onClick: () => window.closeTriageDeckMode?.()
-	}, "☰ 列表模式")), /* @__PURE__ */ k("div", {
+	}, "☰ 列表模式")), /* @__PURE__ */ k$1("div", {
 		class: "dsh-triage-stack",
 		id: "triageCardStack"
-	}, /* @__PURE__ */ k("div", {
+	}, /* @__PURE__ */ k$1("div", {
 		class: "dsh-triage-back-card layer-deep",
 		id: "triageLayerDeep"
-	}, /* @__PURE__ */ k("div", { class: "dsh-triage-back-inner" })), /* @__PURE__ */ k("div", {
+	}, /* @__PURE__ */ k$1("div", { class: "dsh-triage-back-inner" })), /* @__PURE__ */ k$1("div", {
 		class: "dsh-triage-back-card layer-left",
 		id: "triageLayerLeft"
-	}, /* @__PURE__ */ k("div", { class: "dsh-triage-back-inner" })), /* @__PURE__ */ k("div", {
+	}, /* @__PURE__ */ k$1("div", { class: "dsh-triage-back-inner" })), /* @__PURE__ */ k$1("div", {
 		class: "dsh-triage-back-card layer-right",
 		id: "triageLayerRight"
-	}, /* @__PURE__ */ k("div", {
+	}, /* @__PURE__ */ k$1("div", {
 		class: "dsh-triage-back-inner",
 		id: "triageLayerRightInner"
-	})), /* @__PURE__ */ k("div", {
+	})), /* @__PURE__ */ k$1("div", {
 		class: "dsh-triage-fg-card",
 		id: "triageFgCard"
-	})), /* @__PURE__ */ k("div", {
+	})), /* @__PURE__ */ k$1("div", {
 		class: "dsh-triage-modal",
 		id: "triageDetailModal",
 		onClick: (e) => {
 			if (e.target === e.currentTarget) window.closeTriageDetailModal?.();
 		}
-	}, /* @__PURE__ */ k("div", {
+	}, /* @__PURE__ */ k$1("div", {
 		class: "dsh-triage-modal-sheet",
 		id: "triageDetailModalContent"
-	}, /* @__PURE__ */ k("div", {
+	}, /* @__PURE__ */ k$1("div", {
 		class: "dsh-triage-modal-hdr",
 		id: "triageModalHeader"
-	}, /* @__PURE__ */ k("div", {
+	}, /* @__PURE__ */ k$1("div", {
 		class: "dsh-triage-sheet-grabber",
 		"aria-hidden": "true"
-	}), /* @__PURE__ */ k("div", { class: "dsh-triage-modal-hdr-row" }, /* @__PURE__ */ k("strong", {
+	}), /* @__PURE__ */ k$1("div", { class: "dsh-triage-modal-hdr-row" }, /* @__PURE__ */ k$1("strong", {
 		id: "triageModalTitle",
 		style: "font-size:15px;color:#0f172a;"
-	}, "详情"), /* @__PURE__ */ k("div", { class: "dsh-triage-modal-actions" }, /* @__PURE__ */ k("button", {
+	}, "详情"), /* @__PURE__ */ k$1("div", { class: "dsh-triage-modal-actions" }, /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: "dsh-triage-open-chat",
 		id: "triageModalExpandBtn",
 		onClick: () => window.toggleTriageModalExpand?.()
-	}, "⤢ 全屏"), /* @__PURE__ */ k("button", {
+	}, "⤢ 全屏"), /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: "dsh-triage-open-chat",
 		id: "triageModalCloseBtn",
 		onClick: () => window.closeTriageDetailModal?.()
-	}, "收起 ✕")))), /* @__PURE__ */ k("div", {
+	}, "收起 ✕")))), /* @__PURE__ */ k$1("div", {
 		class: "dsh-triage-modal-body",
 		id: "triageModalScrollBody"
 	}))));
 }
 // hub/web/src/components/ChatStage.tsx
 function ChatStage() {
-	return /* @__PURE__ */ k("section", {
+	return /* @__PURE__ */ k$1("section", {
 		class: "chat-fullscreen chat-stage",
 		id: "chatFullscreen"
-	}, /* @__PURE__ */ k("div", { class: "chat-navbar" }, /* @__PURE__ */ k("button", {
+	}, /* @__PURE__ */ k$1("div", { class: "chat-navbar" }, /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: "back-btn",
 		onClick: () => window.closeMobileChat?.()
-	}, "‹ 返回"), /* @__PURE__ */ k("div", { class: "chat-nav-center" }, /* @__PURE__ */ k("div", {
+	}, "‹ 返回"), /* @__PURE__ */ k$1("div", { class: "chat-nav-center" }, /* @__PURE__ */ k$1("div", {
 		class: "chat-nav-title",
 		id: "chatTitle"
-	}, "选择一个会话"), /* @__PURE__ */ k("div", {
+	}, "选择一个会话"), /* @__PURE__ */ k$1("div", {
 		class: "chat-nav-sub",
 		id: "chatSub"
-	}, "点击左侧任意对话开始遥控")), /* @__PURE__ */ k("div", { class: "chat-nav-actions" }, /* @__PURE__ */ k("div", { class: "desktop-stage-tabs" }, /* @__PURE__ */ k("button", {
+	}, "点击左侧任意对话开始遥控")), /* @__PURE__ */ k$1("div", { class: "chat-nav-actions" }, /* @__PURE__ */ k$1("div", { class: "desktop-stage-tabs" }, /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: "stage-seg-btn active",
 		id: "stageBtnChat",
 		onClick: () => window.switchDesktopStage?.("chat")
-	}, "💬 对话流"), /* @__PURE__ */ k("button", {
+	}, "💬 对话流"), /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: "stage-seg-btn",
 		id: "stageBtnCode",
 		onClick: () => window.switchDesktopStage?.("code")
-	}, "📂 项目代码")), /* @__PURE__ */ k("button", {
+	}, "📂 项目代码")), /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: "icon-pill-btn mobile-only-file-btn",
 		onClick: () => window.openInChatFileDrawer?.()
-	}, "📂 文件速览"), /* @__PURE__ */ k("button", {
+	}, "📂 文件速览"), /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: "icon-pill-btn",
 		onClick: () => window.openCurrentSessionActions?.()
-	}, "⋯"))), /* @__PURE__ */ k("div", {
+	}, "⋯"))), /* @__PURE__ */ k$1("div", {
 		class: "chat-switch-alert",
 		id: "chatSwitchAlert",
 		style: "display:none;"
-	}), /* @__PURE__ */ k("div", {
+	}), /* @__PURE__ */ k$1("div", {
 		class: "chat-offline-banner",
 		id: "chatOfflineBanner",
 		style: "display:none;"
-	}), /* @__PURE__ */ k("div", {
+	}), /* @__PURE__ */ k$1("div", {
 		class: "chat-messages",
 		id: "chatMessages"
-	}, /* @__PURE__ */ k("div", { style: "margin:auto;text-align:center;color:#94a3b8;font-size:14px;" }, "👈 点击任意会话查看详细对话与思考过程")), /* @__PURE__ */ k("div", {
+	}, /* @__PURE__ */ k$1("div", { style: "margin:auto;text-align:center;color:#94a3b8;font-size:14px;" }, "👈 点击任意会话查看详细对话与思考过程")), /* @__PURE__ */ k$1("div", {
 		class: "main-viewport file-preview-pane",
 		id: "desktopStageCodePane",
 		style: "display:none;background:var(--surface);"
-	}), /* @__PURE__ */ k("div", {
+	}), /* @__PURE__ */ k$1("div", {
 		class: "running-control-bar",
 		id: "runningControlBar"
-	}, /* @__PURE__ */ k("span", null, "🟢 AI 正在电脑上执行任务..."), /* @__PURE__ */ k("button", {
+	}, /* @__PURE__ */ k$1("span", null, "🟢 AI 正在电脑上执行任务..."), /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: "stop-task-btn",
 		onClick: () => window.stopActiveSession?.()
-	}, "⏹ 立即停止")), /* @__PURE__ */ k("div", {
+	}, "⏹ 立即停止")), /* @__PURE__ */ k$1("div", {
 		class: "composer-attachments-strip",
 		id: "composerAttachmentsStrip",
 		style: "display:none;"
-	}), /* @__PURE__ */ k("div", {
+	}), /* @__PURE__ */ k$1("div", {
 		class: "chat-composer",
 		id: "chatComposerBar"
-	}, /* @__PURE__ */ k("input", {
+	}, /* @__PURE__ */ k$1("input", {
 		type: "file",
 		id: "chatImageInput",
 		accept: "image/*",
 		multiple: true,
 		style: "display:none;",
 		onChange: (e) => window.onChatImageSelected?.(e, "chat")
-	}), /* @__PURE__ */ k("div", {
+	}), /* @__PURE__ */ k$1("div", {
 		class: "composer-unified-card",
 		id: "composerUnifiedCard"
-	}, /* @__PURE__ */ k("div", {
+	}, /* @__PURE__ */ k$1("div", {
 		class: "voice-hint-bar",
 		id: "chatVoiceHintBar",
 		style: "display:none;",
 		onClick: () => window.hideVoiceHintBar?.("globalPromptInput")
-	}), /* @__PURE__ */ k("textarea", {
+	}), /* @__PURE__ */ k$1("textarea", {
 		class: "chat-input",
 		id: "globalPromptInput",
 		rows: 1,
@@ -562,7 +568,7 @@ function ChatStage() {
 		},
 		onKeyDown: (e) => window.onComposerKeydown?.(e),
 		onPaste: (e) => window.onComposerPaste?.(e, "chat")
-	}), /* @__PURE__ */ k("button", {
+	}), /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: "wechat-hold-talk-btn",
 		id: "wechatHoldTalkBtn",
@@ -581,7 +587,7 @@ function ChatStage() {
 			e.stopPropagation();
 			window.startHoldVoice?.(e.clientX, e.clientY);
 		}
-	}, /* @__PURE__ */ k("span", { id: "wechatHoldTalkLabel" }, "🎙️ 按住 说话")), /* @__PURE__ */ k("div", { class: "composer-toolbar-row" }, /* @__PURE__ */ k("div", { class: "composer-tools-left" }, /* @__PURE__ */ k("button", {
+	}, /* @__PURE__ */ k$1("span", { id: "wechatHoldTalkLabel" }, "🎙️ 按住 说话")), /* @__PURE__ */ k$1("div", { class: "composer-toolbar-row" }, /* @__PURE__ */ k$1("div", { class: "composer-tools-left" }, /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: "voice-btn composer-mini-btn mode-toggle-btn",
 		id: "chatVoiceBtn",
@@ -595,7 +601,7 @@ function ChatStage() {
 			e.stopPropagation();
 			window.toggleWechatVoiceMode?.();
 		}
-	}, "🎙️ 语音"), /* @__PURE__ */ k("button", {
+	}, "🎙️ 语音"), /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: "voice-btn composer-mini-btn image-upload-btn",
 		id: "chatImageBtn",
@@ -606,7 +612,7 @@ function ChatStage() {
 			e.stopPropagation();
 			window.triggerImagePicker?.("chat");
 		}
-	}, "🖼️"), /* @__PURE__ */ k("button", {
+	}, "🖼️"), /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: "composer-model-pill",
 		id: "chatModelBtn",
@@ -616,7 +622,7 @@ function ChatStage() {
 			e.stopPropagation();
 			window.openModelPickerSheet?.("chat");
 		}
-	}, /* @__PURE__ */ k("span", { id: "chatModelBtnLabel" }, "🤖 默认模型"), /* @__PURE__ */ k("span", { style: "opacity:0.65;font-size:10px;margin-left:2px;" }, "▾"))), /* @__PURE__ */ k("button", {
+	}, /* @__PURE__ */ k$1("span", { id: "chatModelBtnLabel" }, "🤖 默认模型"), /* @__PURE__ */ k$1("span", { style: "opacity:0.65;font-size:10px;margin-left:2px;" }, "▾"))), /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: "send-btn composer-send-btn",
 		id: "chatSendBtn",
@@ -624,91 +630,91 @@ function ChatStage() {
 			e.preventDefault();
 		},
 		onClick: () => window.sendPromptToActiveSession?.()
-	}, "发送")))), /* @__PURE__ */ k("div", {
+	}, "发送")))), /* @__PURE__ */ k$1("div", {
 		class: "wechat-voice-overlay zone-send",
 		id: "wechatVoiceOverlay",
 		style: "display:none;",
 		"aria-live": "polite"
-	}, /* @__PURE__ */ k("div", { class: "wechat-voice-bubble-wrap" }, /* @__PURE__ */ k("div", {
+	}, /* @__PURE__ */ k$1("div", { class: "wechat-voice-bubble-wrap" }, /* @__PURE__ */ k$1("div", {
 		class: "wechat-voice-bubble",
 		id: "wechatVoiceBubble"
-	}, /* @__PURE__ */ k("div", {
+	}, /* @__PURE__ */ k$1("div", {
 		class: "wechat-voice-transcript is-placeholder",
 		id: "wechatOverlayTranscript"
-	}, "正在听你说话…"), /* @__PURE__ */ k("div", {
+	}, "正在听你说话…"), /* @__PURE__ */ k$1("div", {
 		class: "wechat-voice-wave",
 		"aria-hidden": "true"
-	}, /* @__PURE__ */ k("span", null), /* @__PURE__ */ k("span", null), /* @__PURE__ */ k("span", null), /* @__PURE__ */ k("span", null), /* @__PURE__ */ k("span", null))), /* @__PURE__ */ k("div", { class: "wechat-voice-bubble-tail" })), /* @__PURE__ */ k("div", { class: "wechat-voice-actions" }, /* @__PURE__ */ k("div", {
+	}, /* @__PURE__ */ k$1("span", null), /* @__PURE__ */ k$1("span", null), /* @__PURE__ */ k$1("span", null), /* @__PURE__ */ k$1("span", null), /* @__PURE__ */ k$1("span", null))), /* @__PURE__ */ k$1("div", { class: "wechat-voice-bubble-tail" })), /* @__PURE__ */ k$1("div", { class: "wechat-voice-actions" }, /* @__PURE__ */ k$1("div", {
 		class: "wechat-voice-action-item cancel-zone",
 		id: "wechatZoneCancel"
-	}, /* @__PURE__ */ k("div", { class: "wechat-voice-action-circle" }, "✕"), /* @__PURE__ */ k("span", { class: "wechat-voice-action-tip" }, "左滑取消")), /* @__PURE__ */ k("div", {
+	}, /* @__PURE__ */ k$1("div", { class: "wechat-voice-action-circle" }, "✕"), /* @__PURE__ */ k$1("span", { class: "wechat-voice-action-tip" }, "左滑取消")), /* @__PURE__ */ k$1("div", {
 		class: "wechat-voice-action-item edit-zone",
 		id: "wechatZoneEdit"
-	}, /* @__PURE__ */ k("div", { class: "wechat-voice-action-circle" }, "文"), /* @__PURE__ */ k("span", { class: "wechat-voice-action-tip" }, "右滑改字"))), /* @__PURE__ */ k("div", { class: "wechat-voice-bottom-dock" }, /* @__PURE__ */ k("div", {
+	}, /* @__PURE__ */ k$1("div", { class: "wechat-voice-action-circle" }, "文"), /* @__PURE__ */ k$1("span", { class: "wechat-voice-action-tip" }, "右滑改字"))), /* @__PURE__ */ k$1("div", { class: "wechat-voice-bottom-dock" }, /* @__PURE__ */ k$1("div", {
 		class: "wechat-voice-status-text",
 		id: "wechatOverlayStatus"
-	}, "松开 立即发送"), /* @__PURE__ */ k("div", { class: "wechat-voice-bottom-arc" }, "🎙️"))));
+	}, "松开 立即发送"), /* @__PURE__ */ k$1("div", { class: "wechat-voice-bottom-arc" }, "🎙️"))));
 }
 // hub/web/src/components/Sheets.tsx
 function Sheets() {
 	const closeIfBackdrop = (sheetId) => (e) => {
 		if (e.target === e.currentTarget) window.closeSheet?.(sheetId);
 	};
-	return /* @__PURE__ */ k(M, null, /* @__PURE__ */ k("div", {
+	return /* @__PURE__ */ k$1(M, null, /* @__PURE__ */ k$1("div", {
 		class: "sheet-backdrop",
 		id: "hostSheet",
 		onClick: closeIfBackdrop("hostSheet")
-	}, /* @__PURE__ */ k("div", { class: "sheet-panel" }, /* @__PURE__ */ k("div", { class: "sheet-handle" }), /* @__PURE__ */ k("div", { class: "sheet-title" }, /* @__PURE__ */ k("span", null, "切换遥控的电脑"), /* @__PURE__ */ k("span", {
+	}, /* @__PURE__ */ k$1("div", { class: "sheet-panel" }, /* @__PURE__ */ k$1("div", { class: "sheet-handle" }), /* @__PURE__ */ k$1("div", { class: "sheet-title" }, /* @__PURE__ */ k$1("span", null, "切换遥控的电脑"), /* @__PURE__ */ k$1("span", {
 		style: "font-size:12px;color:var(--muted);font-weight:500;",
 		id: "hostSheetCountLabel"
-	})), /* @__PURE__ */ k("div", { id: "hostOptionList" }))), /* @__PURE__ */ k("div", {
+	})), /* @__PURE__ */ k$1("div", { id: "hostOptionList" }))), /* @__PURE__ */ k$1("div", {
 		class: "sheet-backdrop",
 		id: "newTaskSheet",
 		onClick: closeIfBackdrop("newTaskSheet")
-	}, /* @__PURE__ */ k("div", { class: "sheet-panel new-task-sheet-panel" }, /* @__PURE__ */ k("div", { class: "sheet-handle" }), /* @__PURE__ */ k("div", {
+	}, /* @__PURE__ */ k$1("div", { class: "sheet-panel new-task-sheet-panel" }, /* @__PURE__ */ k$1("div", { class: "sheet-handle" }), /* @__PURE__ */ k$1("div", {
 		class: "sheet-title",
 		style: "margin-bottom:12px;"
-	}, /* @__PURE__ */ k("span", null, "✨ 新建远程对话任务"), /* @__PURE__ */ k("button", {
+	}, /* @__PURE__ */ k$1("span", null, "✨ 新建远程对话任务"), /* @__PURE__ */ k$1("button", {
 		type: "button",
 		style: "border:none;background:transparent;color:var(--muted);font-size:18px;cursor:pointer;padding:4px 8px;",
 		onClick: () => window.closeSheet?.("newTaskSheet")
-	}, "✕")), /* @__PURE__ */ k("div", { class: "new-task-context-card" }, /* @__PURE__ */ k("div", { class: "new-task-context-row" }, /* @__PURE__ */ k("span", { class: "context-row-label" }, "💻 执行电脑"), /* @__PURE__ */ k("div", {
+	}, "✕")), /* @__PURE__ */ k$1("div", { class: "new-task-context-card" }, /* @__PURE__ */ k$1("div", { class: "new-task-context-row" }, /* @__PURE__ */ k$1("span", { class: "context-row-label" }, "💻 执行电脑"), /* @__PURE__ */ k$1("div", {
 		class: "context-row-chips",
 		id: "newTaskHostChips"
-	})), /* @__PURE__ */ k("div", { class: "new-task-context-row" }, /* @__PURE__ */ k("span", { class: "context-row-label" }, "⚡ 执行引擎"), /* @__PURE__ */ k("div", {
+	})), /* @__PURE__ */ k$1("div", { class: "new-task-context-row" }, /* @__PURE__ */ k$1("span", { class: "context-row-label" }, "⚡ 执行引擎"), /* @__PURE__ */ k$1("div", {
 		class: "context-row-chips",
 		id: "newTaskHarnessChips"
-	}))), /* @__PURE__ */ k("div", { class: "new-task-proj-section" }, /* @__PURE__ */ k("div", { class: "new-task-proj-header" }, /* @__PURE__ */ k("span", { class: "proj-header-title" }, "📁 项目工作区"), /* @__PURE__ */ k("div", { style: "display:flex;align-items:center;gap:6px;flex-wrap:nowrap;" }, /* @__PURE__ */ k("button", {
+	}))), /* @__PURE__ */ k$1("div", { class: "new-task-proj-section" }, /* @__PURE__ */ k$1("div", { class: "new-task-proj-header" }, /* @__PURE__ */ k$1("span", { class: "proj-header-title" }, "📁 项目工作区"), /* @__PURE__ */ k$1("div", { style: "display:flex;align-items:center;gap:6px;flex-wrap:nowrap;" }, /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: "proj-header-more-btn",
 		id: "newTaskBrowseDirBtn",
 		onClick: () => window.openNewTaskProjectPickerSheet?.("browse")
-	}, "📂 选择目录"), /* @__PURE__ */ k("button", {
+	}, "📂 选择目录"), /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: "proj-header-more-btn",
 		id: "newTaskCreateWsBtn",
 		onClick: () => window.openNewTaskProjectPickerSheet?.("create")
-	}, "＋ 新工作区"), /* @__PURE__ */ k("button", {
+	}, "＋ 新工作区"), /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: "proj-header-more-btn",
 		id: "newTaskProjMoreBtn",
 		onClick: () => window.openNewTaskProjectPickerSheet?.("recent")
-	}, "全部 ▾"))), /* @__PURE__ */ k("div", {
+	}, "全部 ▾"))), /* @__PURE__ */ k$1("div", {
 		class: "new-task-proj-scroll",
 		id: "newTaskProjectChips"
-	}), /* @__PURE__ */ k("div", {
+	}), /* @__PURE__ */ k$1("div", {
 		id: "newTaskSelectedPathBar",
 		style: "margin-top:5px;font-size:11.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"
-	})), /* @__PURE__ */ k("div", { class: "new-task-card-wrap" }, /* @__PURE__ */ k("div", {
+	})), /* @__PURE__ */ k$1("div", { class: "new-task-card-wrap" }, /* @__PURE__ */ k$1("div", {
 		class: "composer-attachments-strip",
 		id: "newTaskAttachmentsStrip",
 		style: "display:none;margin-bottom:8px;border:1px solid var(--border);border-radius:12px;"
-	}), /* @__PURE__ */ k("div", {
+	}), /* @__PURE__ */ k$1("div", {
 		class: "voice-hint-bar",
 		id: "newTaskVoiceHintBar",
 		style: "display:none;margin-bottom:8px;",
 		onClick: () => window.hideVoiceHintBar?.("newTaskInput")
-	}), /* @__PURE__ */ k("textarea", {
+	}), /* @__PURE__ */ k$1("textarea", {
 		class: "new-task-textarea",
 		id: "newTaskInput",
 		placeholder: "输入你想让电脑执行的任务，或点击下方传截图/语音输入...",
@@ -719,14 +725,14 @@ function Sheets() {
 			if (!window.isVoiceRecording?.() && !e?.isComposing) window.hideVoiceHintBar?.("newTaskInput");
 		},
 		onPaste: (e) => window.onComposerPaste?.(e, "newTask")
-	}), /* @__PURE__ */ k("div", { class: "new-task-toolbar" }, /* @__PURE__ */ k("input", {
+	}), /* @__PURE__ */ k$1("div", { class: "new-task-toolbar" }, /* @__PURE__ */ k$1("input", {
 		type: "file",
 		id: "newTaskImageInput",
 		accept: "image/*",
 		multiple: true,
 		style: "display:none;",
 		onChange: (e) => window.onChatImageSelected?.(e, "newTask")
-	}), /* @__PURE__ */ k("button", {
+	}), /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: "new-task-tool-btn model-btn",
 		id: "newTaskModelBtn",
@@ -736,10 +742,10 @@ function Sheets() {
 			e.stopPropagation();
 			window.openModelPickerSheet?.("newTask");
 		}
-	}, /* @__PURE__ */ k("span", { id: "newTaskModelBtnLabel" }, "🤖 默认模型"), /* @__PURE__ */ k("span", {
+	}, /* @__PURE__ */ k$1("span", { id: "newTaskModelBtnLabel" }, "🤖 默认模型"), /* @__PURE__ */ k$1("span", {
 		class: "model-arrow",
 		style: "opacity:0.7;font-size:10px;margin-left:3px;"
-	}, "▾")), /* @__PURE__ */ k("div", { class: "new-task-toolbar-actions" }, /* @__PURE__ */ k("button", {
+	}, "▾")), /* @__PURE__ */ k$1("div", { class: "new-task-toolbar-actions" }, /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: "new-task-tool-btn",
 		id: "newTaskImageBtn",
@@ -748,7 +754,7 @@ function Sheets() {
 			e.stopPropagation();
 			window.triggerImagePicker?.("newTask");
 		}
-	}, "🖼️ 截图"), /* @__PURE__ */ k("button", {
+	}, "🖼️ 截图"), /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: "new-task-tool-btn",
 		id: "newTaskVoiceBtn",
@@ -760,237 +766,2217 @@ function Sheets() {
 			e.stopPropagation();
 			window.toggleVoiceInput?.("newTaskInput", "newTaskVoiceBtn");
 		}
-	}, "🎤 语音")))), /* @__PURE__ */ k("div", { class: "new-task-quick-strip" }, /* @__PURE__ */ k("button", {
+	}, "🎤 语音")))), /* @__PURE__ */ k$1("div", { class: "new-task-quick-strip" }, /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: "quick-prompt-pill",
 		onClick: () => window.fillQuickPrompt?.("帮我检查当前项目的定时任务和运行日志是否正常")
-	}, "🔍 检查运行状态"), /* @__PURE__ */ k("button", {
+	}, "🔍 检查运行状态"), /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: "quick-prompt-pill",
 		onClick: () => window.fillQuickPrompt?.("运行单元测试并修复所有报错")
-	}, "🧪 跑测试修 Bug"), /* @__PURE__ */ k("button", {
+	}, "🧪 跑测试修 Bug"), /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: "quick-prompt-pill",
 		onClick: () => window.fillQuickPrompt?.("查看 git status 并总结最近的代码改动")
-	}, "📦 总结代码改动")), /* @__PURE__ */ k("button", {
+	}, "📦 总结代码改动")), /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: "primary-block-btn new-task-submit-btn",
 		onClick: () => window.submitNewTask?.()
-	}, "🚀 立即在电脑上启动任务"))), /* @__PURE__ */ k("div", {
+	}, "🚀 立即在电脑上启动任务"))), /* @__PURE__ */ k$1("div", {
 		class: "sheet-backdrop",
 		id: "newTaskProjectPickerSheet",
 		onClick: closeIfBackdrop("newTaskProjectPickerSheet")
-	}, /* @__PURE__ */ k("div", {
+	}, /* @__PURE__ */ k$1("div", {
 		class: "sheet-panel",
 		style: "max-height:82dvh;display:flex;flex-direction:column;"
-	}, /* @__PURE__ */ k("div", { class: "sheet-handle" }), /* @__PURE__ */ k("div", {
+	}, /* @__PURE__ */ k$1("div", { class: "sheet-handle" }), /* @__PURE__ */ k$1("div", {
 		class: "sheet-title",
 		style: "margin-bottom:10px;"
-	}, /* @__PURE__ */ k("span", { id: "newTaskPickerSheetTitle" }, "📁 选择目录或新建工作区"), /* @__PURE__ */ k("button", {
+	}, /* @__PURE__ */ k$1("span", { id: "newTaskPickerSheetTitle" }, "📁 选择目录或新建工作区"), /* @__PURE__ */ k$1("button", {
 		type: "button",
 		style: "border:none;background:transparent;color:var(--muted);font-size:18px;cursor:pointer;padding:4px 8px;",
 		onClick: () => window.closeSheet?.("newTaskProjectPickerSheet")
-	}, "✕")), /* @__PURE__ */ k("div", {
+	}, "✕")), /* @__PURE__ */ k$1("div", {
 		id: "newTaskPickerModeTabs",
 		style: "display:flex;gap:6px;padding:3px;background:var(--subtle);border-radius:10px;margin-bottom:10px;"
-	}, /* @__PURE__ */ k("button", {
+	}, /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: "theme-seg-btn",
 		id: "newTaskTabRecent",
 		style: "flex:1;padding:6px 8px;font-size:12.5px;",
 		onClick: () => window.switchNewTaskPickerMode?.("recent")
-	}, "🕒 已有工作区"), /* @__PURE__ */ k("button", {
+	}, "🕒 已有工作区"), /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: "theme-seg-btn",
 		id: "newTaskTabBrowse",
 		style: "flex:1;padding:6px 8px;font-size:12.5px;",
 		onClick: () => window.switchNewTaskPickerMode?.("browse")
-	}, "📂 选择目录"), /* @__PURE__ */ k("button", {
+	}, "📂 选择目录"), /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: "theme-seg-btn",
 		id: "newTaskTabCreate",
 		style: "flex:1;padding:6px 8px;font-size:12.5px;",
 		onClick: () => window.switchNewTaskPickerMode?.("create")
-	}, "✨ 新工作区")), /* @__PURE__ */ k("div", {
+	}, "✨ 新工作区")), /* @__PURE__ */ k$1("div", {
 		id: "newTaskPickerSearchWrap",
 		style: "padding:0 2px 8px;"
-	}, /* @__PURE__ */ k("input", {
+	}, /* @__PURE__ */ k$1("input", {
 		type: "text",
 		class: "auth-input",
 		id: "newTaskProjectSearchInput",
 		placeholder: "搜索项目名称或路径...",
 		style: "margin:0;",
 		onInput: (e) => window.filterNewTaskProjects?.(e.target.value)
-	})), /* @__PURE__ */ k("div", {
+	})), /* @__PURE__ */ k$1("div", {
 		class: "host-options-list",
 		id: "newTaskProjectPickerBody",
 		style: "flex:1;max-height:56vh;overflow-y:auto;"
-	}))), /* @__PURE__ */ k("div", {
+	}))), /* @__PURE__ */ k$1("div", {
 		class: "sheet-backdrop",
 		id: "taskActionSheet",
 		onClick: closeIfBackdrop("taskActionSheet")
-	}, /* @__PURE__ */ k("div", { class: "sheet-panel" }, /* @__PURE__ */ k("div", { class: "sheet-handle" }), /* @__PURE__ */ k("div", {
+	}, /* @__PURE__ */ k$1("div", { class: "sheet-panel" }, /* @__PURE__ */ k$1("div", { class: "sheet-handle" }), /* @__PURE__ */ k$1("div", {
 		class: "sheet-title",
 		id: "actionSheetTitle"
-	}, "会话操作"), /* @__PURE__ */ k("div", { id: "actionSheetBody" }))), /* @__PURE__ */ k("div", {
+	}, "会话操作"), /* @__PURE__ */ k$1("div", { id: "actionSheetBody" }))), /* @__PURE__ */ k$1("div", {
 		class: "sheet-backdrop",
 		id: "inChatFileSheet",
 		onClick: closeIfBackdrop("inChatFileSheet")
-	}, /* @__PURE__ */ k("div", {
+	}, /* @__PURE__ */ k$1("div", {
 		class: "sheet-panel",
 		"data-expandable": "1"
-	}, /* @__PURE__ */ k("div", {
+	}, /* @__PURE__ */ k$1("div", {
 		class: "sheet-drag-zone",
 		title: "上拉或点击展开更多",
 		onClick: () => window.toggleFileSheetExpanded?.()
-	}, /* @__PURE__ */ k("div", { class: "sheet-handle" })), /* @__PURE__ */ k("div", {
+	}, /* @__PURE__ */ k$1("div", { class: "sheet-handle" })), /* @__PURE__ */ k$1("div", {
 		class: "sheet-title",
 		style: "padding:0 14px 9px;margin:0;border-bottom:1px solid var(--border);gap:8px;"
-	}, /* @__PURE__ */ k("span", {
+	}, /* @__PURE__ */ k$1("span", {
 		id: "inChatFileTitle",
 		style: "overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;"
-	}, "📂 当前项目文件速览"), /* @__PURE__ */ k("div", { class: "sheet-title-actions" }, /* @__PURE__ */ k("button", {
+	}, "📂 当前项目文件速览"), /* @__PURE__ */ k$1("div", { class: "sheet-title-actions" }, /* @__PURE__ */ k$1("button", {
 		type: "button",
 		id: "inChatFileExpandBtn",
 		class: "sheet-icon-btn",
 		title: "展开显示更多",
 		"aria-label": "展开显示更多",
 		onClick: () => window.toggleFileSheetExpanded?.()
-	}, "⤢"), /* @__PURE__ */ k("button", {
+	}, "⤢"), /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: "sheet-icon-btn",
 		title: "关闭",
 		"aria-label": "关闭",
 		onClick: () => window.closeMobileFile?.()
-	}, "✕"))), /* @__PURE__ */ k("div", {
+	}, "✕"))), /* @__PURE__ */ k$1("div", {
 		id: "inChatFileBody",
 		style: "flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;"
-	}))), /* @__PURE__ */ k("div", {
+	}))), /* @__PURE__ */ k$1("div", {
 		class: "sheet-backdrop",
 		id: "mobileSettingsSheet",
 		onClick: closeIfBackdrop("mobileSettingsSheet")
-	}, /* @__PURE__ */ k("div", { class: "sheet-panel" }, /* @__PURE__ */ k("div", { class: "sheet-handle" }), /* @__PURE__ */ k("div", { class: "sheet-title" }, /* @__PURE__ */ k("span", null, "📦 跨电脑一键迁移向导"), /* @__PURE__ */ k("button", {
+	}, /* @__PURE__ */ k$1("div", { class: "sheet-panel" }, /* @__PURE__ */ k$1("div", { class: "sheet-handle" }), /* @__PURE__ */ k$1("div", { class: "sheet-title" }, /* @__PURE__ */ k$1("span", null, "📦 跨电脑一键迁移向导"), /* @__PURE__ */ k$1("button", {
 		type: "button",
 		style: "border:none;background:transparent;color:var(--muted);font-size:18px;cursor:pointer;",
 		onClick: () => window.closeSheet?.("mobileSettingsSheet")
-	}, "✕")), /* @__PURE__ */ k("div", { id: "migrateWizardBody" }))), /* @__PURE__ */ k("div", {
+	}, "✕")), /* @__PURE__ */ k$1("div", { id: "migrateWizardBody" }))), /* @__PURE__ */ k$1("div", {
 		class: "sheet-backdrop",
 		id: "turboGuideSheet",
 		onClick: closeIfBackdrop("turboGuideSheet")
-	}, /* @__PURE__ */ k("div", {
+	}, /* @__PURE__ */ k$1("div", {
 		class: "sheet-panel",
 		style: "max-height:86dvh;overflow-y:auto;"
-	}, /* @__PURE__ */ k("div", { class: "sheet-handle" }), /* @__PURE__ */ k("div", { class: "sheet-title" }, /* @__PURE__ */ k("span", null, "⚡ 极速实时同步 (Rust + SSE) 指南"), /* @__PURE__ */ k("button", {
+	}, /* @__PURE__ */ k$1("div", { class: "sheet-handle" }), /* @__PURE__ */ k$1("div", { class: "sheet-title" }, /* @__PURE__ */ k$1("span", null, "⚡ 极速实时同步 (Rust + SSE) 指南"), /* @__PURE__ */ k$1("button", {
 		type: "button",
 		style: "border:none;background:transparent;color:var(--muted);font-size:18px;cursor:pointer;",
 		onClick: () => window.closeSheet?.("turboGuideSheet")
-	}, "✕")), /* @__PURE__ */ k("div", { id: "turboGuideBody" }))), /* @__PURE__ */ k("div", {
+	}, "✕")), /* @__PURE__ */ k$1("div", { id: "turboGuideBody" }))), /* @__PURE__ */ k$1("div", {
 		class: "sheet-backdrop",
 		id: "shareResultSheet",
 		onClick: closeIfBackdrop("shareResultSheet")
-	}, /* @__PURE__ */ k("div", { class: "sheet-panel" }, /* @__PURE__ */ k("div", { class: "sheet-handle" }), /* @__PURE__ */ k("div", { class: "sheet-title" }, /* @__PURE__ */ k("span", null, "🔗 端到端加密分享已生成"), /* @__PURE__ */ k("button", {
+	}, /* @__PURE__ */ k$1("div", { class: "sheet-panel" }, /* @__PURE__ */ k$1("div", { class: "sheet-handle" }), /* @__PURE__ */ k$1("div", { class: "sheet-title" }, /* @__PURE__ */ k$1("span", null, "🔗 端到端加密分享已生成"), /* @__PURE__ */ k$1("button", {
 		type: "button",
 		style: "border:none;background:transparent;color:var(--muted);font-size:18px;cursor:pointer;",
 		onClick: () => window.closeSheet?.("shareResultSheet")
-	}, "✕")), /* @__PURE__ */ k("div", { id: "shareResultBody" }))), /* @__PURE__ */ k("div", {
+	}, "✕")), /* @__PURE__ */ k$1("div", { id: "shareResultBody" }))), /* @__PURE__ */ k$1("div", {
 		class: "sheet-backdrop",
 		id: "pairingCodeSheet",
 		onClick: closeIfBackdrop("pairingCodeSheet")
-	}, /* @__PURE__ */ k("div", { class: "sheet-panel" }, /* @__PURE__ */ k("div", { class: "sheet-handle" }), /* @__PURE__ */ k("div", { class: "sheet-title" }, /* @__PURE__ */ k("span", null, "📱 添加新手机（6 位配对码）"), /* @__PURE__ */ k("button", {
+	}, /* @__PURE__ */ k$1("div", { class: "sheet-panel" }, /* @__PURE__ */ k$1("div", { class: "sheet-handle" }), /* @__PURE__ */ k$1("div", { class: "sheet-title" }, /* @__PURE__ */ k$1("span", null, "📱 添加新手机（6 位配对码）"), /* @__PURE__ */ k$1("button", {
 		type: "button",
 		style: "border:none;background:transparent;color:var(--muted);font-size:18px;cursor:pointer;",
 		onClick: () => window.closePairingCodeSheet?.()
-	}, "✕")), /* @__PURE__ */ k("div", { id: "pairingCodeBody" }))), /* @__PURE__ */ k("div", {
+	}, "✕")), /* @__PURE__ */ k$1("div", { id: "pairingCodeBody" }))), /* @__PURE__ */ k$1("div", {
 		class: "sheet-backdrop",
 		id: "copyFallbackSheet",
 		onClick: closeIfBackdrop("copyFallbackSheet")
-	}, /* @__PURE__ */ k("div", { class: "sheet-panel" }, /* @__PURE__ */ k("div", { class: "sheet-handle" }), /* @__PURE__ */ k("div", { class: "sheet-title" }, /* @__PURE__ */ k("span", { id: "copyFallbackTitle" }, "📋 复制内容"), /* @__PURE__ */ k("button", {
+	}, /* @__PURE__ */ k$1("div", { class: "sheet-panel" }, /* @__PURE__ */ k$1("div", { class: "sheet-handle" }), /* @__PURE__ */ k$1("div", { class: "sheet-title" }, /* @__PURE__ */ k$1("span", { id: "copyFallbackTitle" }, "📋 复制内容"), /* @__PURE__ */ k$1("button", {
 		type: "button",
 		style: "border:none;background:transparent;color:var(--muted);font-size:18px;cursor:pointer;",
 		onClick: () => window.closeSheet?.("copyFallbackSheet")
-	}, "✕")), /* @__PURE__ */ k("div", { style: "font-size:12px;color:var(--muted);margin-bottom:8px;" }, "当前浏览器限制自动写入剪贴板，请点下方按钮或长按文本框全选复制："), /* @__PURE__ */ k("textarea", {
+	}, "✕")), /* @__PURE__ */ k$1("div", { style: "font-size:12px;color:var(--muted);margin-bottom:8px;" }, "当前浏览器限制自动写入剪贴板，请点下方按钮或长按文本框全选复制："), /* @__PURE__ */ k$1("textarea", {
 		id: "copyFallbackTextarea",
 		readonly: true,
 		class: "new-task-textarea",
 		style: "min-height:92px;font-family:var(--mono);font-size:12px;margin-bottom:10px;",
 		onClick: (e) => e.currentTarget.select()
-	}), /* @__PURE__ */ k("div", { style: "display:flex;gap:8px;" }, /* @__PURE__ */ k("button", {
+	}), /* @__PURE__ */ k$1("div", { style: "display:flex;gap:8px;" }, /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: "primary-block-btn",
 		style: "margin-top:0;flex:1;",
 		onClick: () => window.retryCopyFromFallbackSheet?.()
-	}, "📋 点击复制"), /* @__PURE__ */ k("button", {
+	}, "📋 点击复制"), /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: "choice-chip",
 		style: "padding:0 16px;",
 		onClick: () => window.closeSheet?.("copyFallbackSheet")
-	}, "关闭")))), /* @__PURE__ */ k("div", {
+	}, "关闭")))), /* @__PURE__ */ k$1("div", {
 		class: "sheet-backdrop",
 		id: "modelPickerSheet",
 		onClick: closeIfBackdrop("modelPickerSheet")
-	}, /* @__PURE__ */ k("div", { class: "sheet-panel" }, /* @__PURE__ */ k("div", { class: "sheet-handle" }), /* @__PURE__ */ k("div", { class: "sheet-title" }, /* @__PURE__ */ k("span", { id: "modelPickerTitle" }, "🤖 选择 AI 模型"), /* @__PURE__ */ k("button", {
+	}, /* @__PURE__ */ k$1("div", { class: "sheet-panel" }, /* @__PURE__ */ k$1("div", { class: "sheet-handle" }), /* @__PURE__ */ k$1("div", { class: "sheet-title" }, /* @__PURE__ */ k$1("span", { id: "modelPickerTitle" }, "🤖 选择 AI 模型"), /* @__PURE__ */ k$1("button", {
 		type: "button",
 		style: "border:none;background:transparent;color:var(--muted);font-size:18px;cursor:pointer;",
 		onClick: () => window.closeSheet?.("modelPickerSheet")
-	}, "✕")), /* @__PURE__ */ k("div", { id: "modelPickerBody" }))), /* @__PURE__ */ k("div", {
+	}, "✕")), /* @__PURE__ */ k$1("div", { id: "modelPickerBody" }))), /* @__PURE__ */ k$1("div", {
 		class: "sheet-backdrop",
 		id: "pluginDetailSheet",
 		onClick: closeIfBackdrop("pluginDetailSheet")
-	}, /* @__PURE__ */ k("div", { class: "sheet-panel" }, /* @__PURE__ */ k("div", { class: "sheet-handle" }), /* @__PURE__ */ k("div", {
+	}, /* @__PURE__ */ k$1("div", { class: "sheet-panel" }, /* @__PURE__ */ k$1("div", { class: "sheet-handle" }), /* @__PURE__ */ k$1("div", {
 		class: "sheet-title",
 		style: "margin-bottom:10px;"
-	}, /* @__PURE__ */ k("span", { id: "pluginDetailSheetTitle" }, "🧩 插件详情"), /* @__PURE__ */ k("button", {
+	}, /* @__PURE__ */ k$1("span", { id: "pluginDetailSheetTitle" }, "🧩 插件详情"), /* @__PURE__ */ k$1("button", {
 		type: "button",
 		style: "border:none;background:transparent;color:var(--muted);font-size:18px;cursor:pointer;padding:4px 8px;",
 		onClick: () => window.closeSheet?.("pluginDetailSheet")
-	}, "✕")), /* @__PURE__ */ k("div", { id: "pluginDetailBody" }))), /* @__PURE__ */ k("div", {
+	}, "✕")), /* @__PURE__ */ k$1("div", { id: "pluginDetailBody" }))), /* @__PURE__ */ k$1("div", {
 		class: "sheet-backdrop",
 		id: "fileExportSheet",
 		onClick: closeIfBackdrop("fileExportSheet")
-	}, /* @__PURE__ */ k("div", { class: "sheet-panel file-export-sheet-panel" }, /* @__PURE__ */ k("div", { class: "sheet-handle" }), /* @__PURE__ */ k("div", {
+	}, /* @__PURE__ */ k$1("div", { class: "sheet-panel file-export-sheet-panel" }, /* @__PURE__ */ k$1("div", { class: "sheet-handle" }), /* @__PURE__ */ k$1("div", {
 		class: "sheet-title",
 		style: "margin-bottom:10px;"
-	}, /* @__PURE__ */ k("span", {
+	}, /* @__PURE__ */ k$1("span", {
 		id: "fileExportSheetTitle",
 		style: "overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;"
-	}, "⤓ 导出与分享"), /* @__PURE__ */ k("button", {
+	}, "⤓ 导出与分享"), /* @__PURE__ */ k$1("button", {
 		type: "button",
 		style: "border:none;background:transparent;color:var(--muted);font-size:18px;cursor:pointer;padding:4px 8px;flex-shrink:0;",
 		onClick: () => window.closeSheet?.("fileExportSheet")
-	}, "✕")), /* @__PURE__ */ k("div", { id: "fileExportSheetBody" }))), /* @__PURE__ */ k("div", {
+	}, "✕")), /* @__PURE__ */ k$1("div", { id: "fileExportSheetBody" }))), /* @__PURE__ */ k$1("div", {
 		id: "htmlPreviewOverlay",
 		style: "display:none;position:fixed;inset:0;z-index:9999;background:#0f172a;flex-direction:column;"
-	}, /* @__PURE__ */ k("div", { style: "display:flex;align-items:center;justify-content:space-between;gap:8px;padding:max(10px, env(safe-area-inset-top)) 12px 10px;background:#0f172a;border-bottom:1px solid rgba(148,163,184,0.22);color:#f8fafc;flex-shrink:0;" }, /* @__PURE__ */ k("button", {
+	}, /* @__PURE__ */ k$1("div", { style: "display:flex;align-items:center;justify-content:space-between;gap:8px;padding:max(10px, env(safe-area-inset-top)) 12px 10px;background:#0f172a;border-bottom:1px solid rgba(148,163,184,0.22);color:#f8fafc;flex-shrink:0;" }, /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: "icon-pill-btn",
 		style: "background:rgba(255,255,255,0.12);color:#ffffff;border-color:rgba(255,255,255,0.22);font-weight:700;padding:6px 12px;",
 		onClick: () => window.closeFullscreenHtmlPreview?.()
-	}, "‹ 返回对话"), /* @__PURE__ */ k("span", {
+	}, "‹ 返回对话"), /* @__PURE__ */ k$1("span", {
 		id: "htmlPreviewOverlayTitle",
 		style: "font-size:13.5px;font-weight:700;color:#f8fafc;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;text-align:center;"
-	}, "🌐 HTML 交互预览"), /* @__PURE__ */ k("div", { style: "display:flex;align-items:center;gap:6px;flex-shrink:0;" }, /* @__PURE__ */ k("button", {
+	}, "🌐 HTML 交互预览"), /* @__PURE__ */ k$1("div", { style: "display:flex;align-items:center;gap:6px;flex-shrink:0;" }, /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: "icon-pill-btn",
 		title: "保存或分享此 HTML 文件",
 		"aria-label": "保存或分享此 HTML 文件",
 		style: "background:rgba(255,255,255,0.1);color:#e2e8f0;border-color:rgba(255,255,255,0.18);",
 		onClick: (e) => window.downloadFullscreenHtmlPreview?.(e.currentTarget)
-	}, "⤓"), /* @__PURE__ */ k("button", {
+	}, "⤓"), /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: "icon-pill-btn",
 		id: "htmlPreviewModeBtn",
 		style: "background:rgba(255,255,255,0.1);color:#e2e8f0;border-color:rgba(255,255,255,0.18);",
 		onClick: () => window.toggleFullscreenHtmlSource?.()
-	}, "</> 源码"), /* @__PURE__ */ k("button", {
+	}, "</> 源码"), /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: "icon-pill-btn",
 		title: "重新加载网页",
 		style: "background:rgba(255,255,255,0.1);color:#e2e8f0;border-color:rgba(255,255,255,0.18);",
 		onClick: () => window.reloadFullscreenHtmlPreview?.()
-	}, "🔄"))), /* @__PURE__ */ k("div", {
+	}, "🔄"))), /* @__PURE__ */ k$1("div", {
 		id: "htmlPreviewOverlayBody",
 		style: "flex:1;position:relative;background:#ffffff;overflow:auto;"
 	})));
+}
+// node_modules/.pnpm/preact@11.1.1/node_modules/preact/hooks/dist/hooks.mjs
+var t;
+var r;
+var u;
+var i;
+var o = Object.is;
+var f = 0;
+var c = [];
+var e = [];
+var a = n;
+var v = a.__b;
+var l = a.__r;
+var m = a.diffed;
+var h = a.__c;
+var s = a.unmount;
+var p = a.__;
+function y(n, t) {
+	a.__h && a.__h(r, n, f || t), f = 0;
+	var u = r.__H || (r.__H = {
+		__: [],
+		__h: []
+	});
+	return n >= u.__.length && u.__.push({}), u.__[n];
+}
+function d(n) {
+	return f = 1, _(G, n);
+}
+function _(n, u, i) {
+	var f = y(t++, 2);
+	if (f.t = n, !f.__c && (f.__ = [i ? i(u) : G(void 0, u), function(n) {
+		var t = f.__N ? f.__N[0] : f.__[0], r = f.t(t, n);
+		o(t, r) || (f.__N = [r, f.__[1]], f.__c.setState({}));
+	}], f.__c = r, !r.__f)) {
+		r.__f = !0;
+		var c = r.shouldComponentUpdate;
+		r.shouldComponentUpdate = function(n, t, r) {
+			var u = this.__H;
+			if (!u) return !0;
+			var i = !1, f = this.props != n;
+			if (u.__.some(function(n) {
+				n.__N && (i = !0, o(n.__[0], n.__N[0]) || (f = !0));
+			}), c) {
+				var e = c.call(this, n, t, r);
+				return i ? e || f : e;
+			}
+			return !i || f;
+		};
+	}
+	return f.__;
+}
+function A(n, u) {
+	var i = y(t++, 3);
+	!a.__s && E(i.__H, u) && (i.__P = !0, i.__ = n, i.u = u, r.__H.__h.push(i));
+}
+function T(n) {
+	return f = 5, w(function() {
+		return { current: n };
+	}, []);
+}
+function w(n, r) {
+	var u = y(t++, 7);
+	return E(u.__H, r) && (u.__ = n(), u.__H = r), u.__;
+}
+function g() {
+	var n;
+	do {
+		for (; n = e.shift();) try {
+			C(n);
+		} catch (t) {
+			a.__e(t, { __: (n = n.__P) && n.__v });
+		}
+		for (; n = c.shift();) {
+			var t = n.__H;
+			if (n.__P && t) try {
+				t.__h.some(C), t.__h.some(D), t.__h = [];
+			} catch (r) {
+				t.__h = [], a.__e(r, n.__v);
+			}
+		}
+	} while (e.length);
+}
+a.__b = function(n) {
+	r = null, v && v(n);
+}, a.__ = function(n, t) {
+	n && t.__k && t.__k.__m && (n.__m = t.__k.__m), p && p(n, t);
+}, a.__r = function(n) {
+	l && l(n), t = 0;
+	var i = (r = n.__c).__H;
+	i && (u == r ? r.__h = [] : (i.__h.some(C), i.__h.some(D), t = 0), i.__h = [], i.__.some(function(n) {
+		n.__N && (n.__ = n.__N), n.u = n.__N = void 0;
+	})), u = r;
+}, a.diffed = function(n) {
+	m && m(n);
+	var t = n.__c;
+	t && t.__H && (t.__H.__h.length && B(c.push(t)), t.__H.__.some(function(n) {
+		n.u && (n.__H = n.u);
+	})), u = r = null;
+}, a.__c = function(n, t) {
+	t.some(function(n) {
+		try {
+			n.__h.some(C), n.__h = n.__h.filter(function(n) {
+				return !n.__ || D(n);
+			});
+		} catch (t) {
+			n.__h = [function() {
+				throw t;
+			}];
+		}
+	}), h && h(n, t);
+}, a.unmount = function(n) {
+	s && s(n);
+	var t, r, u = n.__c;
+	u && u.__H && (u.__H.__.some(function(u) {
+		try {
+			if (u.__P && u.__c) {
+				if (void 0 === r) {
+					for (r = n.__; r && (!r.__c || !r.__c.__P);) r = r.__;
+					r = r && r.__c;
+				}
+				u.__P = r, B(e.push(u));
+			} else C(u);
+		} catch (n) {
+			t = n;
+		}
+	}), u.__H = void 0, t && a.__e(t, u.__v));
+};
+var k = "function" == typeof requestAnimationFrame;
+function z(n) {
+	var t, r = function() {
+		clearTimeout(u), k && cancelAnimationFrame(t), setTimeout(n);
+	}, u = setTimeout(r, 35);
+	k && (t = requestAnimationFrame(r));
+}
+function B(n) {
+	1 != n && i == a.requestAnimationFrame || ((i = a.requestAnimationFrame) || z)(g);
+}
+function C(n) {
+	var t = r, u = n.__c;
+	"function" == typeof u && (n.__c = void 0, u()), r = t;
+}
+function D(n) {
+	var t = r;
+	n.__c = n.__(), r = t;
+}
+function E(n, t) {
+	return !n || n.length != t.length || t.some(function(t, r) {
+		return !o(t, n[r]);
+	});
+}
+function G(n, t) {
+	return "function" == typeof t ? t(n) : t;
+}
+// hub/web/src/voice/walkAudio.ts
+var sharedAudioCtx = null;
+function getAudioContext() {
+	if (typeof window === "undefined") return null;
+	const Ctor = window.AudioContext || window.webkitAudioContext;
+	if (!Ctor) return null;
+	try {
+		if (!sharedAudioCtx || sharedAudioCtx.state === "closed") sharedAudioCtx = new Ctor();
+		if (sharedAudioCtx && sharedAudioCtx.state === "suspended") sharedAudioCtx.resume().catch(() => {});
+		return sharedAudioCtx;
+	} catch {
+		return null;
+	}
+}
+function playEarcon(kind) {
+	const ctx = getAudioContext();
+	if (!ctx) return;
+	try {
+		const now = ctx.currentTime;
+		const playTone = (freq, startOffset, dur, vol = .08, type = "sine") => {
+			const osc = ctx.createOscillator();
+			const gain = ctx.createGain();
+			osc.type = type;
+			osc.frequency.setValueAtTime(freq, now + startOffset);
+			gain.gain.setValueAtTime(1e-4, now + startOffset);
+			gain.gain.exponentialRampToValueAtTime(vol, now + startOffset + .015);
+			gain.gain.exponentialRampToValueAtTime(1e-4, now + startOffset + dur);
+			osc.connect(gain);
+			gain.connect(ctx.destination);
+			osc.start(now + startOffset);
+			osc.stop(now + startOffset + dur + .02);
+		};
+		if (kind === "listen") {
+			playTone(587.33, 0, .09, .07);
+			playTone(880, .07, .11, .07);
+		} else if (kind === "done") {
+			playTone(523.25, 0, .11, .08);
+			playTone(783.99, .1, .16, .08);
+		} else if (kind === "approval") {
+			playTone(659.25, 0, .1, .085, "triangle");
+			playTone(880, .11, .12, .085, "triangle");
+			playTone(1046.5, .23, .16, .07, "triangle");
+		} else if (kind === "pin_ok") {
+			playTone(698.46, 0, .09, .08);
+			playTone(1046.5, .09, .16, .09);
+		} else if (kind === "alert") {
+			playTone(392, 0, .14, .09, "triangle");
+			playTone(311.13, .15, .18, .09, "triangle");
+		}
+	} catch {}
+}
+function downsampleFloat32To16kInt16(input, inputSampleRate, targetRate = 16e3) {
+	if (!input.length) return /* @__PURE__ */ new Int16Array(0);
+	if (inputSampleRate === targetRate) {
+		const out = new Int16Array(input.length);
+		for (let i = 0; i < input.length; i += 1) {
+			const s = Math.max(-1, Math.min(1, input[i]));
+			out[i] = s < 0 ? s * 32768 : s * 32767;
+		}
+		return out;
+	}
+	const ratio = inputSampleRate / targetRate;
+	const outLength = Math.max(1, Math.round(input.length / ratio));
+	const out = new Int16Array(outLength);
+	for (let i = 0; i < outLength; i += 1) {
+		const pos = i * ratio;
+		const idx = Math.floor(pos);
+		const frac = pos - idx;
+		const s0 = input[idx] || 0;
+		const s1 = input[Math.min(idx + 1, input.length - 1)] || s0;
+		const val = Math.max(-1, Math.min(1, s0 + (s1 - s0) * frac));
+		out[i] = val < 0 ? val * 32768 : val * 32767;
+	}
+	return out;
+}
+function encodeInt16ToWavBytes(samples, sampleRate = 16e3) {
+	const dataBytes = samples.length * 2;
+	const buf = new ArrayBuffer(44 + dataBytes);
+	const view = new DataView(buf);
+	const writeStr = (offset, str) => {
+		for (let i = 0; i < str.length; i += 1) view.setUint8(offset + i, str.charCodeAt(i));
+	};
+	writeStr(0, "RIFF");
+	view.setUint32(4, 36 + dataBytes, true);
+	writeStr(8, "WAVE");
+	writeStr(12, "fmt ");
+	view.setUint32(16, 16, true);
+	view.setUint16(20, 1, true);
+	view.setUint16(22, 1, true);
+	view.setUint32(24, sampleRate, true);
+	view.setUint32(28, sampleRate * 2, true);
+	view.setUint16(32, 2, true);
+	view.setUint16(34, 16, true);
+	writeStr(36, "data");
+	view.setUint32(40, dataBytes, true);
+	let offset = 44;
+	for (let i = 0; i < samples.length; i += 1) {
+		view.setInt16(offset, samples[i], true);
+		offset += 2;
+	}
+	return new Uint8Array(buf);
+}
+function uint8ToBase64(bytes) {
+	let binary = "";
+	const chunk = 32768;
+	for (let i = 0; i < bytes.length; i += chunk) {
+		const slice = bytes.subarray(i, Math.min(i + chunk, bytes.length));
+		binary += String.fromCharCode.apply(null, Array.from(slice));
+	}
+	return btoa(binary);
+}
+var WalkWavRecorder = class {
+	stream = null;
+	audioCtx = null;
+	sourceNode = null;
+	procNode = null;
+	silentGain = null;
+	chunks = [];
+	sampleRate = 48e3;
+	startedAt = 0;
+	hadSpeech = false;
+	lastVoiceAt = 0;
+	active = false;
+	maxTimer = null;
+	onAutoStop = null;
+	isRecording() {
+		return this.active;
+	}
+	async start(opts = {}) {
+		if (this.active) return;
+		if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) throw new Error("当前浏览器不支持麦克风采集（需 HTTPS 或 localhost 环境）");
+		const stream = await navigator.mediaDevices.getUserMedia({ audio: {
+			channelCount: 1,
+			echoCancellation: true,
+			noiseSuppression: true,
+			autoGainControl: true
+		} });
+		const Ctor = window.AudioContext || window.webkitAudioContext;
+		if (!Ctor) {
+			stream.getTracks().forEach((t) => t.stop());
+			throw new Error("当前浏览器不支持 WebAudio 音频处理");
+		}
+		const ctx = new Ctor();
+		if (ctx.state === "suspended") await ctx.resume().catch(() => {});
+		this.stream = stream;
+		this.audioCtx = ctx;
+		this.sampleRate = ctx.sampleRate || 48e3;
+		this.chunks = [];
+		this.startedAt = Date.now();
+		this.hadSpeech = false;
+		this.lastVoiceAt = this.startedAt;
+		this.active = true;
+		this.onAutoStop = opts.onAutoStop || null;
+		const autoVad = Boolean(opts.autoVad);
+		const vadSilenceMs = Math.max(400, Number(opts.vadSilenceMs) || 850);
+		const maxDurationMs = Math.max(3e3, Number(opts.maxDurationMs) || 25e3);
+		const source = ctx.createMediaStreamSource(stream);
+		const proc = ctx.createScriptProcessor(4096, 1, 1);
+		const silentGain = ctx.createGain();
+		silentGain.gain.value = 0;
+		proc.onaudioprocess = (ev) => {
+			if (!this.active) return;
+			const input = ev.inputBuffer.getChannelData(0);
+			const copy = new Float32Array(input.length);
+			copy.set(input);
+			this.chunks.push(copy);
+			let sumSq = 0;
+			for (let i = 0; i < copy.length; i += 1) sumSq += copy[i] * copy[i];
+			const rms = Math.sqrt(sumSq / Math.max(1, copy.length));
+			const normalizedLevel = Math.min(1, rms * 7.5);
+			opts.onLevel?.(normalizedLevel);
+			const now = Date.now();
+			if (rms > .018) {
+				this.hadSpeech = true;
+				this.lastVoiceAt = now;
+			} else if (autoVad && this.hadSpeech && now - this.startedAt > 550 && now - this.lastVoiceAt >= vadSilenceMs) {
+				const res = this.stop();
+				if (res && this.onAutoStop) this.onAutoStop(res);
+			}
+		};
+		source.connect(proc);
+		proc.connect(silentGain);
+		silentGain.connect(ctx.destination);
+		this.sourceNode = source;
+		this.procNode = proc;
+		this.silentGain = silentGain;
+		this.maxTimer = setTimeout(() => {
+			if (!this.active) return;
+			const res = this.stop();
+			if (res && this.onAutoStop) this.onAutoStop(res);
+		}, maxDurationMs);
+	}
+	stop() {
+		if (!this.active) return null;
+		this.active = false;
+		if (this.maxTimer) {
+			clearTimeout(this.maxTimer);
+			this.maxTimer = null;
+		}
+		const durationMs = Math.max(0, Date.now() - this.startedAt);
+		const hadSpeech = this.hadSpeech;
+		const srcRate = this.sampleRate;
+		const chunks = this.chunks;
+		this.chunks = [];
+		try {
+			this.procNode?.disconnect();
+			this.sourceNode?.disconnect();
+			this.silentGain?.disconnect();
+		} catch {}
+		try {
+			this.stream?.getTracks().forEach((t) => t.stop());
+		} catch {}
+		try {
+			this.audioCtx?.close();
+		} catch {}
+		this.procNode = null;
+		this.sourceNode = null;
+		this.silentGain = null;
+		this.stream = null;
+		this.audioCtx = null;
+		let totalLen = 0;
+		for (const c of chunks) totalLen += c.length;
+		const merged = new Float32Array(totalLen);
+		let offset = 0;
+		for (const c of chunks) {
+			merged.set(c, offset);
+			offset += c.length;
+		}
+		const wavBytes = encodeInt16ToWavBytes(downsampleFloat32To16kInt16(merged, srcRate, 16e3), 16e3);
+		return {
+			wavBase64: uint8ToBase64(wavBytes),
+			byteLength: wavBytes.length,
+			durationMs,
+			sampleRate: 16e3,
+			hadSpeech
+		};
+	}
+};
+var WalkSpeechPlayer = class {
+	runId = 0;
+	activeAudio = null;
+	activeObjectUrl = "";
+	abortCtrl = null;
+	playing = false;
+	isPlaying() {
+		return this.playing;
+	}
+	stop() {
+		this.runId += 1;
+		this.playing = false;
+		if (this.abortCtrl) {
+			try {
+				this.abortCtrl.abort();
+			} catch {}
+			this.abortCtrl = null;
+		}
+		if (this.activeAudio) {
+			try {
+				this.activeAudio.pause();
+				this.activeAudio.src = "";
+			} catch {}
+			this.activeAudio = null;
+		}
+		if (this.activeObjectUrl) {
+			try {
+				URL.revokeObjectURL(this.activeObjectUrl);
+			} catch {}
+			this.activeObjectUrl = "";
+		}
+		try {
+			if (typeof window !== "undefined" && window.speechSynthesis) window.speechSynthesis.cancel();
+		} catch {}
+	}
+	async playAudioBase64(base64, mimeType = "audio/mpeg") {
+		const myRun = this.runId;
+		const bin = atob(base64);
+		const bytes = new Uint8Array(bin.length);
+		for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
+		const blob = new Blob([bytes], { type: mimeType || "audio/mpeg" });
+		const url = URL.createObjectURL(blob);
+		if (this.runId !== myRun) {
+			URL.revokeObjectURL(url);
+			return false;
+		}
+		this.activeObjectUrl = url;
+		const audio = new Audio(url);
+		audio.playsInline = true;
+		this.activeAudio = audio;
+		return new Promise((resolve) => {
+			const cleanup = (ok) => {
+				if (this.activeAudio === audio) this.activeAudio = null;
+				if (this.activeObjectUrl === url) {
+					URL.revokeObjectURL(url);
+					this.activeObjectUrl = "";
+				}
+				resolve(ok);
+			};
+			audio.onended = () => cleanup(true);
+			audio.onerror = () => cleanup(false);
+			const p = audio.play();
+			if (p && typeof p.catch === "function") p.catch(() => cleanup(false));
+		});
+	}
+	speakNativeBrowser(text, rate = 1) {
+		const myRun = this.runId;
+		return new Promise((resolve) => {
+			if (typeof window === "undefined" || !window.speechSynthesis || typeof SpeechSynthesisUtterance === "undefined") {
+				resolve(false);
+				return;
+			}
+			try {
+				window.speechSynthesis.cancel();
+				const u = new SpeechSynthesisUtterance(text);
+				u.lang = /[\u4e00-\u9fa5]/.test(text) ? "zh-CN" : "en-US";
+				u.rate = Math.max(.6, Math.min(2, Number(rate) || 1));
+				u.onend = () => resolve(this.runId === myRun);
+				u.onerror = () => resolve(false);
+				window.speechSynthesis.speak(u);
+			} catch {
+				resolve(false);
+			}
+		});
+	}
+	async speakChunksProgressive(chunks, { useCloudTts, fetchTts, speechRate = 1, onFirstLatency, onStateChange }) {
+		this.stop();
+		const list = (chunks || []).map((c) => String(c || "").trim()).filter(Boolean);
+		if (list.length === 0) return;
+		const myRun = this.runId;
+		const ctrl = new AbortController();
+		this.abortCtrl = ctrl;
+		this.playing = true;
+		onStateChange?.(true);
+		try {
+			if (!useCloudTts) {
+				await this.speakNativeBrowser(list.join(" "), speechRate);
+				return;
+			}
+			let nextPromise = fetchTts(list[0], ctrl.signal).catch(() => ({ ok: false }));
+			for (let i = 0; i < list.length; i += 1) {
+				if (this.runId !== myRun) break;
+				const res = await nextPromise;
+				if (this.runId !== myRun) break;
+				if (i + 1 < list.length) nextPromise = fetchTts(list[i + 1], ctrl.signal).catch(() => ({ ok: false }));
+				else nextPromise = null;
+				if (i === 0 && typeof res?.latencyMs === "number") onFirstLatency?.(res.latencyMs);
+				if (res?.ok && res.audioBase64) {
+					if (!await this.playAudioBase64(res.audioBase64, res.mimeType || "audio/mpeg") && this.runId === myRun) await this.speakNativeBrowser(list[i], speechRate);
+				} else if (this.runId === myRun) await this.speakNativeBrowser(list[i], speechRate);
+			}
+		} finally {
+			if (this.runId === myRun) {
+				this.playing = false;
+				this.abortCtrl = null;
+				onStateChange?.(false);
+			}
+		}
+	}
+};
+var WalkWakeLockManager = class {
+	sentinel = null;
+	wanted = false;
+	visHandler = null;
+	isActive() {
+		return Boolean(this.sentinel);
+	}
+	async enable() {
+		this.wanted = true;
+		if (!this.visHandler && typeof document !== "undefined") {
+			this.visHandler = () => {
+				if (this.wanted && document.visibilityState === "visible") this._acquire();
+			};
+			document.addEventListener("visibilitychange", this.visHandler);
+		}
+		return this._acquire();
+	}
+	async _acquire() {
+		try {
+			const wl = navigator?.wakeLock;
+			if (!wl || typeof wl.request !== "function") return false;
+			this.sentinel = await wl.request("screen");
+			this.sentinel?.addEventListener?.("release", () => {
+				this.sentinel = null;
+			});
+			return true;
+		} catch {
+			this.sentinel = null;
+			return false;
+		}
+	}
+	async disable() {
+		this.wanted = false;
+		if (this.visHandler && typeof document !== "undefined") {
+			document.removeEventListener("visibilitychange", this.visHandler);
+			this.visHandler = null;
+		}
+		if (this.sentinel) {
+			try {
+				await this.sentinel.release();
+			} catch {}
+			this.sentinel = null;
+		}
+	}
+};
+function bindWalkMediaSession(handlers) {
+	const ms = typeof navigator !== "undefined" ? navigator.mediaSession : null;
+	if (!ms || typeof ms.setActionHandler !== "function") return () => {};
+	try {
+		if (typeof window.MediaMetadata === "function") ms.metadata = new window.MediaMetadata({
+			title: "PocketAgents 随行语音总管",
+			artist: "Walk Mode · AirPods Ready",
+			album: "Hands-Free AI Copilot"
+		});
+		ms.setActionHandler("play", () => handlers.onToggleListen());
+		ms.setActionHandler("pause", () => handlers.onStopSpeaking());
+		ms.setActionHandler("nexttrack", () => handlers.onNextBriefing());
+		ms.setActionHandler("previoustrack", () => handlers.onToggleListen());
+	} catch {}
+	return () => {
+		try {
+			ms.setActionHandler("play", null);
+			ms.setActionHandler("pause", null);
+			ms.setActionHandler("nexttrack", null);
+			ms.setActionHandler("previoustrack", null);
+		} catch {}
+	};
+}
+// hub/web/src/components/VoiceCopilotSheets.tsx
+var DEFAULT_CONFIG = {
+	storageMode: "memory",
+	catalog: [],
+	credentials: [],
+	profiles: [{
+		id: "native",
+		name: "系统原生语音（免 Key 免费）",
+		builtin: true,
+		stt: {
+			provider: "native",
+			credId: "",
+			model: "browser-web-speech",
+			language: "zh-CN",
+			thinkingLevel: "default",
+			fallbackChain: []
+		},
+		brain: {
+			provider: "native",
+			credId: "",
+			model: "rule-router",
+			thinkingLevel: "off",
+			maxTokens: 256
+		},
+		tts: {
+			provider: "native",
+			credId: "",
+			model: "browser-speech-synthesis",
+			voice: "system-default",
+			format: "mp3",
+			speed: 1
+		}
+	}],
+	prefs: {
+		activeProfileId: "native",
+		l2Policy: "pin",
+		proactiveBriefing: "approvals",
+		autoVad: true,
+		vadSilenceMs: 850,
+		useByokForChatStt: false,
+		useByokForChatTts: false,
+		autoPlayWalkReplies: true,
+		speechRate: 1
+	},
+	activeProfile: {
+		id: "native",
+		name: "系统原生语音（免 Key 免费）",
+		builtin: true,
+		stt: {
+			provider: "native",
+			credId: "",
+			model: "browser-web-speech",
+			language: "zh-CN",
+			thinkingLevel: "default",
+			fallbackChain: []
+		},
+		brain: {
+			provider: "native",
+			credId: "",
+			model: "rule-router",
+			thinkingLevel: "off",
+			maxTokens: 256
+		},
+		tts: {
+			provider: "native",
+			credId: "",
+			model: "browser-speech-synthesis",
+			voice: "system-default",
+			format: "mp3",
+			speed: 1
+		}
+	}
+};
+function apiCall(path, options = {}) {
+	const bridge = window.__dshVoiceApiFetch;
+	if (typeof bridge === "function") return bridge(path, options);
+	const token = (() => {
+		try {
+			return localStorage.getItem("dsh_hub_token") || "";
+		} catch {
+			return "";
+		}
+	})();
+	const headers = { ...options.headers || {} };
+	if (token) headers["x-hub-token"] = token;
+	if (options.body && !headers["content-type"]) headers["content-type"] = "application/json";
+	return fetch(path, {
+		...options,
+		headers
+	});
+}
+function toast(msg) {
+	try {
+		window.showToast?.(msg);
+	} catch {}
+}
+function summarizeHubState(state) {
+	const hosts = Array.isArray(state?.hosts) ? state.hosts : [];
+	const approvals = [];
+	let runningCount = 0;
+	const completedKeys = [];
+	for (const h of hosts) {
+		const hostName = h?.hostName || h?.hostId || "";
+		const bridge = h?.bridgeState || {};
+		for (const a of bridge.approvals || []) {
+			if (!a) continue;
+			approvals.push({
+				hostId: h.hostId,
+				hostName,
+				code: String(a.code || ""),
+				title: String(a.title || a.summary || a.toolName || "工具审批"),
+				risk: String(a.risk || "")
+			});
+		}
+		for (const t of bridge.tasks || []) {
+			if (!t) continue;
+			if (t.status === "running") runningCount += 1;
+			if (t.status === "idle" && t.lastConclusionAt) completedKeys.push({
+				key: `${h.hostId}:${t.id}:${t.lastConclusionAt}`,
+				title: String(t.title || t.id),
+				hostName
+			});
+		}
+	}
+	return {
+		activeHostId: String(state?.activeHostId || hosts[0]?.hostId || ""),
+		activeSessionId: String(window.__dshActiveSessionId || ""),
+		approvals,
+		runningCount,
+		completedKeys
+	};
+}
+function createEmptyProfileDraft() {
+	return {
+		id: "",
+		name: "自定义随行方案",
+		builtin: false,
+		stt: {
+			provider: "volcengine_asr",
+			credId: "",
+			model: "volc.bigasr.auc_turbo",
+			language: "zh-CN",
+			thinkingLevel: "low",
+			fallbackChain: []
+		},
+		brain: {
+			provider: "gemini",
+			credId: "",
+			model: "gemini-2.5-flash",
+			thinkingLevel: "off",
+			maxTokens: 320
+		},
+		tts: {
+			provider: "volcengine_tts",
+			credId: "",
+			model: "seed-tts-2.0",
+			voice: "zh_female_vv_uranus_bigtts",
+			format: "mp3",
+			speed: 1
+		}
+	};
+}
+function VoiceCopilotSheets() {
+	const [walkOpen, setWalkOpen] = d(false);
+	const [labOpen, setLabOpen] = d(false);
+	const [labTab, setLabTab] = d("profiles");
+	const [config, setConfig] = d(DEFAULT_CONFIG);
+	const [loadingCfg, setLoadingCfg] = d(false);
+	const [walkPhase, setWalkPhase] = d("idle");
+	const [micLevel, setMicLevel] = d(0);
+	const [wakeLocked, setWakeLocked] = d(false);
+	const [lastUserText, setLastUserText] = d("");
+	const [lastReplyText, setLastReplyText] = d("戴上耳机，轻点下方大圆球，问我进度、审批或直接下达新任务。");
+	const [lastActionBadge, setLastActionBadge] = d("");
+	const [lastLatencyBadge, setLastLatencyBadge] = d("");
+	const [activePin, setActivePin] = d(null);
+	const [pinSecLeft, setPinSecLeft] = d(0);
+	const [walkTextInputOpen, setWalkTextInputOpen] = d(false);
+	const [walkTextDraft, setWalkTextDraft] = d("");
+	const [hubSummary, setHubSummary] = d(() => summarizeHubState(window.__dshLastHubState));
+	const [editingProfile, setEditingProfile] = d(null);
+	const [savingProfile, setSavingProfile] = d(false);
+	const [keyProvider, setKeyProvider] = d("gemini");
+	const [keyLabel, setKeyLabel] = d("");
+	const [keyBaseUrl, setKeyBaseUrl] = d("https://generativelanguage.googleapis.com/v1beta");
+	const [keyApiKey, setKeyApiKey] = d("");
+	const [keyAppId, setKeyAppId] = d("");
+	const [keyAccessToken, setKeyAccessToken] = d("");
+	const [keyResourceId, setKeyResourceId] = d("");
+	const [keyDefaultModel, setKeyDefaultModel] = d("");
+	const [keyDefaultVoice, setKeyDefaultVoice] = d("");
+	const [savingKey, setSavingKey] = d(false);
+	const [testingCredId, setTestingCredId] = d("");
+	const [testResults, setTestResults] = d({});
+	const [benchDryRun, setBenchDryRun] = d(true);
+	const [benchText, setBenchText] = d("现在有哪些待审批和运行中的任务？");
+	const [benchRunning, setBenchRunning] = d(false);
+	const [benchRecording, setBenchRecording] = d(false);
+	const [benchReport, setBenchReport] = d(null);
+	const recorderRef = T(null);
+	const playerRef = T(null);
+	const wakeRef = T(null);
+	const nativeRecRef = T(null);
+	const voiceSessionIdRef = T(`walk_${Math.random().toString(36).slice(2, 10)}`);
+	const seenApprovalsRef = T(/* @__PURE__ */ new Set());
+	const seenCompletedRef = T(/* @__PURE__ */ new Set());
+	const walkOpenRef = T(false);
+	const walkPhaseRef = T(walkPhase);
+	const configRef = T(config);
+	A(() => {
+		walkOpenRef.current = walkOpen;
+	}, [walkOpen]);
+	A(() => {
+		walkPhaseRef.current = walkPhase;
+	}, [walkPhase]);
+	A(() => {
+		configRef.current = config;
+	}, [config]);
+	if (!recorderRef.current) recorderRef.current = new WalkWavRecorder();
+	if (!playerRef.current) playerRef.current = new WalkSpeechPlayer();
+	if (!wakeRef.current) wakeRef.current = new WalkWakeLockManager();
+	const refreshConfig = async (silent = false) => {
+		if (!silent) setLoadingCfg(true);
+		try {
+			const res = await apiCall(`/api/voice/config?sessionId=${encodeURIComponent(voiceSessionIdRef.current)}`);
+			const data = await res.json().catch(() => null);
+			if (res.ok && data?.ok) {
+				const next = {
+					storageMode: data.storageMode || "memory",
+					catalog: Array.isArray(data.catalog) ? data.catalog : [],
+					credentials: Array.isArray(data.credentials) ? data.credentials : [],
+					profiles: Array.isArray(data.profiles) && data.profiles.length ? data.profiles : DEFAULT_CONFIG.profiles,
+					prefs: {
+						...DEFAULT_CONFIG.prefs,
+						...data.prefs || {}
+					},
+					activeProfile: data.activeProfile || DEFAULT_CONFIG.activeProfile,
+					activePin: data.activePin || null
+				};
+				setConfig(next);
+				if (data.activePin) setActivePin(data.activePin);
+				window.__dshVoiceConfig = next;
+				window.dispatchEvent(new CustomEvent("dsh:voice-config", { detail: next }));
+			}
+		} catch {} finally {
+			if (!silent) setLoadingCfg(false);
+		}
+	};
+	A(() => {
+		window.openWalkMode = () => {
+			setWalkOpen(true);
+			refreshConfig(true);
+		};
+		window.closeWalkMode = () => {
+			setWalkOpen(false);
+		};
+		window.openVoiceLab = (tab = "profiles") => {
+			setLabTab(tab);
+			setLabOpen(true);
+			refreshConfig(false);
+		};
+		window.closeVoiceLab = () => {
+			setLabOpen(false);
+		};
+		window.__dshRefreshVoiceConfig = () => refreshConfig(true);
+		window.__dshVoiceByokSpeak = async (text, onDone) => {
+			const cfg = configRef.current;
+			if (!cfg?.prefs?.useByokForChatTts || !cfg?.activeProfile || cfg.activeProfile.tts?.provider === "native") return false;
+			const chunks = String(text || "").split(/(?<=[。！？.!?\n])\s*/).map((s) => s.trim()).filter(Boolean).reduce((acc, s) => {
+				const lim = acc.length === 0 ? 48 : 160;
+				if (!acc.length || acc[acc.length - 1].length + s.length > lim) acc.push(s);
+				else acc[acc.length - 1] += s;
+				return acc;
+			}, []);
+			if (!chunks.length) return false;
+			await playerRef.current.speakChunksProgressive(chunks, {
+				useCloudTts: true,
+				speechRate: cfg.prefs.speechRate || 1,
+				fetchTts: async (chunk, signal) => {
+					return (await apiCall("/api/voice/tts", {
+						method: "POST",
+						signal,
+						body: JSON.stringify({
+							text: chunk,
+							profileId: cfg.activeProfile.id
+						})
+					})).json().catch(() => ({ ok: false }));
+				},
+				onStateChange: (playing) => {
+					if (!playing) onDone?.();
+				}
+			});
+			return true;
+		};
+		window.__dshVoiceByokStopSpeak = () => {
+			playerRef.current?.stop();
+		};
+		let chatDictRecorder = null;
+		let chatDictBtnId = "";
+		window.__dshVoiceByokToggleDictation = (targetInputId, btnId, showToastFn, onComposerInputFn) => {
+			const cfg = configRef.current;
+			if (!cfg?.prefs?.useByokForChatStt || !cfg?.activeProfile || cfg.activeProfile.stt?.provider === "native") return false;
+			const btn = document.getElementById(btnId);
+			const input = document.getElementById(targetInputId);
+			if (!input) return false;
+			if (chatDictRecorder?.isRecording()) {
+				document.getElementById(chatDictBtnId || btnId)?.classList.remove("recording");
+				const rec = chatDictRecorder.stop();
+				chatDictRecorder = null;
+				chatDictBtnId = "";
+				if (!rec || rec.byteLength < 1200) {
+					showToastFn("⏹ 录音太短，已取消");
+					return true;
+				}
+				showToastFn("👂 BYOK 云端识别中…");
+				apiCall("/api/voice/stt", {
+					method: "POST",
+					body: JSON.stringify({
+						audioBase64: rec.wavBase64,
+						mimeType: "audio/wav",
+						profileId: cfg.activeProfile.id
+					})
+				}).then((r) => r.json().catch(() => ({ ok: false }))).then((data) => {
+					if (data?.ok && String(data.text || "").trim()) {
+						const sep = input.value && !/\s$/.test(input.value) ? " " : "";
+						input.value = `${input.value}${sep}${String(data.text).trim()}`;
+						onComposerInputFn();
+						showToastFn(`✅ 识别完成 (${data.latencyMs ?? 0}ms)`);
+					} else if (data?.silence) showToastFn("未检测到清晰人声");
+					else showToastFn(`⚠️ 云端识别失败：${data?.error || "请检查密钥"}`);
+				}).catch(() => showToastFn("⚠️ 网络异常，云端识别失败"));
+				return true;
+			}
+			chatDictRecorder = new WalkWavRecorder();
+			chatDictBtnId = btnId;
+			btn?.classList.add("recording");
+			showToastFn("🎙️ BYOK 录音中…说完再点一次发送转写");
+			chatDictRecorder.start({ autoVad: false }).catch((err) => {
+				btn?.classList.remove("recording");
+				chatDictRecorder = null;
+				chatDictBtnId = "";
+				showToastFn(err?.message || "无法打开麦克风");
+			});
+			return true;
+		};
+		const initTimer = setTimeout(() => {
+			refreshConfig(true);
+		}, 800);
+		return () => {
+			clearTimeout(initTimer);
+			playerRef.current?.stop();
+			recorderRef.current?.stop();
+			wakeRef.current?.disable();
+		};
+	}, []);
+	A(() => {
+		if (!activePin) {
+			setPinSecLeft(0);
+			return;
+		}
+		const tick = () => {
+			const left = Math.max(0, Math.ceil((activePin.expiresAt - Date.now()) / 1e3));
+			setPinSecLeft(left);
+			if (left <= 0) setActivePin(null);
+		};
+		tick();
+		const timer = setInterval(tick, 500);
+		return () => clearInterval(timer);
+	}, [activePin]);
+	A(() => {
+		if (!walkOpen) {
+			playerRef.current?.stop();
+			stopAllListening();
+			wakeRef.current?.disable();
+			setWakeLocked(false);
+			setWalkPhase("idle");
+			return;
+		}
+		const snap = summarizeHubState(window.__dshLastHubState);
+		setHubSummary(snap);
+		seenApprovalsRef.current = new Set(snap.approvals.map((a) => `${a.hostId}:${a.code}`));
+		seenCompletedRef.current = new Set(snap.completedKeys.map((c) => c.key));
+		wakeRef.current?.enable().then((ok) => setWakeLocked(ok));
+		const unbindMedia = bindWalkMediaSession({
+			onToggleListen: () => {
+				toggleWalkMic();
+			},
+			onNextBriefing: () => {
+				runBriefingTurn();
+			},
+			onStopSpeaking: () => {
+				playerRef.current?.stop();
+				if (walkPhaseRef.current === "speaking") setWalkPhase("idle");
+			}
+		});
+		return () => {
+			unbindMedia();
+		};
+	}, [walkOpen]);
+	A(() => {
+		const onHubState = (ev) => {
+			const snap = summarizeHubState(ev?.detail || window.__dshLastHubState);
+			setHubSummary(snap);
+			if (!walkOpenRef.current) return;
+			const mode = configRef.current?.prefs?.proactiveBriefing || "approvals";
+			if (mode === "manual") return;
+			const freshApprovals = snap.approvals.filter((a) => {
+				const k = `${a.hostId}:${a.code}`;
+				if (seenApprovalsRef.current.has(k)) return false;
+				seenApprovalsRef.current.add(k);
+				return true;
+			});
+			if (freshApprovals.length > 0 && walkPhaseRef.current === "idle") {
+				const a = freshApprovals[0];
+				playEarcon("approval");
+				const briefText = `注意，${a.hostName} 收到新的审批请求：${a.title}。点圆球说放行或拒绝。`;
+				setLastReplyText(briefText);
+				setLastActionBadge(`🔔 新待审批 ${a.code}`);
+				speakWalkReply([briefText]);
+				return;
+			}
+			if (mode === "all") {
+				const freshCompleted = snap.completedKeys.filter((c) => {
+					if (seenCompletedRef.current.has(c.key)) return false;
+					seenCompletedRef.current.add(c.key);
+					return true;
+				});
+				if (freshCompleted.length > 0 && walkPhaseRef.current === "idle") {
+					const c = freshCompleted[0];
+					playEarcon("done");
+					const briefText = `${c.hostName} 上的任务「${c.title}」已完成。`;
+					setLastReplyText(briefText);
+					setLastActionBadge("✅ 任务完成");
+					speakWalkReply([briefText]);
+				}
+			}
+		};
+		window.addEventListener("dsh:hub-state", onHubState);
+		return () => window.removeEventListener("dsh:hub-state", onHubState);
+	}, []);
+	const stopAllListening = () => {
+		if (recorderRef.current?.isRecording()) recorderRef.current.stop();
+		if (nativeRecRef.current) {
+			try {
+				nativeRecRef.current.stop();
+			} catch {}
+			nativeRecRef.current = null;
+		}
+		setMicLevel(0);
+	};
+	const speakWalkReply = async (chunks, onFirstTtsMs) => {
+		const cfg = configRef.current;
+		if (!cfg.prefs.autoPlayWalkReplies) {
+			setWalkPhase("idle");
+			return;
+		}
+		const useCloud = cfg.activeProfile?.tts?.provider && cfg.activeProfile.tts.provider !== "native";
+		setWalkPhase("speaking");
+		await playerRef.current.speakChunksProgressive(chunks, {
+			useCloudTts: Boolean(useCloud),
+			speechRate: cfg.prefs.speechRate || 1,
+			fetchTts: async (text, signal) => {
+				return (await apiCall("/api/voice/tts", {
+					method: "POST",
+					signal,
+					body: JSON.stringify({
+						text,
+						profileId: cfg.activeProfile.id
+					})
+				})).json().catch(() => ({ ok: false }));
+			},
+			onFirstLatency: onFirstTtsMs,
+			onStateChange: (playing) => {
+				if (!playing && walkPhaseRef.current === "speaking") setWalkPhase("idle");
+			}
+		});
+	};
+	const handleWalkUserText = async (spokenText, sttMs = null, wavKb = null) => {
+		const clean = String(spokenText || "").trim();
+		if (!clean) {
+			setWalkPhase("idle");
+			setLastReplyText("刚才没有听到清晰人声，轻点圆球再说一次。");
+			return;
+		}
+		setLastUserText(clean);
+		setWalkPhase("thinking");
+		setLastActionBadge("");
+		try {
+			const snap = summarizeHubState(window.__dshLastHubState);
+			const res = await apiCall("/api/voice/turn", {
+				method: "POST",
+				body: JSON.stringify({
+					text: clean,
+					voiceSessionId: voiceSessionIdRef.current,
+					activeHostId: snap.activeHostId,
+					activeSessionId: snap.activeSessionId,
+					profileId: configRef.current.activeProfile.id,
+					dryRun: false
+				})
+			});
+			const data = await res.json().catch(() => ({
+				ok: false,
+				error: `HTTP ${res.status}`
+			}));
+			if (!res.ok || !data?.ok) {
+				playEarcon("alert");
+				setWalkPhase("idle");
+				const errMsg = data?.error || "语音大脑调用失败，请检查密钥与网络";
+				setLastReplyText(errMsg);
+				setLastActionBadge("❌ 调用失败");
+				return;
+			}
+			const reply = String(data.spokenReply || "已处理。");
+			const chunks = Array.isArray(data.spokenChunks) && data.spokenChunks.length ? data.spokenChunks : [reply];
+			setLastReplyText(reply);
+			setActivePin(data.pinChallenge || null);
+			if (data.fastPath === "l2_pin_matched") {
+				playEarcon("pin_ok");
+				setLastActionBadge(`🔓 确认码通过 · 已放行 ${data.action?.code || ""}`);
+			} else if (data.execution?.requiresPin) {
+				playEarcon("alert");
+				setLastActionBadge(`⚠️ L2 高危拦截 · 需念出 ${data.pinChallenge?.pin || ""}`);
+			} else if (data.execution?.executed) {
+				playEarcon("done");
+				setLastActionBadge({
+					approve: "✅ 已放行审批",
+					reject: "🚫 已拒绝审批",
+					answer_question: "✅ 已提交选择",
+					send_prompt: "📤 已发送追问",
+					create_task: "✨ 已新建任务",
+					stop_session: "⏹ 已发送停止指令"
+				}[data.execution.type] || `✅ ${data.execution.type}`);
+			} else if (data.action?.type === "query_status") setLastActionBadge("📊 状态播报");
+			const baseMetrics = [];
+			if (wavKb !== null) baseMetrics.push(`WAV ${wavKb}KB`);
+			if (sttMs !== null) baseMetrics.push(`STT ${sttMs}ms`);
+			baseMetrics.push(`大脑 ${data.latencyMs ?? 0}ms${data.fastPath ? " ⚡" : ""}`);
+			setLastLatencyBadge(baseMetrics.join(" · "));
+			await speakWalkReply(chunks, (ttsMs) => {
+				setLastLatencyBadge([...baseMetrics, `TTS ${ttsMs}ms`].join(" · "));
+			});
+		} catch (err) {
+			playEarcon("alert");
+			setWalkPhase("idle");
+			setLastReplyText(err?.message || "网络异常，请稍后再试");
+			setLastActionBadge("❌ 网络异常");
+		}
+	};
+	const handleWalkWavReady = async (rec) => {
+		setMicLevel(0);
+		const wavKb = Math.max(1, Math.round(rec.byteLength / 1024));
+		if (rec.byteLength < 1600) {
+			setWalkPhase("idle");
+			return;
+		}
+		setWalkPhase("transcribing");
+		try {
+			const res = await apiCall("/api/voice/stt", {
+				method: "POST",
+				body: JSON.stringify({
+					audioBase64: rec.wavBase64,
+					mimeType: "audio/wav",
+					profileId: configRef.current.activeProfile.id
+				})
+			});
+			const data = await res.json().catch(() => ({
+				ok: false,
+				error: `HTTP ${res.status}`
+			}));
+			if (!res.ok || !data?.ok) {
+				playEarcon("alert");
+				setWalkPhase("idle");
+				setLastReplyText(data?.error || "云端语音识别失败，请在语音配置检查密钥");
+				setLastActionBadge("❌ STT 失败");
+				return;
+			}
+			if (data.silence || !String(data.text || "").trim()) {
+				setWalkPhase("idle");
+				setLastReplyText("没有检测到清晰人声（静音），轻点圆球重新说。");
+				setLastLatencyBadge(`WAV ${wavKb}KB · STT ${data.latencyMs ?? 0}ms · 静音`);
+				return;
+			}
+			await handleWalkUserText(data.text, data.latencyMs ?? 0, wavKb);
+		} catch (err) {
+			playEarcon("alert");
+			setWalkPhase("idle");
+			setLastReplyText(err?.message || "语音上传失败");
+			setLastActionBadge("❌ 网络失败");
+		}
+	};
+	const startNativeWalkSpeech = () => {
+		const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+		if (!SR) {
+			toast("当前浏览器不支持原生语音识别，可在「配置」添加云端 STT 密钥或使用下方文字输入");
+			setWalkTextInputOpen(true);
+			setWalkPhase("idle");
+			return;
+		}
+		const rec = new SR();
+		rec.lang = "zh-CN";
+		rec.interimResults = true;
+		rec.continuous = false;
+		let finalText = "";
+		const t0 = Date.now();
+		rec.onresult = (ev) => {
+			let txt = "";
+			for (let i = 0; i < ev.results.length; i += 1) txt += ev.results[i][0]?.transcript || "";
+			finalText = txt.trim();
+			if (finalText) setLastUserText(finalText);
+		};
+		rec.onerror = () => {
+			nativeRecRef.current = null;
+			setWalkPhase("idle");
+		};
+		rec.onend = () => {
+			nativeRecRef.current = null;
+			const elapsed = Date.now() - t0;
+			if (finalText) handleWalkUserText(finalText, elapsed, null);
+			else setWalkPhase("idle");
+		};
+		nativeRecRef.current = rec;
+		setWalkPhase("listening");
+		playEarcon("listen");
+		rec.start();
+	};
+	const toggleWalkMic = async () => {
+		if (walkPhaseRef.current === "speaking") playerRef.current?.stop();
+		if (walkPhaseRef.current === "listening") {
+			if (recorderRef.current?.isRecording()) {
+				const res = recorderRef.current.stop();
+				if (res) handleWalkWavReady(res);
+			} else if (nativeRecRef.current) try {
+				nativeRecRef.current.stop();
+			} catch {}
+			return;
+		}
+		if (walkPhaseRef.current === "transcribing" || walkPhaseRef.current === "thinking") return;
+		if ((configRef.current.activeProfile?.stt?.provider || "native") === "native") {
+			startNativeWalkSpeech();
+			return;
+		}
+		try {
+			playEarcon("listen");
+			setWalkPhase("listening");
+			await recorderRef.current.start({
+				autoVad: configRef.current.prefs.autoVad,
+				vadSilenceMs: configRef.current.prefs.vadSilenceMs || 850,
+				onLevel: (lvl) => setMicLevel(lvl),
+				onAutoStop: (res) => {
+					handleWalkWavReady(res);
+				}
+			});
+		} catch (err) {
+			setWalkPhase("idle");
+			toast(err?.message || "无法打开麦克风，请检查浏览器权限");
+		}
+	};
+	const runBriefingTurn = async () => {
+		playerRef.current?.stop();
+		stopAllListening();
+		await handleWalkUserText("汇报一下当前所有电脑的待审批和任务进度");
+	};
+	const handleClearPin = async (rejectAlso = false) => {
+		if (rejectAlso && activePin) {
+			await handleWalkUserText("拒绝");
+			return;
+		}
+		await apiCall("/api/voice/pin/clear", {
+			method: "POST",
+			body: JSON.stringify({ sessionId: voiceSessionIdRef.current })
+		}).catch(() => {});
+		setActivePin(null);
+	};
+	const updatePrefPatch = async (patch) => {
+		const res = await apiCall("/api/voice/prefs", {
+			method: "POST",
+			body: JSON.stringify(patch)
+		});
+		const data = await res.json().catch(() => null);
+		if (res.ok && data?.ok && data.config) {
+			setConfig((prev) => ({
+				...prev,
+				...data.config
+			}));
+			window.__dshVoiceConfig = data.config;
+			window.dispatchEvent(new CustomEvent("dsh:voice-config", { detail: data.config }));
+			toast("✅ 语音偏好已保存");
+		} else toast(`❌ ${data?.error || "保存失败"}`);
+	};
+	const handleSaveCredential = async () => {
+		setSavingKey(true);
+		try {
+			const res = await apiCall("/api/voice/credentials", {
+				method: "POST",
+				body: JSON.stringify({
+					provider: keyProvider,
+					label: keyLabel,
+					baseUrl: keyBaseUrl,
+					apiKey: keyApiKey,
+					appId: keyAppId,
+					accessToken: keyAccessToken,
+					resourceId: keyResourceId,
+					defaultModel: keyDefaultModel,
+					defaultVoice: keyDefaultVoice,
+					active: true
+				})
+			});
+			const data = await res.json().catch(() => null);
+			if (!res.ok || !data?.ok) {
+				toast(`❌ ${data?.error || "保存密钥失败"}`);
+				return;
+			}
+			setConfig((prev) => ({
+				...prev,
+				...data.config
+			}));
+			setKeyLabel("");
+			setKeyApiKey("");
+			setKeyAppId("");
+			setKeyAccessToken("");
+			toast("🔐 密钥已加密存入 Vault（不再回显明文）");
+		} finally {
+			setSavingKey(false);
+		}
+	};
+	const handleTestCredential = async (credId) => {
+		setTestingCredId(credId);
+		try {
+			const res = await apiCall("/api/voice/test", {
+				method: "POST",
+				body: JSON.stringify({ credId })
+			});
+			const data = await res.json().catch(() => ({
+				ok: false,
+				error: `HTTP ${res.status}`
+			}));
+			setTestResults((prev) => ({
+				...prev,
+				[credId]: {
+					ok: Boolean(data?.ok),
+					summary: data?.summary || (data?.ok ? `✅ 连通 (${data.latencyMs}ms)` : `❌ ${data?.error || "测试失败"}`)
+				}
+			}));
+		} finally {
+			setTestingCredId("");
+		}
+	};
+	const handleActivateCredential = async (credId) => {
+		const res = await apiCall("/api/voice/credentials/activate", {
+			method: "POST",
+			body: JSON.stringify({ id: credId })
+		});
+		const data = await res.json().catch(() => null);
+		if (res.ok && data?.ok && data.config) {
+			setConfig((prev) => ({
+				...prev,
+				...data.config
+			}));
+			toast("✅ 已切换该服务商的默认密钥");
+		}
+	};
+	const handleDeleteCredential = async (credId) => {
+		const res = await apiCall(`/api/voice/credentials/${encodeURIComponent(credId)}`, { method: "DELETE" });
+		const data = await res.json().catch(() => null);
+		if (res.ok && data?.ok && data.config) {
+			setConfig((prev) => ({
+				...prev,
+				...data.config
+			}));
+			toast("🗑️ 密钥已移除");
+		}
+	};
+	const handleSaveProfile = async () => {
+		if (!editingProfile) return;
+		setSavingProfile(true);
+		try {
+			const res = await apiCall("/api/voice/profiles", {
+				method: "POST",
+				body: JSON.stringify({
+					...editingProfile,
+					activate: true
+				})
+			});
+			const data = await res.json().catch(() => null);
+			if (!res.ok || !data?.ok) {
+				toast(`❌ ${data?.error || "保存方案失败"}`);
+				return;
+			}
+			setConfig((prev) => ({
+				...prev,
+				...data.config
+			}));
+			setEditingProfile(null);
+			toast("✅ 方案已保存并设为当前生效");
+		} finally {
+			setSavingProfile(false);
+		}
+	};
+	const handleDeleteProfile = async (profileId) => {
+		const res = await apiCall(`/api/voice/profiles/${encodeURIComponent(profileId)}`, { method: "DELETE" });
+		const data = await res.json().catch(() => null);
+		if (res.ok && data?.ok && data.config) {
+			setConfig((prev) => ({
+				...prev,
+				...data.config
+			}));
+			if (editingProfile?.id === profileId) setEditingProfile(null);
+			toast("🗑️ 方案已删除");
+		}
+	};
+	const runBenchTurn = async (textOverride, sttMeta) => {
+		const input = String(textOverride ?? benchText).trim();
+		if (!input) return;
+		setBenchRunning(true);
+		try {
+			const snap = summarizeHubState(window.__dshLastHubState);
+			const turnRes = await apiCall("/api/voice/turn", {
+				method: "POST",
+				body: JSON.stringify({
+					text: input,
+					voiceSessionId: `bench_${voiceSessionIdRef.current}`,
+					activeHostId: snap.activeHostId,
+					activeSessionId: snap.activeSessionId,
+					profileId: config.activeProfile.id,
+					dryRun: benchDryRun
+				})
+			});
+			const turnData = await turnRes.json().catch(() => ({
+				ok: false,
+				error: `HTTP ${turnRes.status}`
+			}));
+			let ttsData = null;
+			if (turnData?.ok && turnData.spokenReply) ttsData = await (await apiCall("/api/voice/tts", {
+				method: "POST",
+				body: JSON.stringify({
+					text: turnData.spokenChunks?.[0] || turnData.spokenReply,
+					profileId: config.activeProfile.id
+				})
+			})).json().catch(() => ({ ok: false }));
+			setBenchReport({
+				stt: sttMeta || null,
+				turn: turnData,
+				tts: ttsData
+			});
+		} finally {
+			setBenchRunning(false);
+		}
+	};
+	const toggleBenchVoiceCapture = async () => {
+		if (benchRecording) {
+			const rec = recorderRef.current?.stop();
+			setBenchRecording(false);
+			if (!rec) return;
+			const wavKb = Math.max(1, Math.round(rec.byteLength / 1024));
+			setBenchRunning(true);
+			try {
+				const sttRes = await apiCall("/api/voice/stt", {
+					method: "POST",
+					body: JSON.stringify({
+						audioBase64: rec.wavBase64,
+						mimeType: "audio/wav",
+						profileId: config.activeProfile.id
+					})
+				});
+				const sttData = await sttRes.json().catch(() => ({
+					ok: false,
+					error: `HTTP ${sttRes.status}`
+				}));
+				if (!sttData?.ok) {
+					setBenchReport({ stt: {
+						ok: false,
+						error: sttData?.error || "STT 失败",
+						wavKb,
+						latencyMs: sttData?.latencyMs || 0
+					} });
+					setBenchRunning(false);
+					return;
+				}
+				setBenchText(sttData.text || "");
+				await runBenchTurn(sttData.text || "", {
+					latencyMs: sttData.latencyMs || 0,
+					wavKb,
+					provider: `${sttData.provider}/${sttData.model || ""}`
+				});
+			} catch (err) {
+				setBenchReport({ stt: {
+					ok: false,
+					error: err?.message || "录音失败",
+					wavKb
+				} });
+				setBenchRunning(false);
+			}
+			return;
+		}
+		if (config.activeProfile.stt?.provider === "native") {
+			toast("当前方案 STT 为系统原生；切换到云端 BYOK 方案即可测试真实 WAV 上传延迟");
+			return;
+		}
+		try {
+			setBenchRecording(true);
+			await recorderRef.current.start({ autoVad: false });
+		} catch (err) {
+			setBenchRecording(false);
+			toast(err?.message || "无法打开麦克风");
+		}
+	};
+	const selectedCatalog = config.catalog.find((c) => c.id === keyProvider);
+	const onSelectKeyProvider = (prov) => {
+		setKeyProvider(prov);
+		const item = config.catalog.find((c) => c.id === prov);
+		setKeyBaseUrl(item?.defaultBaseUrl || "");
+		setKeyResourceId(item?.defaultResourceId || "");
+		setKeyDefaultModel("");
+		setKeyDefaultVoice("");
+	};
+	const renderCredSelect = (provider, value, onChange) => {
+		if (provider === "native") return null;
+		const matched = config.credentials.filter((c) => c.provider === provider);
+		return /* @__PURE__ */ k$1("select", {
+			class: "voice-field-input",
+			value,
+			onChange: (e) => onChange(e.target.value)
+		}, /* @__PURE__ */ k$1("option", { value: "" }, "自动跟随该服务商当前默认密钥 (", matched.length, " 个可用)"), matched.map((c) => /* @__PURE__ */ k$1("option", {
+			key: c.id,
+			value: c.id
+		}, c.label, " (", c.authSummary, ")", c.active ? " ★" : "")));
+	};
+	const activeProf = config.activeProfile || DEFAULT_CONFIG.activeProfile;
+	const orbScale = walkPhase === "listening" ? 1 + Math.min(.18, micLevel * .22) : 1;
+	return /* @__PURE__ */ k$1(M, null, walkOpen && /* @__PURE__ */ k$1("div", {
+		id: "walkModeOverlay",
+		class: "walk-mode-overlay",
+		role: "dialog",
+		"aria-label": "随行耳机模式"
+	}, /* @__PURE__ */ k$1("div", { class: "walk-top-bar" }, /* @__PURE__ */ k$1("div", { class: "walk-top-left" }, /* @__PURE__ */ k$1("button", {
+		type: "button",
+		class: "walk-profile-pill",
+		onClick: () => {
+			setLabTab("profiles");
+			setLabOpen(true);
+		},
+		title: "点击切换语音方案与模型"
+	}, /* @__PURE__ */ k$1("span", null, "🎧"), /* @__PURE__ */ k$1("span", { class: "walk-profile-name" }, activeProf.name), /* @__PURE__ */ k$1("span", null, "▾")), hubSummary.approvals.length > 0 && /* @__PURE__ */ k$1("span", { class: "walk-badge-warn" }, "⚠️ ", hubSummary.approvals.length, " 待审批"), wakeLocked && /* @__PURE__ */ k$1("span", { class: "walk-badge-subtle" }, "🔆 常亮")), /* @__PURE__ */ k$1("div", { class: "walk-top-right" }, /* @__PURE__ */ k$1("button", {
+		type: "button",
+		class: "walk-top-btn",
+		id: "walkOpenLabBtn",
+		onClick: () => {
+			setLabTab("profiles");
+			setLabOpen(true);
+		}
+	}, "⚙️ 配置"), /* @__PURE__ */ k$1("button", {
+		type: "button",
+		class: "walk-top-btn walk-exit-btn",
+		id: "walkExitBtn",
+		onClick: () => setWalkOpen(false)
+	}, "退出 ✕"))), /* @__PURE__ */ k$1("div", {
+		class: "walk-stage",
+		onClick: () => {
+			if (walkPhase === "speaking") {
+				playerRef.current?.stop();
+				setWalkPhase("idle");
+				toast("🔇 已跳过当前播报");
+			}
+		}
+	}, /* @__PURE__ */ k$1("div", { class: `walk-phase-pill phase-${walkPhase}` }, walkPhase === "idle" && "🟢 就绪 · 戴耳机随时说", walkPhase === "listening" && "🎙️ 正在聆听（说完自动停顿或再点圆球）", walkPhase === "transcribing" && "👂 正在高速转写…", walkPhase === "thinking" && "🧠 随行总管思考中…", walkPhase === "speaking" && "🔊 正在播报（轻点字幕静音 / 点圆球直接插话）"), activePin && /* @__PURE__ */ k$1("div", {
+		class: "walk-pin-card",
+		onClick: (e) => e.stopPropagation()
+	}, /* @__PURE__ */ k$1("div", { class: "walk-pin-head" }, /* @__PURE__ */ k$1("span", null, "🔐 高危操作确认码"), /* @__PURE__ */ k$1("span", { class: "walk-pin-timer" }, pinSecLeft, "s 后过期")), /* @__PURE__ */ k$1("div", { class: "walk-pin-digits" }, activePin.pin.split("").join("  ")), /* @__PURE__ */ k$1("div", { class: "walk-pin-desc" }, activePin.summary || activePin.code, " · 请念出上方 3 位数字放行，或说「拒绝」"), /* @__PURE__ */ k$1("div", { class: "walk-pin-actions" }, /* @__PURE__ */ k$1("button", {
+		type: "button",
+		class: "walk-chip-danger",
+		onClick: () => void handleClearPin(true)
+	}, "🚫 立即拒绝"), /* @__PURE__ */ k$1("button", {
+		type: "button",
+		class: "walk-chip-btn",
+		onClick: () => void handleClearPin(false)
+	}, "✕ 取消本次弹窗"))), /* @__PURE__ */ k$1("div", { class: "walk-subtitle-box" }, lastUserText && /* @__PURE__ */ k$1("div", { class: "walk-user-line" }, "你：", lastUserText), /* @__PURE__ */ k$1("div", { class: "walk-reply-line" }, lastReplyText), (lastActionBadge || lastLatencyBadge) && /* @__PURE__ */ k$1("div", { class: "walk-meta-row" }, lastActionBadge && /* @__PURE__ */ k$1("span", { class: "walk-action-tag" }, lastActionBadge), lastLatencyBadge && /* @__PURE__ */ k$1("span", { class: "walk-latency-tag" }, lastLatencyBadge))), /* @__PURE__ */ k$1("div", {
+		class: "walk-quick-strip",
+		onClick: (e) => e.stopPropagation()
+	}, /* @__PURE__ */ k$1("button", {
+		type: "button",
+		class: "walk-chip-btn",
+		onClick: () => void runBriefingTurn()
+	}, "⏭ 汇报最新进度 (", hubSummary.approvals.length, " 审批 · ", hubSummary.runningCount, " 运行中)"), /* @__PURE__ */ k$1("button", {
+		type: "button",
+		class: "walk-chip-btn",
+		onClick: () => setWalkTextInputOpen((v) => !v)
+	}, "⌨️ ", walkTextInputOpen ? "收起打字" : "静音打字")), walkTextInputOpen && /* @__PURE__ */ k$1("div", {
+		class: "walk-text-composer",
+		onClick: (e) => e.stopPropagation()
+	}, /* @__PURE__ */ k$1("input", {
+		type: "text",
+		class: "walk-text-input",
+		placeholder: "地铁/会议中不便说话时可直接发口令...",
+		value: walkTextDraft,
+		onInput: (e) => setWalkTextDraft(e.target.value),
+		onKeyDown: (e) => {
+			if (e.key === "Enter" && walkTextDraft.trim()) {
+				const t = walkTextDraft.trim();
+				setWalkTextDraft("");
+				handleWalkUserText(t);
+			}
+		}
+	}), /* @__PURE__ */ k$1("button", {
+		type: "button",
+		class: "walk-text-send",
+		onClick: () => {
+			if (!walkTextDraft.trim()) return;
+			const t = walkTextDraft.trim();
+			setWalkTextDraft("");
+			handleWalkUserText(t);
+		}
+	}, "发送"))), /* @__PURE__ */ k$1("div", { class: "walk-orb-dock" }, /* @__PURE__ */ k$1("button", {
+		type: "button",
+		id: "walkMicOrbBtn",
+		class: `walk-mic-orb phase-${walkPhase}`,
+		style: `transform: scale(${orbScale.toFixed(3)});`,
+		onClick: () => void toggleWalkMic()
+	}, /* @__PURE__ */ k$1("span", { class: "walk-orb-icon" }, walkPhase === "listening" ? "⏹" : walkPhase === "speaking" ? "🎙️" : walkPhase === "thinking" || walkPhase === "transcribing" ? "⏳" : "🎙️"), /* @__PURE__ */ k$1("span", { class: "walk-orb-label" }, walkPhase === "listening" ? "说完再点发送" : walkPhase === "speaking" ? "点此随时插话" : walkPhase === "transcribing" || walkPhase === "thinking" ? "处理中…" : "盲点开始说话")), /* @__PURE__ */ k$1("div", { class: "walk-footer-toggles" }, /* @__PURE__ */ k$1("button", {
+		type: "button",
+		class: `walk-mini-toggle ${config.prefs.autoVad ? "on" : ""}`,
+		onClick: () => void updatePrefPatch({ autoVad: !config.prefs.autoVad })
+	}, config.prefs.autoVad ? "🟢 自动停顿收音" : "⚪ 手动点停"), /* @__PURE__ */ k$1("button", {
+		type: "button",
+		class: `walk-mini-toggle ${config.prefs.proactiveBriefing !== "manual" ? "on" : ""}`,
+		onClick: () => {
+			const order = [
+				"approvals",
+				"all",
+				"manual"
+			];
+			const next = order[(order.indexOf(config.prefs.proactiveBriefing) + 1) % order.length];
+			updatePrefPatch({ proactiveBriefing: next });
+		}
+	}, "🔔 主动播报：", config.prefs.proactiveBriefing === "approvals" ? "仅审批" : config.prefs.proactiveBriefing === "all" ? "审批+完成" : "手动"), /* @__PURE__ */ k$1("span", { class: "walk-mini-hint" }, "高危：", config.prefs.l2Policy === "pin" ? "3位确认码" : "仅屏触")))), labOpen && /* @__PURE__ */ k$1("div", {
+		id: "voiceLabSheet",
+		class: "sheet-backdrop open voice-lab-backdrop",
+		onClick: (e) => {
+			if (e.target === e.currentTarget) setLabOpen(false);
+		}
+	}, /* @__PURE__ */ k$1("div", { class: "sheet-panel voice-lab-panel" }, /* @__PURE__ */ k$1("div", { class: "sheet-handle" }), /* @__PURE__ */ k$1("div", {
+		class: "sheet-title",
+		style: "margin-bottom:10px;"
+	}, /* @__PURE__ */ k$1("span", null, "🎙️ 随行语音总管 & BYOK 配置"), /* @__PURE__ */ k$1("button", {
+		type: "button",
+		style: "border:none;background:transparent;color:var(--muted);font-size:18px;cursor:pointer;padding:4px 8px;",
+		onClick: () => setLabOpen(false)
+	}, "✕")), /* @__PURE__ */ k$1("div", { class: "voice-lab-tabs" }, /* @__PURE__ */ k$1("button", {
+		type: "button",
+		class: `voice-lab-tab ${labTab === "profiles" ? "active" : ""}`,
+		onClick: () => setLabTab("profiles")
+	}, "🎛️ 方案与开关"), /* @__PURE__ */ k$1("button", {
+		type: "button",
+		class: `voice-lab-tab ${labTab === "keys" ? "active" : ""}`,
+		onClick: () => setLabTab("keys")
+	}, "🔑 密钥池 (", config.credentials.length, ")"), /* @__PURE__ */ k$1("button", {
+		type: "button",
+		class: `voice-lab-tab ${labTab === "bench" ? "active" : ""}`,
+		onClick: () => setLabTab("bench")
+	}, "🧪 调试台")), /* @__PURE__ */ k$1("div", { class: "voice-lab-body" }, loadingCfg && /* @__PURE__ */ k$1("div", { class: "voice-muted-note" }, "正在读取加密配置…"), labTab === "profiles" && /* @__PURE__ */ k$1("div", { class: "voice-tab-stack" }, /* @__PURE__ */ k$1("div", { class: "voice-card" }, /* @__PURE__ */ k$1("div", { class: "voice-card-head" }, /* @__PURE__ */ k$1("span", { class: "voice-card-title" }, "当前生效语音方案"), /* @__PURE__ */ k$1("button", {
+		type: "button",
+		class: "voice-pill-btn primary",
+		onClick: () => setEditingProfile(createEmptyProfileDraft())
+	}, "＋ 新建混搭方案")), /* @__PURE__ */ k$1("div", { class: "voice-profile-list" }, config.profiles.map((p) => {
+		const isActive = p.id === config.prefs.activeProfileId;
+		return /* @__PURE__ */ k$1("div", {
+			key: p.id,
+			class: `voice-profile-row ${isActive ? "active" : ""}`
+		}, /* @__PURE__ */ k$1("div", {
+			style: "flex:1;min-width:0;cursor:pointer;",
+			onClick: () => void updatePrefPatch({ activeProfileId: p.id })
+		}, /* @__PURE__ */ k$1("div", { class: "voice-profile-row-title" }, /* @__PURE__ */ k$1("span", null, isActive ? "✅ " : "⚪ ", p.name)), /* @__PURE__ */ k$1("div", { class: "voice-profile-row-sub" }, "👂 ", p.stt.provider, "/", p.stt.model || "默认", " · 🧠 ", p.brain.provider, "/", p.brain.model || "默认", " · 🗣️ ", p.tts.provider, "/", p.tts.model || "默认")), !p.builtin && /* @__PURE__ */ k$1("div", { style: "display:flex;gap:6px;flex-shrink:0;" }, /* @__PURE__ */ k$1("button", {
+			type: "button",
+			class: "voice-pill-btn",
+			onClick: () => setEditingProfile(JSON.parse(JSON.stringify(p)))
+		}, "编辑"), /* @__PURE__ */ k$1("button", {
+			type: "button",
+			class: "voice-pill-btn danger",
+			onClick: () => void handleDeleteProfile(p.id)
+		}, "删")));
+	}))), editingProfile && /* @__PURE__ */ k$1("div", { class: "voice-card voice-editor-card" }, /* @__PURE__ */ k$1("div", { class: "voice-card-head" }, /* @__PURE__ */ k$1("span", { class: "voice-card-title" }, editingProfile.id ? "编辑混搭方案" : "新建自由混搭方案（耳朵 / 大脑 / 嘴巴独立可选）"), /* @__PURE__ */ k$1("button", {
+		type: "button",
+		class: "voice-pill-btn",
+		onClick: () => setEditingProfile(null)
+	}, "取消")), /* @__PURE__ */ k$1("label", { class: "voice-field-label" }, "方案名称"), /* @__PURE__ */ k$1("input", {
+		class: "voice-field-input",
+		value: editingProfile.name,
+		placeholder: "例如：豆包耳朵嘴巴 + Gemini 大脑",
+		onInput: (e) => setEditingProfile({
+			...editingProfile,
+			name: e.target.value
+		})
+	}), /* @__PURE__ */ k$1("div", { class: "voice-stage-box" }, /* @__PURE__ */ k$1("div", { class: "voice-stage-title" }, "👂 1. 语音识别 (STT · 耳朵)"), /* @__PURE__ */ k$1("select", {
+		class: "voice-field-input",
+		value: editingProfile.stt.provider,
+		onChange: (e) => {
+			const prov = e.target.value;
+			const defModel = prov === "volcengine_asr" ? "volc.bigasr.auc_turbo" : prov === "gemini" ? "gemini-2.5-flash" : prov === "openai_compat" ? "whisper-1" : "browser-web-speech";
+			setEditingProfile({
+				...editingProfile,
+				stt: {
+					...editingProfile.stt,
+					provider: prov,
+					credId: "",
+					model: defModel
+				}
+			});
+		}
+	}, /* @__PURE__ */ k$1("option", { value: "native" }, "系统原生浏览器识别（免 Key 免费）"), /* @__PURE__ */ k$1("option", { value: "volcengine_asr" }, "火山豆包 Flash ASR"), /* @__PURE__ */ k$1("option", { value: "gemini" }, "Google Gemini（音频直识）"), /* @__PURE__ */ k$1("option", { value: "openai_compat" }, "OpenAI 兼容接口（Whisper / Transcribe）")), renderCredSelect(editingProfile.stt.provider, editingProfile.stt.credId, (v) => setEditingProfile({
+		...editingProfile,
+		stt: {
+			...editingProfile.stt,
+			credId: v
+		}
+	})), editingProfile.stt.provider !== "native" && /* @__PURE__ */ k$1("input", {
+		class: "voice-field-input",
+		value: editingProfile.stt.model,
+		placeholder: "模型 / Resource ID（如 volc.bigasr.auc_turbo）",
+		onInput: (e) => setEditingProfile({
+			...editingProfile,
+			stt: {
+				...editingProfile.stt,
+				model: e.target.value
+			}
+		})
+	}), editingProfile.stt.provider === "gemini" && /* @__PURE__ */ k$1("select", {
+		class: "voice-field-input",
+		value: editingProfile.stt.thinkingLevel || "low",
+		onChange: (e) => setEditingProfile({
+			...editingProfile,
+			stt: {
+				...editingProfile.stt,
+				thinkingLevel: e.target.value
+			}
+		})
+	}, /* @__PURE__ */ k$1("option", { value: "low" }, "思考档位：low（推荐，防漏字且低延迟）"), /* @__PURE__ */ k$1("option", { value: "default" }, "思考档位：模型默认"), /* @__PURE__ */ k$1("option", { value: "medium" }, "思考档位：medium")), editingProfile.stt.provider !== "native" && /* @__PURE__ */ k$1("select", {
+		class: "voice-field-input",
+		value: editingProfile.stt.fallbackChain?.[0]?.provider || "",
+		onChange: (e) => {
+			const fbProv = e.target.value;
+			const fbModel = fbProv === "gemini" ? "gemini-2.5-flash" : fbProv === "volcengine_asr" ? "volc.bigasr.auc_turbo" : fbProv === "openai_compat" ? "whisper-1" : "";
+			setEditingProfile({
+				...editingProfile,
+				stt: {
+					...editingProfile.stt,
+					fallbackChain: fbProv ? [{
+						provider: fbProv,
+						credId: "",
+						model: fbModel,
+						thinkingLevel: "low"
+					}] : []
+				}
+			});
+		}
+	}, /* @__PURE__ */ k$1("option", { value: "" }, "备用降级 STT：无（主引擎失败直接报错）"), /* @__PURE__ */ k$1("option", { value: "gemini" }, "备用降级 STT：Google Gemini"), /* @__PURE__ */ k$1("option", { value: "volcengine_asr" }, "备用降级 STT：火山 Flash ASR"), /* @__PURE__ */ k$1("option", { value: "openai_compat" }, "备用降级 STT：OpenAI 兼容 Whisper"))), /* @__PURE__ */ k$1("div", { class: "voice-stage-box" }, /* @__PURE__ */ k$1("div", { class: "voice-stage-title" }, "🧠 2. 语音总管大脑 (Brain · 理解与工具调度)"), /* @__PURE__ */ k$1("select", {
+		class: "voice-field-input",
+		value: editingProfile.brain.provider,
+		onChange: (e) => {
+			const prov = e.target.value;
+			const defModel = prov === "gemini" ? "gemini-2.5-flash" : prov === "openai_compat" ? "deepseek-chat" : "rule-router";
+			setEditingProfile({
+				...editingProfile,
+				brain: {
+					...editingProfile.brain,
+					provider: prov,
+					credId: "",
+					model: defModel
+				}
+			});
+		}
+	}, /* @__PURE__ */ k$1("option", { value: "native" }, "本地规则路由（免 Key 基础口令）"), /* @__PURE__ */ k$1("option", { value: "gemini" }, "Google Gemini"), /* @__PURE__ */ k$1("option", { value: "openai_compat" }, "OpenAI 兼容接口（DeepSeek / 方舟 Ark / OpenAI / Ollama）")), renderCredSelect(editingProfile.brain.provider, editingProfile.brain.credId, (v) => setEditingProfile({
+		...editingProfile,
+		brain: {
+			...editingProfile.brain,
+			credId: v
+		}
+	})), editingProfile.brain.provider !== "native" && /* @__PURE__ */ k$1(M, null, /* @__PURE__ */ k$1("input", {
+		class: "voice-field-input",
+		value: editingProfile.brain.model,
+		placeholder: "模型 ID（如 gemini-2.5-flash / deepseek-v4-1-flash-261017）",
+		onInput: (e) => setEditingProfile({
+			...editingProfile,
+			brain: {
+				...editingProfile.brain,
+				model: e.target.value
+			}
+		})
+	}), /* @__PURE__ */ k$1("select", {
+		class: "voice-field-input",
+		value: editingProfile.brain.thinkingLevel || "off",
+		onChange: (e) => setEditingProfile({
+			...editingProfile,
+			brain: {
+				...editingProfile.brain,
+				thinkingLevel: e.target.value
+			}
+		})
+	}, /* @__PURE__ */ k$1("option", { value: "off" }, "思考档位：关闭思考（极速 ~1s，推荐随行口令）"), /* @__PURE__ */ k$1("option", { value: "low" }, "思考档位：low（轻量思考，3.x/4.x 最低档）"), /* @__PURE__ */ k$1("option", { value: "medium" }, "思考档位：medium"), /* @__PURE__ */ k$1("option", { value: "high" }, "思考档位：high（复杂多任务规划）")))), /* @__PURE__ */ k$1("div", { class: "voice-stage-box" }, /* @__PURE__ */ k$1("div", { class: "voice-stage-title" }, "🗣️ 3. 语音播报 (TTS · 嘴巴)"), /* @__PURE__ */ k$1("select", {
+		class: "voice-field-input",
+		value: editingProfile.tts.provider,
+		onChange: (e) => {
+			const prov = e.target.value;
+			const defModel = prov === "volcengine_tts" ? "seed-tts-2.0" : prov === "gemini" ? "gemini-2.5-flash-preview-tts" : prov === "openai_compat" ? "gpt-4o-mini-tts" : "browser-speech-synthesis";
+			const defVoice = prov === "volcengine_tts" ? "zh_female_vv_uranus_bigtts" : prov === "gemini" ? "Kore" : prov === "openai_compat" ? "alloy" : "system-default";
+			setEditingProfile({
+				...editingProfile,
+				tts: {
+					...editingProfile.tts,
+					provider: prov,
+					credId: "",
+					model: defModel,
+					voice: defVoice
+				}
+			});
+		}
+	}, /* @__PURE__ */ k$1("option", { value: "native" }, "系统原生语音合成（免 Key 免费）"), /* @__PURE__ */ k$1("option", { value: "volcengine_tts" }, "火山豆包 Seed-TTS 2.0"), /* @__PURE__ */ k$1("option", { value: "gemini" }, "Google Gemini TTS（自动转 WAV）"), /* @__PURE__ */ k$1("option", { value: "openai_compat" }, "OpenAI 兼容接口（/audio/speech）")), renderCredSelect(editingProfile.tts.provider, editingProfile.tts.credId, (v) => setEditingProfile({
+		...editingProfile,
+		tts: {
+			...editingProfile.tts,
+			credId: v
+		}
+	})), editingProfile.tts.provider !== "native" && /* @__PURE__ */ k$1("div", { class: "voice-two-col" }, /* @__PURE__ */ k$1("input", {
+		class: "voice-field-input",
+		value: editingProfile.tts.model,
+		placeholder: "模型 / Resource ID",
+		onInput: (e) => setEditingProfile({
+			...editingProfile,
+			tts: {
+				...editingProfile.tts,
+				model: e.target.value
+			}
+		})
+	}), /* @__PURE__ */ k$1("input", {
+		class: "voice-field-input",
+		value: editingProfile.tts.voice || "",
+		placeholder: "音色 Speaker / Voice",
+		onInput: (e) => setEditingProfile({
+			...editingProfile,
+			tts: {
+				...editingProfile.tts,
+				voice: e.target.value
+			}
+		})
+	}))), /* @__PURE__ */ k$1("button", {
+		type: "button",
+		class: "primary-block-btn",
+		disabled: savingProfile,
+		onClick: () => void handleSaveProfile()
+	}, savingProfile ? "正在保存…" : "💾 保存并启用该方案")), /* @__PURE__ */ k$1("div", { class: "voice-card" }, /* @__PURE__ */ k$1("div", {
+		class: "voice-card-title",
+		style: "margin-bottom:8px;"
+	}, "🛡️ 安全护栏与行为开关"), /* @__PURE__ */ k$1("div", { class: "voice-toggle-row" }, /* @__PURE__ */ k$1("div", null, /* @__PURE__ */ k$1("div", { class: "voice-row-main" }, "高危操作审批策略 (L2)"), /* @__PURE__ */ k$1("div", { class: "voice-row-sub" }, "命中 rm -rf / force push / 生产部署等高危指令时的保护方式")), /* @__PURE__ */ k$1("select", {
+		class: "voice-mini-select",
+		value: config.prefs.l2Policy,
+		onChange: (e) => void updatePrefPatch({ l2Policy: e.target.value })
+	}, /* @__PURE__ */ k$1("option", { value: "pin" }, "🔢 念出随机 3 位确认码"), /* @__PURE__ */ k$1("option", { value: "screen_only" }, "📱 仅限手机屏幕点按"))), /* @__PURE__ */ k$1("div", { class: "voice-toggle-row" }, /* @__PURE__ */ k$1("div", null, /* @__PURE__ */ k$1("div", { class: "voice-row-main" }, "聊天页「🔊 播报」使用 BYOK 语音合成"), /* @__PURE__ */ k$1("div", { class: "voice-row-sub" }, "默认关闭（保持免费系统语音）；开启后复用当前方案 TTS，失败自动降级")), /* @__PURE__ */ k$1("input", {
+		type: "checkbox",
+		class: "voice-switch",
+		checked: config.prefs.useByokForChatTts,
+		onChange: (e) => void updatePrefPatch({ useByokForChatTts: e.target.checked })
+	})), /* @__PURE__ */ k$1("div", { class: "voice-toggle-row" }, /* @__PURE__ */ k$1("div", null, /* @__PURE__ */ k$1("div", { class: "voice-row-main" }, "聊天页语音输入优先使用 BYOK 识别"), /* @__PURE__ */ k$1("div", { class: "voice-row-sub" }, "默认关闭（保持免费系统语音）；开启后可在聊天页复用云端 STT")), /* @__PURE__ */ k$1("input", {
+		type: "checkbox",
+		class: "voice-switch",
+		checked: config.prefs.useByokForChatStt,
+		onChange: (e) => void updatePrefPatch({ useByokForChatStt: e.target.checked })
+	})))), labTab === "keys" && /* @__PURE__ */ k$1("div", { class: "voice-tab-stack" }, /* @__PURE__ */ k$1("div", { class: "voice-security-banner" }, "🔐 所有密钥均在你的 Hub 服务端以 ", /* @__PURE__ */ k$1("strong", null, "AES-256-GCM"), " 加密落盘（权限 ", /* @__PURE__ */ k$1("code", null, "0600"), "），保存后永不回显明文；同一服务商支持存多把 Key 随时热切。"), config.credentials.length > 0 && /* @__PURE__ */ k$1("div", { class: "voice-card" }, /* @__PURE__ */ k$1("div", {
+		class: "voice-card-title",
+		style: "margin-bottom:8px;"
+	}, "已保存密钥池 (", config.credentials.length, ")"), config.credentials.map((c) => /* @__PURE__ */ k$1("div", {
+		key: c.id,
+		class: "voice-cred-item"
+	}, /* @__PURE__ */ k$1("div", { style: "flex:1;min-width:0;" }, /* @__PURE__ */ k$1("div", { class: "voice-cred-title" }, /* @__PURE__ */ k$1("span", { class: "voice-prov-tag" }, c.provider), /* @__PURE__ */ k$1("span", null, c.label), c.active && /* @__PURE__ */ k$1("span", { class: "voice-active-tag" }, "默认")), /* @__PURE__ */ k$1("div", { class: "voice-cred-sub" }, c.authSummary, c.baseUrl ? ` · ${c.baseUrl.replace(/^https?:\/\//, "").slice(0, 42)}` : ""), testResults[c.id] && /* @__PURE__ */ k$1("div", { class: `voice-test-msg ${testResults[c.id].ok ? "ok" : "err"}` }, testResults[c.id].summary)), /* @__PURE__ */ k$1("div", { class: "voice-cred-actions" }, /* @__PURE__ */ k$1("button", {
+		type: "button",
+		class: "voice-pill-btn",
+		disabled: testingCredId === c.id,
+		onClick: () => void handleTestCredential(c.id)
+	}, testingCredId === c.id ? "测速中…" : "🔌 测速"), !c.active && /* @__PURE__ */ k$1("button", {
+		type: "button",
+		class: "voice-pill-btn",
+		onClick: () => void handleActivateCredential(c.id)
+	}, "设为默认"), /* @__PURE__ */ k$1("button", {
+		type: "button",
+		class: "voice-pill-btn danger",
+		onClick: () => void handleDeleteCredential(c.id)
+	}, "删"))))), /* @__PURE__ */ k$1("div", { class: "voice-card" }, /* @__PURE__ */ k$1("div", {
+		class: "voice-card-title",
+		style: "margin-bottom:8px;"
+	}, "添加新密钥（开源中立 · 自由填任意厂商）"), /* @__PURE__ */ k$1("label", { class: "voice-field-label" }, "服务商协议类型"), /* @__PURE__ */ k$1("select", {
+		class: "voice-field-input",
+		value: keyProvider,
+		onChange: (e) => onSelectKeyProvider(e.target.value)
+	}, /* @__PURE__ */ k$1("option", { value: "gemini" }, "Google Gemini API（STT / 大脑 / TTS）"), /* @__PURE__ */ k$1("option", { value: "openai_compat" }, "OpenAI 兼容接口（DeepSeek / 方舟 Ark / OpenAI / Ollama）"), /* @__PURE__ */ k$1("option", { value: "volcengine_asr" }, "火山豆包语音识别 (Flash ASR · 独立权限池)"), /* @__PURE__ */ k$1("option", { value: "volcengine_tts" }, "火山豆包语音合成 (Seed-TTS 2.0 · 独立权限池)")), selectedCatalog?.hint && /* @__PURE__ */ k$1("div", { class: "voice-muted-note" }, selectedCatalog.hint), /* @__PURE__ */ k$1("label", { class: "voice-field-label" }, "自定义备注名"), /* @__PURE__ */ k$1("input", {
+		class: "voice-field-input",
+		value: keyLabel,
+		placeholder: "例如：我的主号 Key / 公司方舟 Key",
+		onInput: (e) => setKeyLabel(e.target.value)
+	}), /* @__PURE__ */ k$1("label", { class: "voice-field-label" }, "接口 Base URL"), /* @__PURE__ */ k$1("input", {
+		class: "voice-field-input",
+		value: keyBaseUrl,
+		placeholder: "https://...",
+		onInput: (e) => setKeyBaseUrl(e.target.value)
+	}), selectedCatalog?.baseUrlExamples && selectedCatalog.baseUrlExamples.length > 1 && /* @__PURE__ */ k$1("div", { class: "voice-chip-row" }, selectedCatalog.baseUrlExamples.map((ex) => /* @__PURE__ */ k$1("button", {
+		key: ex.url,
+		type: "button",
+		class: "voice-quick-chip",
+		onClick: () => setKeyBaseUrl(ex.url)
+	}, ex.label))), /* @__PURE__ */ k$1("label", { class: "voice-field-label" }, "API Key ", keyProvider === "volcengine_asr" || keyProvider === "volcengine_tts" ? "（或留空改填下方 AppID + Access Token）" : "（必填）"), /* @__PURE__ */ k$1("input", {
+		type: "password",
+		class: "voice-field-input",
+		value: keyApiKey,
+		placeholder: "粘贴密钥（只写不回显）",
+		onInput: (e) => setKeyApiKey(e.target.value)
+	}), (keyProvider === "volcengine_asr" || keyProvider === "volcengine_tts") && /* @__PURE__ */ k$1(M, null, /* @__PURE__ */ k$1("div", { class: "voice-two-col" }, /* @__PURE__ */ k$1("div", null, /* @__PURE__ */ k$1("label", { class: "voice-field-label" }, "AppID（可选替代）"), /* @__PURE__ */ k$1("input", {
+		class: "voice-field-input",
+		value: keyAppId,
+		placeholder: "火山语音 AppID",
+		onInput: (e) => setKeyAppId(e.target.value)
+	})), /* @__PURE__ */ k$1("div", null, /* @__PURE__ */ k$1("label", { class: "voice-field-label" }, "Access Token"), /* @__PURE__ */ k$1("input", {
+		type: "password",
+		class: "voice-field-input",
+		value: keyAccessToken,
+		placeholder: "火山 Access Token",
+		onInput: (e) => setKeyAccessToken(e.target.value)
+	}))), /* @__PURE__ */ k$1("label", { class: "voice-field-label" }, "Resource ID"), /* @__PURE__ */ k$1("input", {
+		class: "voice-field-input",
+		value: keyResourceId,
+		placeholder: keyProvider === "volcengine_asr" ? "volc.bigasr.auc_turbo" : "seed-tts-2.0",
+		onInput: (e) => setKeyResourceId(e.target.value)
+	})), /* @__PURE__ */ k$1("div", { class: "voice-two-col" }, /* @__PURE__ */ k$1("div", null, /* @__PURE__ */ k$1("label", { class: "voice-field-label" }, "默认模型（可选）"), /* @__PURE__ */ k$1("input", {
+		class: "voice-field-input",
+		value: keyDefaultModel,
+		placeholder: "留空则按方案指定",
+		onInput: (e) => setKeyDefaultModel(e.target.value)
+	})), /* @__PURE__ */ k$1("div", null, /* @__PURE__ */ k$1("label", { class: "voice-field-label" }, "默认音色（可选）"), /* @__PURE__ */ k$1("input", {
+		class: "voice-field-input",
+		value: keyDefaultVoice,
+		placeholder: "如 Kore / alloy / vv",
+		onInput: (e) => setKeyDefaultVoice(e.target.value)
+	}))), /* @__PURE__ */ k$1("button", {
+		type: "button",
+		class: "primary-block-btn",
+		disabled: savingKey,
+		onClick: () => void handleSaveCredential()
+	}, savingKey ? "正在加密保存…" : "🔐 加密存入密钥池"))), labTab === "bench" && /* @__PURE__ */ k$1("div", { class: "voice-tab-stack" }, /* @__PURE__ */ k$1("div", { class: "voice-card" }, /* @__PURE__ */ k$1("div", {
+		class: "voice-toggle-row",
+		style: "padding-top:0;border-top:none;"
+	}, /* @__PURE__ */ k$1("div", null, /* @__PURE__ */ k$1("div", { class: "voice-row-main" }, "🧪 试跑模式 (Dry-Run)"), /* @__PURE__ */ k$1("div", { class: "voice-row-sub" }, "完整跑通当前方案的模型与耗时打点，但绝不向电脑真实下发任何指令")), /* @__PURE__ */ k$1("input", {
+		type: "checkbox",
+		class: "voice-switch",
+		checked: benchDryRun,
+		onChange: (e) => setBenchDryRun(e.target.checked)
+	})), /* @__PURE__ */ k$1("div", {
+		class: "voice-muted-note",
+		style: "margin-top:6px;"
+	}, "当前被测方案：", /* @__PURE__ */ k$1("strong", null, activeProf.name)), /* @__PURE__ */ k$1("div", {
+		class: "voice-chip-row",
+		style: "margin-top:8px;"
+	}, [
+		"现在有哪些待审批和运行中的任务？",
+		"放行当前审批",
+		"帮我新建任务跑一遍单测",
+		"确认码 739"
+	].map((sample) => /* @__PURE__ */ k$1("button", {
+		key: sample,
+		type: "button",
+		class: "voice-quick-chip",
+		onClick: () => setBenchText(sample)
+	}, sample))), /* @__PURE__ */ k$1("textarea", {
+		class: "voice-field-input",
+		rows: 2,
+		style: "margin-top:8px;",
+		value: benchText,
+		onInput: (e) => setBenchText(e.target.value),
+		placeholder: "输入一句测试口令，或点下方录一段真声测全链路..."
+	}), /* @__PURE__ */ k$1("div", { style: "display:flex;gap:8px;margin-top:8px;" }, /* @__PURE__ */ k$1("button", {
+		type: "button",
+		class: "primary-block-btn",
+		style: "margin-top:0;flex:1;",
+		disabled: benchRunning,
+		onClick: () => void runBenchTurn()
+	}, benchRunning ? "⏳ 跑分测试中…" : "🚀 跑一轮大脑 + 语音测速"), /* @__PURE__ */ k$1("button", {
+		type: "button",
+		class: `voice-pill-btn ${benchRecording ? "danger" : ""}`,
+		style: "padding:10px 12px;",
+		disabled: benchRunning,
+		onClick: () => void toggleBenchVoiceCapture()
+	}, benchRecording ? "⏹ 停止并测全链路" : "🎙️ 录真声"))), benchReport && /* @__PURE__ */ k$1("div", { class: "voice-card" }, /* @__PURE__ */ k$1("div", {
+		class: "voice-card-title",
+		style: "margin-bottom:8px;"
+	}, "📊 实测耗时与结构化决策"), /* @__PURE__ */ k$1("div", { class: "voice-metrics-grid" }, benchReport.stt && /* @__PURE__ */ k$1("div", { class: "voice-metric-box" }, /* @__PURE__ */ k$1("div", { class: "voice-metric-k" }, "STT (", benchReport.stt.wavKb || 0, "KB)"), /* @__PURE__ */ k$1("div", { class: "voice-metric-v" }, benchReport.stt.latencyMs ?? 0, " ms")), benchReport.turn && /* @__PURE__ */ k$1("div", { class: "voice-metric-box" }, /* @__PURE__ */ k$1("div", { class: "voice-metric-k" }, "大脑 (", benchReport.turn.model || "-", ")"), /* @__PURE__ */ k$1("div", { class: "voice-metric-v" }, benchReport.turn.latencyMs ?? 0, " ms")), benchReport.tts && /* @__PURE__ */ k$1("div", { class: "voice-metric-box" }, /* @__PURE__ */ k$1("div", { class: "voice-metric-k" }, "TTS (", benchReport.tts.provider || "-", ")"), /* @__PURE__ */ k$1("div", { class: "voice-metric-v" }, benchReport.tts.latencyMs ?? 0, " ms"))), benchReport.turn?.spokenReply && /* @__PURE__ */ k$1("div", { class: "voice-bench-reply" }, /* @__PURE__ */ k$1("div", null, /* @__PURE__ */ k$1("strong", null, "口语回复："), benchReport.turn.spokenReply), benchReport.tts?.audioBase64 && /* @__PURE__ */ k$1("button", {
+		type: "button",
+		class: "voice-pill-btn primary",
+		style: "margin-top:8px;",
+		onClick: () => void playerRef.current?.playAudioBase64(benchReport.tts.audioBase64, benchReport.tts.mimeType)
+	}, "🔊 试听云端合成音频 (", Math.round((benchReport.tts.byteLength || 0) / 1024), " KB)")), (benchReport.stt?.error || benchReport.turn?.error || benchReport.tts?.error) && /* @__PURE__ */ k$1("div", {
+		class: "voice-test-msg err",
+		style: "margin-top:8px;"
+	}, benchReport.stt?.error || benchReport.turn?.error || benchReport.tts?.error), benchReport.turn?.action && /* @__PURE__ */ k$1("pre", { class: "voice-bench-json" }, JSON.stringify({
+		fastPath: benchReport.turn.fastPath || null,
+		action: benchReport.turn.action,
+		execution: benchReport.turn.execution
+	}, null, 2))))))));
 }
 // hub/web/src/App.tsx
 var HARNESS_SVG_SPRITE = `<svg id="dshHarnessSvgDefs" width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
@@ -1105,45 +3091,45 @@ var HARNESS_SVG_SPRITE = `<svg id="dshHarnessSvgDefs" width="24" height="24" vie
   </defs>
 </svg>`;
 function App() {
-	return /* @__PURE__ */ k(M, null, /* @__PURE__ */ k("div", {
+	return /* @__PURE__ */ k$1(M, null, /* @__PURE__ */ k$1("div", {
 		style: "position:fixed;left:-9999px;top:-9999px;width:24px;height:24px;overflow:hidden;opacity:0;pointer-events:none;",
 		"aria-hidden": "true",
 		dangerouslySetInnerHTML: { __html: HARNESS_SVG_SPRITE }
-	}), /* @__PURE__ */ k("div", {
+	}), /* @__PURE__ */ k$1("div", {
 		class: "install-hint",
 		id: "installHint"
-	}, /* @__PURE__ */ k("div", { class: "install-hint-text" }, "📲 想收锁屏通知？点底部分享 ", /* @__PURE__ */ k("strong", null, "→ 添加到主屏幕"), "，再从桌面图标打开"), /* @__PURE__ */ k("button", {
+	}, /* @__PURE__ */ k$1("div", { class: "install-hint-text" }, "📲 想收锁屏通知？点底部分享 ", /* @__PURE__ */ k$1("strong", null, "→ 添加到主屏幕"), "，再从桌面图标打开"), /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: "install-hint-close",
 		onClick: () => window.dismissInstallHint?.()
-	}, "知道了")), /* @__PURE__ */ k("div", {
+	}, "知道了")), /* @__PURE__ */ k$1("div", {
 		class: "toast-pill",
 		id: "toastPill"
-	}, "操作成功"), /* @__PURE__ */ k("div", { class: "preview-toolbar" }, /* @__PURE__ */ k("span", null, "视图体验："), /* @__PURE__ */ k("button", {
+	}, "操作成功"), /* @__PURE__ */ k$1("div", { class: "preview-toolbar" }, /* @__PURE__ */ k$1("span", null, "视图体验："), /* @__PURE__ */ k$1("button", {
 		type: "button",
 		id: "btnPhoneMode",
 		class: "active",
 		onClick: () => window.setPreviewMode?.("phone")
-	}, "📱 iPhone 手机视图"), /* @__PURE__ */ k("button", {
+	}, "📱 iPhone 手机视图"), /* @__PURE__ */ k$1("button", {
 		type: "button",
 		id: "btnDesktopMode",
 		onClick: () => window.setPreviewMode?.("desktop")
-	}, "🖥️ 电脑双栏同屏视图"), /* @__PURE__ */ k("button", {
+	}, "🖥️ 电脑双栏同屏视图"), /* @__PURE__ */ k$1("button", {
 		type: "button",
 		"data-lang-toggle": "1",
 		onClick: () => window.toggleLangPreference?.()
-	}, "🌐 EN")), /* @__PURE__ */ k("div", {
+	}, "🌐 EN")), /* @__PURE__ */ k$1("div", {
 		class: "auth-overlay",
 		id: "authOverlay"
-	}, /* @__PURE__ */ k("div", {
+	}, /* @__PURE__ */ k$1("div", {
 		class: "auth-card",
 		style: "position:relative;"
-	}, /* @__PURE__ */ k("button", {
+	}, /* @__PURE__ */ k$1("button", {
 		type: "button",
 		"data-lang-toggle": "1",
 		onClick: () => window.toggleLangPreference?.(),
 		style: "position:absolute;top:14px;right:14px;border:1px solid var(--border);background:var(--subtle);color:var(--text-secondary);border-radius:999px;padding:4px 10px;font-size:11.5px;font-weight:700;cursor:pointer;"
-	}, "🌐 EN"), /* @__PURE__ */ k("div", { style: "font-size:38px;margin-bottom:8px;" }, "🔒"), /* @__PURE__ */ k("div", { style: "font-size:18px;font-weight:800;color:var(--text);" }, "DSH 远控控制台登录"), /* @__PURE__ */ k("div", { style: "font-size:12.5px;color:var(--text-secondary);margin-top:8px;line-height:1.6;text-align:left;background:var(--subtle);padding:10px 12px;border-radius:10px;border:1px solid var(--border);" }, /* @__PURE__ */ k("div", null, "💻 ", /* @__PURE__ */ k("strong", null, "电脑首次接入"), "：输入部署时设置的管理密码 (", /* @__PURE__ */ k("code", null, "HUB_TOKEN"), ")"), /* @__PURE__ */ k("div", { style: "margin-top:4px;" }, "📱 ", /* @__PURE__ */ k("strong", null, "手机免密登录"), "：直接扫电脑网页上的二维码，或输入 6 位配对码")), /* @__PURE__ */ k("input", {
+	}, "🌐 EN"), /* @__PURE__ */ k$1("div", { style: "font-size:38px;margin-bottom:8px;" }, "🔒"), /* @__PURE__ */ k$1("div", { style: "font-size:18px;font-weight:800;color:var(--text);" }, "DSH 远控控制台登录"), /* @__PURE__ */ k$1("div", { style: "font-size:12.5px;color:var(--text-secondary);margin-top:8px;line-height:1.6;text-align:left;background:var(--subtle);padding:10px 12px;border-radius:10px;border:1px solid var(--border);" }, /* @__PURE__ */ k$1("div", null, "💻 ", /* @__PURE__ */ k$1("strong", null, "电脑首次接入"), "：输入部署时设置的管理密码 (", /* @__PURE__ */ k$1("code", null, "HUB_TOKEN"), ")"), /* @__PURE__ */ k$1("div", { style: "margin-top:4px;" }, "📱 ", /* @__PURE__ */ k$1("strong", null, "手机免密登录"), "：直接扫电脑网页上的二维码，或输入 6 位配对码")), /* @__PURE__ */ k$1("input", {
 		type: "password",
 		class: "auth-input",
 		id: "authTokenInput",
@@ -1151,21 +3137,21 @@ function App() {
 		onKeyDown: (e) => {
 			if (e.key === "Enter") window.submitAuthLogin?.();
 		}
-	}), /* @__PURE__ */ k("button", {
+	}), /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: "primary-block-btn",
 		onClick: () => window.submitAuthLogin?.()
-	}, "🔓 解锁进入总控台"))), /* @__PURE__ */ k("div", { class: "app-shell" }, /* @__PURE__ */ k("div", { class: "primary-pane" }, /* @__PURE__ */ k(TopBar, null), /* @__PURE__ */ k("div", {
+	}, "🔓 解锁进入总控台"))), /* @__PURE__ */ k$1("div", { class: "app-shell" }, /* @__PURE__ */ k$1("div", { class: "primary-pane" }, /* @__PURE__ */ k$1(TopBar, null), /* @__PURE__ */ k$1("div", {
 		class: "pull-refresh-slot",
 		id: "pullRefreshSlot",
 		"aria-hidden": "true"
-	}, /* @__PURE__ */ k("div", {
+	}, /* @__PURE__ */ k$1("div", {
 		class: "pull-refresh-pill",
 		id: "pullRefreshPill"
-	}, /* @__PURE__ */ k("span", { id: "pullRefreshLabel" }, "↓ 下拉刷新状态"))), /* @__PURE__ */ k("main", {
+	}, /* @__PURE__ */ k$1("span", { id: "pullRefreshLabel" }, "↓ 下拉刷新状态"))), /* @__PURE__ */ k$1("main", {
 		class: "main-viewport",
 		id: "mainViewport"
-	}), /* @__PURE__ */ k(BottomTabs, null), /* @__PURE__ */ k(TriageDeck, null)), /* @__PURE__ */ k(ChatStage, null), /* @__PURE__ */ k(Sheets, null), /* @__PURE__ */ k("button", {
+	}), /* @__PURE__ */ k$1(BottomTabs, null), /* @__PURE__ */ k$1(TriageDeck, null)), /* @__PURE__ */ k$1(ChatStage, null), /* @__PURE__ */ k$1(Sheets, null), /* @__PURE__ */ k$1(VoiceCopilotSheets, null), /* @__PURE__ */ k$1("button", {
 		type: "button",
 		id: "scrollBottomBtn",
 		style: "display:none;",
@@ -3498,6 +5484,9 @@ function toggleVoiceInput(targetInputId = "globalPromptInput", btnId = "chatVoic
 	const win = window;
 	const showToast = deps?.showToast || (win.showToast ?? (() => {}));
 	const onComposerInput = deps?.onComposerInput || (win.onComposerInput ?? (() => {}));
+	if (typeof win.__dshVoiceByokToggleDictation === "function") {
+		if (win.__dshVoiceByokToggleDictation(targetInputId, btnId, showToast, onComposerInput)) return;
+	}
 	const btn = document.getElementById(btnId);
 	if ((voiceSessionActive || activeVoiceRecognition) && activeVoiceInputId === targetInputId || btn?.classList.contains("recording")) {
 		stopVoiceInput();
@@ -3986,6 +5975,27 @@ var EXACT_ZH_TO_EN = {
 	"连接中...": "Connecting...",
 	"⚡ 极速": "⚡ Turbo",
 	"新建对话": "New Task",
+	"随行耳机模式 (Walk Mode)": "Walk Mode (Headphones)",
+	"随行耳机语音总管 & BYOK 模型池": "Walk Mode Voice Copilot & BYOK Model Pool",
+	"🎧 边走路边戴耳机控制所有 AI 任务": "🎧 Control All AI Tasks Hands-Free with Headphones",
+	"🎧 进入随行模式": "🎧 Open Walk Mode",
+	"⚙️ 方案与开关": "⚙️ Profiles & Switches",
+	"🔑 密钥池 (BYOK)": "🔑 Key Pool (BYOK)",
+	"🧪 调试台": "🧪 Voice Lab",
+	"🎙️ 随行语音总管 & BYOK 配置": "🎙️ Voice Copilot & BYOK Config",
+	"🎛️ 方案与开关": "🎛️ Profiles",
+	"⚙️ 配置": "⚙️ Config",
+	"退出 ✕": "Exit ✕",
+	"盲点开始说话": "Tap Anywhere to Talk",
+	"说完再点发送": "Tap to Send",
+	"点此随时插话": "Tap to Interrupt",
+	"系统原生语音（免 Key 免费）": "System Native Speech (Free, No Key)",
+	"＋ 新建混搭方案": "+ New Custom Profile",
+	"🛡️ 安全护栏与行为开关": "🛡️ Safety Guardrails & Toggles",
+	"高危操作审批策略 (L2)": "High-Risk Approval Policy (L2)",
+	"🔢 念出随机 3 位确认码": "🔢 Spoken 3-Digit PIN",
+	"📱 仅限手机屏幕点按": "📱 Screen Tap Only",
+	"🔐 加密存入密钥池": "🔐 Encrypt & Save Key",
 	"⚠️ 网络连接中断，正在自动重连…": "⚠️ Connection lost, reconnecting…",
 	"点此立即重试": "Tap to retry",
 	"搜索对话标题、项目或内容...": "Search sessions, projects, or messages...",
@@ -8626,6 +10636,108 @@ function createDemoSandbox({ getHubState, setHubState, getLang, onStateMutated, 
 				expiresAt: Date.now() + 6e5
 			});
 		}
+		if (pathname === "/api/voice/config") return jsonResp({
+			ok: true,
+			storageMode: "demo-sandbox",
+			catalog: [],
+			credentials: [],
+			profiles: [{
+				id: "native",
+				name: "系统原生语音（免 Key 免费）",
+				builtin: true,
+				stt: {
+					provider: "native",
+					credId: "",
+					model: "browser-web-speech",
+					language: "zh-CN",
+					thinkingLevel: "default",
+					fallbackChain: []
+				},
+				brain: {
+					provider: "native",
+					credId: "",
+					model: "rule-router",
+					thinkingLevel: "off",
+					maxTokens: 256
+				},
+				tts: {
+					provider: "native",
+					credId: "",
+					model: "browser-speech-synthesis",
+					voice: "system-default",
+					format: "mp3",
+					speed: 1
+				}
+			}],
+			prefs: {
+				activeProfileId: "native",
+				l2Policy: "pin",
+				proactiveBriefing: "approvals",
+				autoVad: true,
+				vadSilenceMs: 850,
+				useByokForChatStt: false,
+				useByokForChatTts: false,
+				autoPlayWalkReplies: true,
+				speechRate: 1
+			},
+			activeProfile: {
+				id: "native",
+				name: "系统原生语音（免 Key 免费）",
+				builtin: true,
+				stt: {
+					provider: "native",
+					credId: "",
+					model: "browser-web-speech",
+					language: "zh-CN",
+					thinkingLevel: "default",
+					fallbackChain: []
+				},
+				brain: {
+					provider: "native",
+					credId: "",
+					model: "rule-router",
+					thinkingLevel: "off",
+					maxTokens: 256
+				},
+				tts: {
+					provider: "native",
+					credId: "",
+					model: "browser-speech-synthesis",
+					voice: "system-default",
+					format: "mp3",
+					speed: 1
+				}
+			}
+		});
+		if (pathname === "/api/voice/turn" && method === "POST") {
+			let body = {};
+			try {
+				body = JSON.parse(options.body || "{}");
+			} catch {}
+			const txt = String(body.text || "").trim();
+			const spokenReply = /审批|状态|进度/.test(txt) ? "演示环境当前有 1 条常规待审批和 1 个正在运行的任务。部署自己的 Hub 后，填入任意 BYOK 密钥即可启用真实随行耳机语音总管。" : `体验模式收到你的语音口令「${txt.slice(0, 32)}」。在自己的 Hub 中配置 Gemini / 火山豆包 / OpenAI 兼容密钥后，即可直接遥控电脑。`;
+			return jsonResp({
+				ok: true,
+				provider: "demo",
+				model: "demo-router",
+				latencyMs: 12,
+				userText: txt,
+				spokenReply,
+				spokenChunks: [spokenReply],
+				action: { type: "query_status" },
+				execution: {
+					executed: false,
+					dryRun: true,
+					type: "query_status"
+				}
+			});
+		}
+		if (pathname === "/api/voice/tts" && method === "POST") return jsonResp({
+			ok: true,
+			provider: "native",
+			useBrowserSpeech: true,
+			latencyMs: 1
+		});
 		return jsonResp({
 			ok: true,
 			demo: true
@@ -10342,6 +12454,9 @@ function initHubController() {
 		activeSpeechState.boundaryUpdatedAt = 0;
 		releaseSpeechRuntimeHandles();
 		try {
+			window.__dshVoiceByokStopSpeak?.();
+		} catch {}
+		try {
 			if (window.speechSynthesis && (window.speechSynthesis.speaking || window.speechSynthesis.pending || window.speechSynthesis.paused)) window.speechSynthesis.cancel();
 		} catch {}
 		if (wasPlaying) syncSpeechFooterDom();
@@ -10369,6 +12484,27 @@ function initHubController() {
 		const actualBaseOffset = effectiveOffset > 0 && effectiveOffset < fullSpokenText.length ? effectiveOffset : 0;
 		const myRunId = ++activeSpeechState.runId;
 		releaseSpeechRuntimeHandles();
+		const byokCfg = window.__dshVoiceConfig;
+		if (byokCfg?.prefs?.useByokForChatTts && byokCfg?.activeProfile?.tts?.provider && byokCfg.activeProfile.tts.provider !== "native" && typeof window.__dshVoiceByokSpeak === "function") {
+			activeSpeechState.playing = true;
+			activeSpeechState.sessionId = effectiveSessionId;
+			activeSpeechState.msgIdx = msgIdx;
+			activeSpeechState.rawSourceText = rawText;
+			activeSpeechState.hasDistinctSummary = prepared.hasDistinctSummary;
+			activeSpeechState.fullSpokenText = fullSpokenText;
+			syncSpeechFooterDom();
+			acquireSpeechWakeLock(myRunId);
+			window.__dshVoiceByokSpeak(remainingText, () => {
+				if (activeSpeechState.runId !== myRunId) return;
+				activeSpeechState.playing = false;
+				activeSpeechState.sessionId = "";
+				activeSpeechState.msgIdx = -1;
+				activeSpeechState.rawSourceText = "";
+				releaseSpeechRuntimeHandles();
+				syncSpeechFooterDom();
+			});
+			return;
+		}
 		const synth = window.speechSynthesis;
 		const wasSynthBusy = Boolean(synth.speaking || synth.pending || synth.paused);
 		if (wasSynthBusy) try {
@@ -15469,6 +17605,24 @@ function initHubController() {
           </div>
 
           <div>
+            <div class="settings-group-title">随行耳机语音总管 & BYOK 模型池</div>
+            <div class="settings-card">
+              <div class="settings-item" style="flex-direction:column;align-items:stretch;gap:10px;">
+                <div>
+                  <div class="settings-item-title">🎧 边走路边戴耳机控制所有 AI 任务</div>
+                  <div class="settings-item-desc">默认免费使用系统原生语音；也可自填任意 API Key（Gemini / 火山豆包 / OpenAI 兼容接口）自由混搭 STT + 大脑 + TTS，高危操作自动触发 3 位语音确认码</div>
+                </div>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                  <button class="pill-action-btn primary" onclick="openWalkMode()">🎧 进入随行模式</button>
+                  <button class="pill-action-btn" onclick="openVoiceLab('profiles')">⚙️ 方案与开关</button>
+                  <button class="pill-action-btn" onclick="openVoiceLab('keys')">🔑 密钥池 (BYOK)</button>
+                  <button class="pill-action-btn" onclick="openVoiceLab('bench')">🧪 调试台</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div>
             <div class="settings-group-title">多电脑协同与一键迁移</div>
             <div class="settings-card">
               <div class="settings-item">
@@ -17279,6 +19433,11 @@ function initHubController() {
 		}
 		preservePreviewUiState(nextState);
 		hubState = nextState;
+		try {
+			window.__dshLastHubState = nextState;
+			window.__dshActiveSessionId = activeSessionId;
+			window.dispatchEvent(new CustomEvent("dsh:hub-state", { detail: nextState }));
+		} catch {}
 		if (!skipCache) saveCachedHubStateSnapshot(nextState);
 	}
 	let hasLoadedInitialState = false;
@@ -17844,6 +20003,7 @@ function initHubController() {
 		forceHardUpgradeReload,
 		applyHubState,
 		getHubState: () => hubState,
+		__dshVoiceApiFetch: apiFetch,
 		fetchState,
 		connectSSE,
 		renderHarnessBadgeHtml,
@@ -18241,6 +20401,6 @@ function initHubController() {
 // hub/web/src/main.tsx
 var root = document.getElementById("app");
 if (root) {
-	K(/* @__PURE__ */ k(App, null), root);
+	K(/* @__PURE__ */ k$1(App, null), root);
 	initHubController();
 }

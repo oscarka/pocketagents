@@ -2,6 +2,20 @@
 
 本项目的重要变更都记录在这里。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [0.9.9] - 2026-11-23
+
+### Added
+
+- **BYOK 随行耳机语音总管、全屏 OLED 步行模式与调试台（`hub/voice-vault.js` / `hub/voice-copilot.js` / `hub/server.js` / `hub/web/src/voice/walkAudio.ts` / `hub/web/src/components/VoiceCopilotSheets.tsx`）**：
+  - **开源中立多厂商自填密钥池（AES-256-GCM 加密落盘 `0600`）**：零内置硬编码 Key、默认保持 100% 免费系统原生语音；支持自由填入 Google Gemini（兼容 `AIza...` 与新版 `AQ.Ab...`）、火山豆包 Flash ASR / Seed-TTS 2.0（ASR 与 TTS 权限池独立解绑）、以及任意 OpenAI 兼容接口（DeepSeek / 火山方舟 Ark / OpenAI / OpenRouter / SiliconFlow / Groq / Ollama），同一服务商支持多 Key 热切换，保存后永不回显明文；
+  - **三段独立混搭与思考档位调优**：耳朵（STT，支持多级降级链与火山 `20000003` 静音识别）、大脑（Brain，独立控制 `off / low / medium / high` 思考档位，自动适配 Gemini 2.5 `thinkingBudget: 0` 与 Gemini 3.x/4.x `thinkingLevel: low`）、嘴巴（TTS，支持渐进首句预取播报与 Gemini 24kHz PCM 自动转 WAV）全部独立解耦；
+  - **1ms 确定性高危 3 位语音确认码护栏（L2）**：自动识别 `rm -rf`、`git push --force`、`DROP TABLE`、`sudo`、生产部署等高危审批，默认在 Hub 端生成 30 秒有效随机 3 位确认码并在 LLM 之前以 ~1ms 确定性核验中英文及百位读法（如 `739` / `七三九` / `七百三十九` / `seven three nine`），最多 3 次错误自动锁定，亦可在设置中切为「仅限手机屏幕点按」；
+  - **全屏 OLED 随行耳机模式（Walk Mode）+ 调试台（Voice Lab）**：顶栏新增极简 `🎧` 入口与「设备与设置」快捷卡片；纯黑省电盲操大圆球支持随时插话打断（Barge-in）、纯前端 16kHz WAV 录音（跨 iOS Safari / Android Chrome 一致）、Auto-VAD 自动停顿收音、AirPods MediaSession 硬件键联动、Screen Wake Lock 屏幕常亮与新审批主动语音播报；内置 Dry-Run 试跑调试台实时打点 `WAV KB / STT ms / 大脑 ms / TTS ms` 与决策 JSON，且聊天页「语音输入 / 🔊 播报」可选按需接入 BYOK。
+
+### Security
+
+- **Hub 宿主机凭证校验与工作区敏感路径防护加固（`hub/hub-core.js` / `hub/server.js` / `dsh-feishu/lib/workspace-ops.js` / `deploy-vm.sh`）**：禁止伪造 `hst_` 格式令牌绕过心跳与事件接口，收紧宿主机文件读写路径检查以拦截敏感凭证目录，并同步更新 `deploy-vm.sh` 打包全部 `hub/*.js` 模块。
+
 ## [0.9.8] - 2026-11-20
 
 ### Added

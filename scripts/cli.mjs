@@ -35,7 +35,7 @@ import { listWorkspaceFiles, readWorkspaceFile } from '../dsh-feishu/lib/workspa
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const PKG_PATH = join(__dirname, '..', 'package.json')
-let PKG_VERSION = '0.9.8'
+let PKG_VERSION = '0.9.9'
 try {
   PKG_VERSION = JSON.parse(readFileSync(PKG_PATH, 'utf8')).version || PKG_VERSION
 } catch {
@@ -210,7 +210,7 @@ export async function runCli(argv = process.argv.slice(2)) {
   }
 
   const silentLogger = {
-    info: () => {},
+    info: () => { },
     warn: msg => console.warn(msg),
     error: msg => console.error(msg),
   }
@@ -337,10 +337,10 @@ export async function runCli(argv = process.argv.slice(2)) {
       console.log('\n🛑 Stopping PocketAgents...')
       try {
         hubAgent?.stop?.()
-      } catch {}
+      } catch { }
       try {
         await localHub.close()
-      } catch {}
+      } catch { }
       resolve()
     }
     process.once('SIGINT', () => void shutdown())

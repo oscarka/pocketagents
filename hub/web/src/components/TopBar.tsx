@@ -29,9 +29,18 @@ export function TopBar() {
           <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
             <button
               type="button"
+              id="walkModeTopBtn"
+              class="walk-top-pill-btn"
+              title="随行耳机模式 (Walk Mode)"
+              onClick={() => (window as any).openWalkMode?.()}
+            >
+              🎧
+            </button>
+            <button
+              type="button"
               data-lang-toggle="1"
               onClick={() => (window as any).toggleLangPreference?.()}
-              style="border:1px solid var(--border);background:var(--subtle);color:var(--text-secondary);border-radius:999px;padding:4px 9px;font-size:11.5px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0;"
+              style="border:1px solid var(--border);background:var(--subtle);color:var(--text-secondary);border-radius:999px;padding:4px 8px;font-size:11.5px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0;"
             >
               🌐 EN
             </button>

@@ -628,7 +628,6 @@ export class HubAgent {
 
   resolveExtraArtifactRoots() {
     return [
-      this.config?.dshHome || '',
       ...discoverDoubaoSessionRoots(getDoubaoDataRoot(this.config?.doubaoHome || '')),
       getDoubaoChatsDir(),
       ...(Array.isArray(this.config?.antigravityBrainDirs) ? this.config.antigravityBrainDirs : []),
@@ -769,7 +768,7 @@ export class HubAgent {
           body: JSON.stringify({
             meta: {
               ...listed,
-              status: listed.ok ? 200 : 400,
+              status: listed.ok ? 200 : listed.status || 400,
               hostId: this.config.hostId,
               agentId: fsReq.agentId || '',
             },
@@ -789,7 +788,7 @@ export class HubAgent {
           body: JSON.stringify({
             meta: {
               ...readMeta,
-              status: readMeta.ok ? 200 : 404,
+              status: readMeta.ok ? 200 : readMeta.status || 404,
               hostId: this.config.hostId,
               agentId: fsReq.agentId || '',
             },

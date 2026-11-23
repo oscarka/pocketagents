@@ -2120,6 +2120,9 @@ export function initHubController() {
     activeSpeechState.boundaryUpdatedAt = 0;
     releaseSpeechRuntimeHandles();
     try {
+      window.__dshVoiceByokStopSpeak?.();
+    } catch { }
+    try {
       if (window.speechSynthesis && (window.speechSynthesis.speaking || window.speechSynthesis.pending || window.speechSynthesis.paused)) {
         window.speechSynthesis.cancel();
       }
@@ -2174,6 +2177,34 @@ export function initHubController() {
 
     const myRunId = ++activeSpeechState.runId;
     releaseSpeechRuntimeHandles();
+
+    // Optional BYOK Cloud TTS for normal chat replies (strictly opt-in via Voice Lab settings, OFF by default)
+    const byokCfg = window.__dshVoiceConfig;
+    if (
+      byokCfg?.prefs?.useByokForChatTts &&
+      byokCfg?.activeProfile?.tts?.provider &&
+      byokCfg.activeProfile.tts.provider !== 'native' &&
+      typeof window.__dshVoiceByokSpeak === 'function'
+    ) {
+      activeSpeechState.playing = true;
+      activeSpeechState.sessionId = effectiveSessionId;
+      activeSpeechState.msgIdx = msgIdx;
+      activeSpeechState.rawSourceText = rawText;
+      activeSpeechState.hasDistinctSummary = prepared.hasDistinctSummary;
+      activeSpeechState.fullSpokenText = fullSpokenText;
+      syncSpeechFooterDom();
+      void acquireSpeechWakeLock(myRunId);
+      void window.__dshVoiceByokSpeak(remainingText, () => {
+        if (activeSpeechState.runId !== myRunId) return;
+        activeSpeechState.playing = false;
+        activeSpeechState.sessionId = '';
+        activeSpeechState.msgIdx = -1;
+        activeSpeechState.rawSourceText = '';
+        releaseSpeechRuntimeHandles();
+        syncSpeechFooterDom();
+      });
+      return;
+    }
 
     const synth = window.speechSynthesis;
     const wasSynthBusy = Boolean(synth.speaking || synth.pending || synth.paused);
@@ -8441,6 +8472,24 @@ export function initHubController() {
           </div>
 
           <div>
+            <div class="settings-group-title">随行耳机语音总管 & BYOK 模型池</div>
+            <div class="settings-card">
+              <div class="settings-item" style="flex-direction:column;align-items:stretch;gap:10px;">
+                <div>
+                  <div class="settings-item-title">🎧 边走路边戴耳机控制所有 AI 任务</div>
+                  <div class="settings-item-desc">默认免费使用系统原生语音；也可自填任意 API Key（Gemini / 火山豆包 / OpenAI 兼容接口）自由混搭 STT + 大脑 + TTS，高危操作自动触发 3 位语音确认码</div>
+                </div>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                  <button class="pill-action-btn primary" onclick="openWalkMode()">🎧 进入随行模式</button>
+                  <button class="pill-action-btn" onclick="openVoiceLab('profiles')">⚙️ 方案与开关</button>
+                  <button class="pill-action-btn" onclick="openVoiceLab('keys')">🔑 密钥池 (BYOK)</button>
+                  <button class="pill-action-btn" onclick="openVoiceLab('bench')">🧪 调试台</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div>
             <div class="settings-group-title">多电脑协同与一键迁移</div>
             <div class="settings-card">
               <div class="settings-item">
@@ -10540,6 +10589,11 @@ export function initHubController() {
     }
     preservePreviewUiState(nextState);
     hubState = nextState;
+    try {
+      window.__dshLastHubState = nextState;
+      window.__dshActiveSessionId = activeSessionId;
+      window.dispatchEvent(new CustomEvent('dsh:hub-state', { detail: nextState }));
+    } catch { }
     if (!skipCache) {
       saveCachedHubStateSnapshot(nextState);
     }
@@ -11123,6 +11177,7 @@ export function initHubController() {
     forceHardUpgradeReload,
     applyHubState,
     getHubState: () => hubState,
+    __dshVoiceApiFetch: apiFetch,
     fetchState,
     connectSSE,
     renderHarnessBadgeHtml,

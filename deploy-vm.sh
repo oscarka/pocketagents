@@ -46,7 +46,7 @@ trap 'rm -f "${TMP_TAR}"' EXIT
 
 COPYFILE_DISABLE=1 tar --no-xattrs --exclude='.DS_Store' -czf "${TMP_TAR}" \
   package.json icon.svg connect-host.sh \
-  hub/server.js hub/hub-core.js hub/delta-state.js hub/push-formatter.js hub/web-push.js hub/public
+  hub/*.js hub/public
 
 REMOTE_CMD="sudo mkdir -p '${REMOTE_DIR}' && \
 sudo find '${REMOTE_DIR}/hub/public/assets' -type f -mtime +7 -delete 2>/dev/null || true && \

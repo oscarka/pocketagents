@@ -3,7 +3,7 @@ import { timingSafeEqual } from 'node:crypto'
 import { accessSync, constants, existsSync, readFileSync } from 'node:fs'
 import { readdir, readFile, stat } from 'node:fs/promises'
 import { homedir, networkInterfaces } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, join, posix as posixPath } from 'node:path'
 import { Readable, Transform } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { fileURLToPath } from 'node:url'
@@ -11,9 +11,78 @@ import { promisify } from 'node:util'
 import { brotliCompressSync, createGzip, gunzipSync, gzip, gzipSync, constants as zlibConstants } from 'node:zlib'
 import { HubCore } from './hub-core.js'
 import { captureStateDigest, buildStateDelta } from './delta-state.js'
+import { VoiceVault } from './voice-vault.js'
+import { VoiceCopilotEngine } from './voice-copilot.js'
 
 const gzipAsync = promisify(gzip)
 const HUB_MEDIA_CACHE_MAX_ITEM_BYTES = 1.5 * 1024 * 1024
+
+function normalizeFsSecurityPath(raw = '') {
+  let s = String(raw ?? '').trim().replace(/^file:\/\//i, '').replace(/#L\d+(?:-L?\d+)?$/i, '')
+  for (let i = 0; i < 2; i += 1) {
+    if (!s.includes('%')) break
+    try {
+      const dec = decodeURIComponent(s)
+      if (dec === s) break
+      s = dec
+    } catch {
+      break
+    }
+  }
+  const cleaned = s.replace(/\\/g, '/').replace(/\/{2,}/g, '/')
+  if (!cleaned) return ''
+  const norm = posixPath.normalize(cleaned)
+  return norm === '/' ? '/' : norm.replace(/\/+$/, '')
+}
+
+const HOME_ROOT_RE = /^(?:~|\/(?:Users|home)\/[^/]+|\/root)$/i
+const SENSITIVE_SYSTEM_ROOT_RE = /^(?:\/etc|\/private\/etc|\/proc|\/sys|\/var\/lib\/dsh-hub)(?:\/|$)/i
+const SENSITIVE_DIR_SEGMENT_RE =
+  /(?:^|\/)(?:\.ssh|\.aws|\.gnupg|\.kube|Library\/Keychains|Library\/LaunchAgents|\.config\/(?:gcloud|gh|op|1password)|\.docker\/config\.json)(?:\/|$)/i
+const SENSITIVE_DSH_PATH_RE =
+  /(?:^|\/)\.dsh(?:$|\/(?:\.credentials\.yaml|feishu\.env|feishu-host\.json|hub-state\.json|dsh-hub-state\.json|hub-daemon\.log|headless-remote-patch\.yml|profiles|sessions|dsh-runtimes|storages|cache)(?:\/|$))/i
+const SENSITIVE_BASENAME_RE =
+  /^(?:\.credentials\.yaml|feishu\.env|feishu-host\.json|hub-state\.json|dsh-hub-state\.json|session\.v\d+\.jsonl\.zstd|id_rsa|id_ed25519|id_ecdsa|id_dsa|\.netrc|\.npmrc|\.pypirc|\.git-credentials|\.pgpass|\.my\.cnf)$/i
+const HOME_DOTFILE_SECRET_RE =
+  /^(?:~|\/(?:Users|home)\/[^/]+|\/root)\/\.(?:zshenv|zshrc|zprofile|zlogin|zlogout|zsh_history|bashrc|bash_profile|bash_history|profile|local\/bin\/env)$/i
+const RAW_STREAM_SECRET_BASENAME_RE =
+  /^(?:\.env(?:\.(?!example$|sample$|template$|dist$)[^/]+)?|[^/]+\.env|.*\.(?:pem|key|p12|pfx|jks|keystore)|credentials\.json|service-account[^/]*\.json)$/i
+
+export function isBlockedHubFsPath({ cwd = '', path = '', op = 'read', isAdmin = true } = {}) {
+  const normCwd = normalizeFsSecurityPath(cwd)
+  const normPath = normalizeFsSecurityPath(path)
+  const rawCombined =
+    normPath.startsWith('/') || normPath === '~' || normPath.startsWith('~/')
+      ? normPath
+      : normCwd && normPath
+        ? `${normCwd}/${normPath.replace(/^\/+/, '')}`
+        : normPath || normCwd
+  const combined = rawCombined ? posixPath.normalize(rawCombined).replace(/\/+$/, '') || '/' : ''
+
+  if (
+    SENSITIVE_SYSTEM_ROOT_RE.test(combined) ||
+    SENSITIVE_DIR_SEGMENT_RE.test(combined) ||
+    SENSITIVE_DSH_PATH_RE.test(combined)
+  ) {
+    return true
+  }
+  if (HOME_DOTFILE_SECRET_RE.test(combined)) {
+    return true
+  }
+  const base = combined.split('/').pop() || ''
+  if (base && SENSITIVE_BASENAME_RE.test(base)) {
+    return true
+  }
+  if (op === 'stream') {
+    if (base && RAW_STREAM_SECRET_BASENAME_RE.test(base)) {
+      return true
+    }
+    if (!isAdmin && (HOME_ROOT_RE.test(normCwd) || normCwd === '/') && normPath.replace(/^\.\/+/, '').startsWith('.')) {
+      return true
+    }
+  }
+  return false
+}
 
 function createImageCacheTransform(expectedBytes, maxBytes, onComplete) {
   const chunks = []
@@ -240,6 +309,9 @@ export function createHubServer({
   requireToken = false,
   trustProxy,
   logger = console,
+  voiceVaultFile,
+  voiceVaultSecret = process.env.VOICE_VAULT_SECRET || '',
+  voiceFetch = globalThis.fetch,
   sseMaxLifetimeMs = Number(process.env.HUB_SSE_MAX_LIFETIME_MS) || 240_000,
   sseMinIntervalMs = Number.isFinite(Number(process.env.HUB_SSE_MIN_INTERVAL_MS))
     ? Number(process.env.HUB_SSE_MIN_INTERVAL_MS)
@@ -255,6 +327,28 @@ export function createHubServer({
   const buildInfo = resolveBuildInfo(hub.now ? hub.now() : Date.now())
   hub.buildInfo = buildInfo
   hub.setTokenSecret?.(expectedToken)
+
+  const resolvedVoiceVaultFile =
+    voiceVaultFile !== undefined
+      ? String(voiceVaultFile || '').trim()
+      : String(process.env.VOICE_VAULT_FILE || '').trim() ||
+      (hub.stateFile ? join(dirname(hub.stateFile), 'voice-vault.enc.json') : '')
+  const voiceVault = new VoiceVault({
+    vaultFile: resolvedVoiceVaultFile,
+    secret: voiceVaultSecret,
+    now: hub.now,
+  })
+  void voiceVault.init()
+  const voiceCopilot = new VoiceCopilotEngine({
+    hub,
+    vault: voiceVault,
+    fetchImpl: voiceFetch,
+    now: hub.now,
+  })
+
+  const authVerifyFailBuckets = new Map()
+  const AUTH_VERIFY_WINDOW_MS = 60_000
+  const AUTH_VERIFY_MAX_FAILS = 10
 
   function extractCandidateToken(headers = {}, urlObj) {
     const authHeader = String(headers.authorization ?? headers.Authorization ?? '').trim()
@@ -639,7 +733,29 @@ export function createHubServer({
     }
 
     if (pathname === '/api/auth/verify' && method === 'POST') {
+      const clientKey = resolveClientIp(headers, remoteAddress, {
+        ...(trustProxy !== undefined ? { trustProxy } : {}),
+      })
+      const nowMs = hub.now ? hub.now() : Date.now()
+      const recentFails = (authVerifyFailBuckets.get(clientKey) || []).filter(ts => nowMs - ts < AUTH_VERIFY_WINDOW_MS)
+      if (recentFails.length >= AUTH_VERIFY_MAX_FAILS) {
+        authVerifyFailBuckets.set(clientKey, recentFails)
+        return {
+          status: 429,
+          json: { ok: false, rateLimited: true, error: '尝试次数过多，请 1 分钟后再试', authRequired: Boolean(expectedToken) },
+        }
+      }
       const ok = checkAuth(headers, urlObj)
+      if (ok) {
+        authVerifyFailBuckets.delete(clientKey)
+      } else {
+        recentFails.push(nowMs)
+        authVerifyFailBuckets.set(clientKey, recentFails)
+        if (authVerifyFailBuckets.size > 1000) {
+          const oldestKey = authVerifyFailBuckets.keys().next().value
+          authVerifyFailBuckets.delete(oldestKey)
+        }
+      }
       return {
         status: ok ? 200 : 401,
         json: { ok, authRequired: Boolean(expectedToken) },
@@ -650,7 +766,8 @@ export function createHubServer({
       // Host-level reporting endpoints accept either the Admin HUB_TOKEN or that specific host's dedicated hostToken
       if (method === 'POST' && pathname === '/api/heartbeat') {
         const targetHostId = String(body?.hostId ?? '').trim()
-        if (!checkHostOrAdminAuth(headers, urlObj, targetHostId)) {
+        const isAdminReq = checkAuth(headers, urlObj)
+        if (!isAdminReq && (!targetHostId || !checkHostOrAdminAuth(headers, urlObj, targetHostId))) {
           return {
             status: 401,
             json: {
@@ -663,7 +780,7 @@ export function createHubServer({
         const candidateToken = extractCandidateToken(headers, urlObj)
         const outcome = hub.handleHeartbeat({
           ...body,
-          ...(candidateToken && /^hst_[0-9a-f]{48}$/.test(candidateToken)
+          ...(candidateToken && targetHostId && hub.verifySignedHostToken(targetHostId, candidateToken)
             ? { presentedHostToken: candidateToken }
             : {}),
         })
@@ -687,7 +804,8 @@ export function createHubServer({
           meta = body.meta && typeof body.meta === 'object' ? body.meta : body
         }
         const targetHostId = String(meta?.hostId ?? '').trim()
-        if (!checkHostOrAdminAuth(headers, urlObj, targetHostId)) {
+        const isAdminReq = checkAuth(headers, urlObj)
+        if (!isAdminReq && (!targetHostId || !checkHostOrAdminAuth(headers, urlObj, targetHostId))) {
           rawStream?.resume?.()
           return {
             status: 401,
@@ -727,10 +845,12 @@ export function createHubServer({
         /^\/api\/v1\/signaling\/([^/]+)$/.test(pathname) ||
         pathname === '/api/v1/turn/credentials'
 
+      // mediaTicket is strictly limited to read-only media/preview streaming endpoints;
+      // directory listing (/fs/list) and text/meta reads (/fs/read) always require Admin HUB_TOKEN.
       const isReadOnlyMediaEndpoint =
         (method === 'GET' &&
           (/^\/api\/hosts\/([^/]+)\/file-preview$/.test(pathname) ||
-            /^\/api\/hosts\/([^/]+)\/fs\/(?:list|read|stream)$/.test(pathname) ||
+            /^\/api\/hosts\/([^/]+)\/fs\/stream$/.test(pathname) ||
             /^\/api\/hosts\/([^/]+)\/fs\/hls\/(?:index\.m3u8|seg_\d{5}\.ts)$/.test(pathname))) ||
         (method === 'POST' && /^\/api\/hosts\/([^/]+)\/fs\/rtc-offer$/.test(pathname))
 
@@ -914,6 +1034,13 @@ export function createHubServer({
         const cwd = urlObj.searchParams.get('cwd') || ''
         const agentId = urlObj.searchParams.get('agentId') || ''
         const raw = urlObj.searchParams.get('raw') === '1'
+        const isAdminReq = checkAuth(headers, urlObj)
+        if (isBlockedHubFsPath({ cwd, path: reqPath, op: 'stream', isAdmin: isAdminReq })) {
+          return {
+            status: 403,
+            json: { ok: false, error: '安全策略拦截：禁止远程读取敏感凭证或系统密钥路径' },
+          }
+        }
         const mtParam = String(urlObj.searchParams.get('mt') ?? '').trim()
         const tokenParam = String(urlObj.searchParams.get('token') ?? '').trim()
         const effectiveMt = (mtParam && hub.verifyMediaTicket(mtParam)) ? mtParam : hub.getMediaTicket()
@@ -1021,6 +1148,13 @@ export function createHubServer({
         const reqPath = urlObj.searchParams.get('path') || ''
         const cwd = urlObj.searchParams.get('cwd') || ''
         const agentId = urlObj.searchParams.get('agentId') || ''
+        const isAdminReq = checkAuth(headers, urlObj)
+        if (isBlockedHubFsPath({ cwd, path: reqPath, op: fsOp, isAdmin: isAdminReq })) {
+          return {
+            status: 403,
+            json: { ok: false, error: '安全策略拦截：禁止远程读取敏感凭证或系统密钥路径' },
+          }
+        }
         const streamQuery = new URLSearchParams({
           path: reqPath,
           ...(cwd ? { cwd } : {}),
@@ -1352,6 +1486,86 @@ export function createHubServer({
         return { status: 200, json: outcome }
       }
 
+      // BYOK Voice Copilot & Walking Headphones Mode APIs (strictly behind admin HUB_TOKEN)
+      if (pathname.startsWith('/api/voice/')) {
+        await voiceVault.init()
+
+        if (method === 'GET' && pathname === '/api/voice/config') {
+          const voiceSessionId = urlObj.searchParams.get('sessionId') || 'default'
+          return {
+            status: 200,
+            json: {
+              ok: true,
+              ...voiceVault.toPublicState(),
+              activePin: voiceCopilot.getActivePinChallenge(voiceSessionId),
+            },
+          }
+        }
+
+        if (method === 'POST' && pathname === '/api/voice/credentials') {
+          const outcome = await voiceVault.upsertCredential(body || {})
+          return { status: outcome.ok ? 200 : 400, json: outcome }
+        }
+
+        const voiceCredDeleteMatch = /^\/api\/voice\/credentials\/([^/]+)$/.exec(pathname)
+        if (method === 'DELETE' && (pathname === '/api/voice/credentials' || voiceCredDeleteMatch)) {
+          const targetId = voiceCredDeleteMatch
+            ? decodeURIComponent(voiceCredDeleteMatch[1])
+            : String(body?.id || urlObj.searchParams.get('id') || '').trim()
+          const outcome = await voiceVault.deleteCredential(targetId)
+          return { status: outcome.ok ? 200 : 404, json: outcome }
+        }
+
+        if (method === 'POST' && pathname === '/api/voice/credentials/activate') {
+          const outcome = await voiceVault.activateCredential(body?.id || '')
+          return { status: outcome.ok ? 200 : 404, json: outcome }
+        }
+
+        if (method === 'POST' && pathname === '/api/voice/profiles') {
+          const outcome = await voiceVault.upsertProfile(body || {})
+          return { status: outcome.ok ? 200 : 400, json: outcome }
+        }
+
+        const voiceProfileDeleteMatch = /^\/api\/voice\/profiles\/([^/]+)$/.exec(pathname)
+        if (method === 'DELETE' && (pathname === '/api/voice/profiles' || voiceProfileDeleteMatch)) {
+          const targetId = voiceProfileDeleteMatch
+            ? decodeURIComponent(voiceProfileDeleteMatch[1])
+            : String(body?.id || urlObj.searchParams.get('id') || '').trim()
+          const outcome = await voiceVault.deleteProfile(targetId)
+          return { status: outcome.ok ? 200 : 400, json: outcome }
+        }
+
+        if (method === 'POST' && pathname === '/api/voice/prefs') {
+          const outcome = await voiceVault.updatePrefs(body || {})
+          return { status: outcome.ok ? 200 : 400, json: outcome }
+        }
+
+        if (method === 'POST' && pathname === '/api/voice/test') {
+          const outcome = await voiceCopilot.testCredential(body || {})
+          return { status: outcome.ok ? 200 : 502, json: outcome }
+        }
+
+        if (method === 'POST' && pathname === '/api/voice/stt') {
+          const outcome = await voiceCopilot.runStt(body || {})
+          return { status: outcome.ok ? 200 : 502, json: outcome }
+        }
+
+        if (method === 'POST' && pathname === '/api/voice/turn') {
+          const outcome = await voiceCopilot.runBrainTurn(body || {})
+          return { status: outcome.ok ? 200 : 502, json: outcome }
+        }
+
+        if (method === 'POST' && pathname === '/api/voice/tts') {
+          const outcome = await voiceCopilot.runTts(body || {})
+          return { status: outcome.ok ? 200 : 502, json: outcome }
+        }
+
+        if (method === 'POST' && pathname === '/api/voice/pin/clear') {
+          voiceCopilot.pinStore.clear(body?.sessionId || 'default')
+          return { status: 200, json: { ok: true } }
+        }
+      }
+
       // SSE fallback for in-memory fetchAdapter testing
       if (method === 'GET' && pathname === '/api/events') {
         return {
@@ -1444,14 +1658,36 @@ export function createHubServer({
     try {
       const urlObj = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`)
       if (req.method === 'GET' && urlObj.pathname === '/api/events') {
-        if (!checkHostOrAdminAuth(req.headers, urlObj)) {
-          await sendJson(res, 401, { ok: false, error: 'Unauthorized', authRequired: true }, req.headers)
-          return
-        }
-        const isHostMode =
+        const isAdminReq = checkAuth(req.headers, urlObj)
+        const requestedHostId = String(urlObj.searchParams.get('hostId') || '').trim()
+        const isHostModeRequested =
           urlObj.searchParams.get('mode') === 'host' ||
           /^node\b/i.test(String(req.headers['user-agent'] || ''))
-        const watchHostId = String(urlObj.searchParams.get('hostId') || '').trim()
+
+        let isHostMode = isHostModeRequested
+        let watchHostId = requestedHostId
+        if (!isAdminReq) {
+          const candidateToken = extractCandidateToken(req.headers, urlObj)
+          const authHostId = hub.resolveAuthenticatedHostId(candidateToken, requestedHostId)
+          // Host tokens may NEVER subscribe to the admin full-state SSE stream (which includes
+          // mediaTicket, enrollment code, and all connected hosts). They may ONLY open mode=host
+          // strictly scoped to their own hostId.
+          if (!isHostModeRequested || !authHostId) {
+            await sendJson(
+              res,
+              401,
+              {
+                ok: false,
+                error: 'Unauthorized: valid HUB_TOKEN required (or mode=host with matching Host Token)',
+                authRequired: true,
+              },
+              req.headers,
+            )
+            return
+          }
+          isHostMode = true
+          watchHostId = authHostId
+        }
 
         if (isHostMode) {
           req.socket?.setNoDelay?.(true)
@@ -1593,9 +1829,9 @@ export function createHubServer({
           const evtName = typeof evt === 'string' ? evt : String(evt?.type || '')
           const minGap =
             evtName === 'command_queued' ||
-            evtName === 'command_cancelled' ||
-            evtName === 'task_concluded' ||
-            evtName === 'session_pinned'
+              evtName === 'command_cancelled' ||
+              evtName === 'task_concluded' ||
+              evtName === 'session_pinned'
               ? Math.min(30, sseMinIntervalMs)
               : sseMinIntervalMs
           const elapsed = Date.now() - lastSsePushAt
@@ -1673,7 +1909,8 @@ export function createHubServer({
           }
         }
         const targetHostId = String(meta?.hostId ?? '').trim()
-        if (!checkHostOrAdminAuth(req.headers, urlObj, targetHostId)) {
+        const isAdminReq = checkAuth(req.headers, urlObj)
+        if (!isAdminReq && (!targetHostId || !checkHostOrAdminAuth(req.headers, urlObj, targetHostId))) {
           req.resume()
           await sendJson(
             res,
@@ -1927,7 +2164,7 @@ export function createHubServer({
     })()
   }
 
-  return { server, hub, dispatchRequest, fetchAdapter }
+  return { server, hub, voiceVault, voiceCopilot, dispatchRequest, fetchAdapter }
 }
 
 function renderServiceWorkerJs(buildInfo = {}) {

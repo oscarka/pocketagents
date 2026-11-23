@@ -89,6 +89,39 @@ export class HubCore {
     return Buffer.from(this.mediaSeed, 'hex')
   }
 
+  getHostTokenSigningKey() {
+    if (this.tokenSecret) {
+      return createHmac('sha256', this.tokenSecret).update('dsh-host-token-v1').digest()
+    }
+    return createHmac('sha256', Buffer.from(this.mediaSeed, 'hex')).update('dsh-host-token-v1').digest()
+  }
+
+  issueSignedHostToken(hostId) {
+    const cleanHostId = String(hostId ?? '').trim()
+    const nonceHex = randomBytes(8).toString('hex')
+    const macHex = createHmac('sha256', this.getHostTokenSigningKey())
+      .update(`${cleanHostId}:${nonceHex}`)
+      .digest('hex')
+      .slice(0, 32)
+    return `hst_${nonceHex}${macHex}`
+  }
+
+  verifySignedHostToken(hostId, candidateToken) {
+    const cleanHostId = String(hostId ?? '').trim()
+    const candidate = String(candidateToken ?? '').trim()
+    if (!cleanHostId) return false
+    const match = /^hst_([0-9a-f]{16})([0-9a-f]{32})$/.exec(candidate)
+    if (!match) return false
+    const [, nonceHex, presentedMac] = match
+    const expectedMac = createHmac('sha256', this.getHostTokenSigningKey())
+      .update(`${cleanHostId}:${nonceHex}`)
+      .digest('hex')
+      .slice(0, 32)
+    const a = Buffer.from(presentedMac, 'utf8')
+    const b = Buffer.from(expectedMac, 'utf8')
+    return a.length === b.length && timingSafeEqual(a, b)
+  }
+
   onStateChange(listener) {
     this.sseListeners.add(listener)
     return () => this.sseListeners.delete(listener)
@@ -1595,7 +1628,7 @@ export class HubCore {
           : null,
         trust,
         lastSeen: now,
-        ...(payload.presentedHostToken && /^hst_[0-9a-f]{48}$/.test(payload.presentedHostToken)
+        ...(payload.presentedHostToken && this.verifySignedHostToken(hostId, payload.presentedHostToken)
           ? {
             hostToken: payload.presentedHostToken,
             hostTokenCreatedAt: now,
@@ -1923,7 +1956,7 @@ export class HubCore {
       return { ok: true, hostId, trust: record.trust, tokenRevoked: true }
     }
     if (action === 'rotate_token') {
-      const hostToken = `hst_${randomBytes(24).toString('hex')}`
+      const hostToken = this.issueSignedHostToken(hostId)
       record.hostToken = hostToken
       record.hostTokenCreatedAt = now
       record.hostTokenPreview = `${hostToken.slice(0, 8)}...${hostToken.slice(-4)}`
@@ -2054,7 +2087,7 @@ export class HubCore {
       .replace(/[^a-z0-9-_]/g, '')
     const cleanHostId = rawId || `mac-${randomBytes(3).toString('hex')}`
     const cleanHostName = String(hostName || cleanHostId).trim() || cleanHostId
-    const hostToken = `hst_${randomBytes(24).toString('hex')}`
+    const hostToken = this.issueSignedHostToken(cleanHostId)
     const hostTokenPreview = `${hostToken.slice(0, 8)}...${hostToken.slice(-4)}`
 
     const existing = this.hosts.get(cleanHostId)
@@ -2120,7 +2153,7 @@ export class HubCore {
           if (a.length === b.length && timingSafeEqual(a, b)) return true
         }
       }
-      return /^hst_[0-9a-f]{48}$/.test(candidate)
+      return false
     }
     const record = this.hosts.get(cleanHostId)
     if (record) {
@@ -2132,9 +2165,8 @@ export class HubCore {
       return timingSafeEqual(a, b)
     }
     // Stateless container cold-start recovery (e.g. Cloud Run redeploy):
-    // If this hostId is not in memory yet, allow an unrevoked enrollment token format
-    // provided it is not already bound to a different hostId in memory.
-    if (/^hst_[0-9a-f]{48}$/.test(candidate)) {
+    // ONLY accept cryptographically HMAC-signed host tokens bound to BOTH this Hub's secret and this exact hostId.
+    if (this.verifySignedHostToken(cleanHostId, candidate)) {
       for (const h of this.hosts.values()) {
         if (h.hostToken === candidate && h.hostId !== cleanHostId) {
           return false
@@ -2143,6 +2175,25 @@ export class HubCore {
       return true
     }
     return false
+  }
+
+  resolveAuthenticatedHostId(candidateToken, claimedHostId = '') {
+    const candidate = String(candidateToken ?? '').trim()
+    const cleanClaimed = String(claimedHostId ?? '').trim()
+    if (!candidate) return ''
+    if (cleanClaimed) {
+      return this.verifyHostCredential(cleanClaimed, candidate) ? cleanClaimed : ''
+    }
+    for (const h of this.hosts.values()) {
+      if (h.hostToken && h.trust?.status !== 'revoked') {
+        const a = Buffer.from(candidate)
+        const b = Buffer.from(String(h.hostToken))
+        if (a.length === b.length && timingSafeEqual(a, b)) {
+          return h.hostId
+        }
+      }
+    }
+    return ''
   }
 
   createPairingCode({ hostId = '', ttlMs = 5 * 60_000 } = {}) {
@@ -2859,21 +2910,12 @@ export class HubCore {
     const exp = Number(parts[1])
     const sig = parts[2]
     if (!Number.isFinite(exp) || exp <= now || !sig) return false
-    const candidateKeys = [this.getPrimaryMediaTicketKey()]
-    if (this.tokenSecret && this.mediaSeed) {
-      candidateKeys.push(Buffer.from(this.mediaSeed, 'hex'))
-    }
+    const expected = createHmac('sha256', this.getPrimaryMediaTicketKey())
+      .update(`mt1.${exp}`)
+      .digest('base64url')
     const a = Buffer.from(sig, 'utf8')
-    for (const key of candidateKeys) {
-      const expected = createHmac('sha256', key)
-        .update(`mt1.${exp}`)
-        .digest('base64url')
-      const b = Buffer.from(expected, 'utf8')
-      if (a.length === b.length && timingSafeEqual(a, b)) {
-        return true
-      }
-    }
-    return false
+    const b = Buffer.from(expected, 'utf8')
+    return a.length === b.length && timingSafeEqual(a, b)
   }
 
   storeFsHotCache(hostId, relPath, value, ttlMs = 10 * 60_000) {
@@ -3097,6 +3139,10 @@ export class HubCore {
     const entry = this.pendingFsRequests.get(cleanId)
     if (!entry) {
       return { ok: false, status: 404, error: 'Unknown or expired fs request' }
+    }
+    const claimedHostId = String(meta?.hostId ?? '').trim()
+    if (claimedHostId && entry.hostId && claimedHostId !== entry.hostId) {
+      return { ok: false, status: 403, error: 'Host mismatch for fs tunnel request' }
     }
     clearTimeout(entry.timer)
     this.pendingFsRequests.delete(cleanId)

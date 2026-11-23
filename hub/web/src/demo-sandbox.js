@@ -805,6 +805,65 @@ export function createDemoSandbox({ getHubState, setHubState, getLang, onStateMu
         expiresAt: Date.now() + 10 * 60_000,
       });
     }
+    if (pathname === '/api/voice/config') {
+      return jsonResp({
+        ok: true,
+        storageMode: 'demo-sandbox',
+        catalog: [],
+        credentials: [],
+        profiles: [
+          {
+            id: 'native',
+            name: '系统原生语音（免 Key 免费）',
+            builtin: true,
+            stt: { provider: 'native', credId: '', model: 'browser-web-speech', language: 'zh-CN', thinkingLevel: 'default', fallbackChain: [] },
+            brain: { provider: 'native', credId: '', model: 'rule-router', thinkingLevel: 'off', maxTokens: 256 },
+            tts: { provider: 'native', credId: '', model: 'browser-speech-synthesis', voice: 'system-default', format: 'mp3', speed: 1.0 },
+          },
+        ],
+        prefs: {
+          activeProfileId: 'native',
+          l2Policy: 'pin',
+          proactiveBriefing: 'approvals',
+          autoVad: true,
+          vadSilenceMs: 850,
+          useByokForChatStt: false,
+          useByokForChatTts: false,
+          autoPlayWalkReplies: true,
+          speechRate: 1.0,
+        },
+        activeProfile: {
+          id: 'native',
+          name: '系统原生语音（免 Key 免费）',
+          builtin: true,
+          stt: { provider: 'native', credId: '', model: 'browser-web-speech', language: 'zh-CN', thinkingLevel: 'default', fallbackChain: [] },
+          brain: { provider: 'native', credId: '', model: 'rule-router', thinkingLevel: 'off', maxTokens: 256 },
+          tts: { provider: 'native', credId: '', model: 'browser-speech-synthesis', voice: 'system-default', format: 'mp3', speed: 1.0 },
+        },
+      });
+    }
+    if (pathname === '/api/voice/turn' && method === 'POST') {
+      let body = {};
+      try { body = JSON.parse(options.body || '{}'); } catch { }
+      const txt = String(body.text || '').trim();
+      const spokenReply = /审批|状态|进度/.test(txt)
+        ? '演示环境当前有 1 条常规待审批和 1 个正在运行的任务。部署自己的 Hub 后，填入任意 BYOK 密钥即可启用真实随行耳机语音总管。'
+        : `体验模式收到你的语音口令「${txt.slice(0, 32)}」。在自己的 Hub 中配置 Gemini / 火山豆包 / OpenAI 兼容密钥后，即可直接遥控电脑。`;
+      return jsonResp({
+        ok: true,
+        provider: 'demo',
+        model: 'demo-router',
+        latencyMs: 12,
+        userText: txt,
+        spokenReply,
+        spokenChunks: [spokenReply],
+        action: { type: 'query_status' },
+        execution: { executed: false, dryRun: true, type: 'query_status' },
+      });
+    }
+    if (pathname === '/api/voice/tts' && method === 'POST') {
+      return jsonResp({ ok: true, provider: 'native', useBrowserSpeech: true, latencyMs: 1 });
+    }
     return jsonResp({ ok: true, demo: true });
   }
 

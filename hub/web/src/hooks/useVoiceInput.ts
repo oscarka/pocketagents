@@ -1258,6 +1258,13 @@ export function toggleVoiceInput(
   const win: any = window;
   const showToast = deps?.showToast || (win.showToast ?? (() => { }));
   const onComposerInput = deps?.onComposerInput || (win.onComposerInput ?? (() => { }));
+
+  // Optional opt-in BYOK cloud STT for chat page (OFF by default; zero change to native speech when disabled)
+  if (typeof win.__dshVoiceByokToggleDictation === 'function') {
+    const handledByByok = win.__dshVoiceByokToggleDictation(targetInputId, btnId, showToast, onComposerInput);
+    if (handledByByok) return;
+  }
+
   const btn = document.getElementById(btnId);
 
   // 如果当前正处于录音状态（无论是 voiceSessionActive、activeVoiceRecognition 还在，还是按钮带有 .recording 类），点击立即强制关闭！
