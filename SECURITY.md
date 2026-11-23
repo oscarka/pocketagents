@@ -47,12 +47,15 @@ We will respond promptly. Please allow time for a fix before public disclosure.
 
 ## Implemented Security Controls
 
-### Authentication & Per-Host Isolation
+### Authentication, Zero-Trust Phone Approval & Per-Host Isolation
 
 - The Hub **refuses to start** unless `HUB_TOKEN` is configured (`hub/server.js`).
-- All `/api/*` and `/fs/*` routes require authentication except public bootstrap/health endpoints (`/healthz`, `/api/auth/verify`, `/api/pairing/exchange`, `/api/enroll/exchange`), with constant-time `timingSafeEqual` token comparison.
-- **Per-computer isolated credentials**: Enrolling a computer via a 15-minute enrollment code issues a dedicated revocable host token (`hst_...`) pinned to the machine's Ed25519 public key fingerprint. Revoking one computer never disrupts other hosts.
+- All `/api/*` and `/fs/*` routes require authentication except public bootstrap/health endpoints (`/healthz`, `/api/health`, `/api/auth/verify`, `/api/auth/device-request/:id`, `/api/pairing/exchange`, `/api/hosts/join`), with constant-time `timingSafeEqual` token comparison. Unauthenticated `/api/health` hides hostnames and counts when accessed through a reverse proxy.
+- **Zero-Trust Phone-Approved Access Gate (`v0.9.10`)**: When enabled in Settings, every approved browser receives an individual `dev_...` credential. Even if `HUB_TOKEN` is compromised, unknown browsers are held on a 6-digit verification waiting screen while your trusted phone receives an instant Web Push & approval banner (`✓ Allow` / `🚫 Deny`), and direct API calls using bare `HUB_TOKEN` are rejected with `403 DEVICE_APPROVAL_REQUIRED`. Newly enrolled computers enter `pending_approval` quarantine until approved on your phone (`HUB_RESET_TRUSTED_DEVICES=1` provides break-glass recovery).
+- **Real-Time Intrusion Alerts**: Forged `hst_...` host tokens, sensitive path probes, password brute-force, and high-frequency unauthorized scans are logged (with real client IP when `TRUST_PROXY=1` and automatic `[REDACTED]` credential scrubbing) and pushed to your phone with per-IP cooldowns.
+- **Per-computer HMAC-signed credentials**: Enrolling a computer via an enrollment code issues a dedicated HMAC-signed host token (`hst_...`) bound to that `hostId` and pinned to the machine's Ed25519 public key fingerprint. Revoking one computer never disrupts other hosts; rotating `HUB_TOKEN` acts as a master kill-switch invalidating prior signed host tokens and media tickets.
 - **Read-only media tickets**: Inline images and `HTTP 206 Range` video streams use short-lived, path-scoped HMAC `mediaTicket` query tokens so `HUB_TOKEN` is never exposed in `<img src>` or `<video src>` URLs.
+- **Encrypted BYOK Voice Vault & SSRF Guard**: Optional BYOK voice API keys are stored encrypted with AES-256-GCM (`0600`), never echoed back in plaintext, and block cloud metadata SSRF destinations (`169.254.169.254`, `metadata.google.internal`, etc.).
 
 ### Pairing & Rate Limiting
 
@@ -110,7 +113,7 @@ Please review and harden as needed for production deployments:
 
 | Secret | How to Rotate | Impact |
 | --- | --- | --- |
-| `HUB_TOKEN` | Change in Web Settings or update env var & redeploy | Browsers must sign in again; enrolled `hst_...` computers keep working unless revoked |
+| `HUB_TOKEN` | Change in Web Settings or update env var & redeploy | Browsers must sign in again; HMAC-signed `hst_...` host tokens and `mediaTicket`s derived from the old secret are also invalidated (re-enroll hosts with a fresh enrollment code) |
 | Host Credential (`hst_...`) | Tap **🚫 Revoke Token** in Web Settings or delete `feishu-host.json` | Only that specific computer is disconnected and must re-enroll |
 | `VAPID_SECRET` | Update env var & redeploy | Existing Web Push subscriptions expire; re-enable Push in phone Settings |
 | Feishu `App Secret` | Reset in Feishu Open Platform console | Update `feishu.env` on Feishu-enabled hosts and restart daemon |
@@ -166,12 +169,15 @@ Please review and harden as needed for production deployments:
 
 ## 已实现的控制
 
-### 认证与一机一证隔离
+### 认证、零信任手机审批与一机一证隔离
 
 - 未设置 `HUB_TOKEN` 时 Hub **直接拒绝裸奔启动**（`hub/server.js`）。
-- 所有 `/api/*` 与 `/fs/*` 接口（除公开探活与配对交换接口外）均强制鉴权，并使用 `timingSafeEqual` 防止时序侧信道。
-- **每台电脑独立可吊销凭证**：通过 15 分钟配对码接入的每台电脑都会获得独立的 `hst_...` 凭证并绑定 Ed25519 设备公钥指纹；在手机端吊销某一台电脑不会影响其他机器。
+- 所有 `/api/*` 与 `/fs/*` 接口（除公开探活、设备审批轮询与配对交换接口外）均强制鉴权，并使用 `timingSafeEqual` 防止时序侧信道；反向代理后的公网未登录 `/api/health` 不再暴露主机名与主机数。
+- **零信任「手机审批门禁」（`v0.9.10`）**：在设置页开启后，每个已批准浏览器持有独立 `dev_...` 信任凭证；即便主密码 `HUB_TOKEN` 泄露，陌生浏览器也会卡在 6 位核对码等待页并立即向已信任手机推送审批通知，直接持裸主密码调管理接口会被 `403 DEVICE_APPROVAL_REQUIRED` 拦截；新配对电脑也默认进入 `pending_approval` 隔离态，需手机批准后才放行（支持 `HUB_RESET_TRUSTED_DEVICES=1` 紧急逃生）。
+- **实时入侵检测与锁屏告警**：自动识别伪造 `hst_...` 令牌、敏感凭证路径探测、密码爆破与高频扫描（`TRUST_PROXY=1` 提取真实公网 IP，日志自动 `[REDACTED]` 脱敏），带冷却机制推送至手机。
+- **每台电脑独立 HMAC 签名凭证**：通过配对码接入的每台电脑获得绑定 `hostId` 的独立 HMAC 签名 `hst_...` 凭证并锁定 Ed25519 设备指纹；吊销单台电脑不影响其他机器，轮换主密码 `HUB_TOKEN` 可一键失效全部旧签名主机凭证与媒体票据。
 - **短效只读媒体票据 (`mediaTicket`)**：聊天内嵌图片与 `HTTP 206` 视频流使用绑定文件路径与有效期的 HMAC 只读票据，避免在 `<img src>` / `<video src>` 中暴露主密码 `HUB_TOKEN`。
+- **加密语音密钥库与 SSRF 防护**：可选 BYOK 语音 API Key 采用 AES-256-GCM 加密落盘（`0600`），永不回显明文，并拦截云厂商内网元数据 SSRF 地址（`169.254.169.254`、`metadata.google.internal` 等）。
 
 ### 手机配对与防爆破限流
 
@@ -230,7 +236,7 @@ Please review and harden as needed for production deployments:
 
 | 密钥 | 轮换方式 | 影响 |
 | --- | --- | --- |
-| `HUB_TOKEN` | 在网页「设置 → 修改密码」或改环境变量重新部署 | 已登录浏览器需重新解锁；已配对电脑（`hst_...` 独立凭证）继续正常工作 |
+| `HUB_TOKEN` | 在网页「设置 → 修改密码」或改环境变量重新部署 | 已登录浏览器需重新解锁；基于旧密码派生的 HMAC 签名 `hst_...` 主机凭证与媒体票据同步作废（电脑端用新配对码一键重连即可） |
 | 单机凭证 (`hst_...`) | Web 总控台点「🚫 吊销凭证」或删本机 `feishu-host.json` | 仅该台电脑断开并需重新配对，不影响其他电脑 |
 | `VAPID_SECRET` | 改环境变量并重新部署 | 已有锁屏推送订阅失效，需在手机设置里重新点一次开启推送 |
 | 飞书 `App Secret` | 飞书开放平台重置 | 更新对应机器的 `feishu.env` 并重启守护进程 |

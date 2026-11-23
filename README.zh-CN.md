@@ -2,7 +2,7 @@
   <img src="docs/assets/hero-banner-zh.svg" alt="PocketAgents — 手机遥控 Claude Code、OpenAI Codex、Antigravity IDE 与 DeepSeek Harness" width="100%" />
 
   <p align="center">
-    <strong>PocketAgents</strong> —— <strong>把电脑上正在跑的 <a href="#支持的-ai-编程工具">Claude Code、OpenAI Codex、Antigravity IDE、DeepSeek Harness (DSH) 与 WorkBuddy</a> 装进手机口袋 —— 100% 开源自托管、零第三方中继。<br/>手机滑卡批阅、一键放行命令与多选弹窗、微信式按住说话插话、或点 <code>🔊 播报</code> 直接听结论。</strong>
+    <strong>PocketAgents</strong> —— <strong>把电脑上正在跑的 <a href="#支持的-ai-编程工具">Claude Code、OpenAI Codex、Antigravity IDE、DeepSeek Harness (DSH) 与 WorkBuddy</a> 装进手机口袋 —— 100% 开源自托管、零第三方中继。<br/>手机滑卡批阅、戴耳机全屏 <code>🎧 随行语音总管</code> 边走边指挥、文件/Markdown 增强导出，并支持零信任「手机审批门禁」。</strong>
   </p>
 
   <p align="center">
@@ -72,7 +72,7 @@ npx pocketagents
 - **出门在外两眼一抹黑**：下楼买咖啡、在地铁上或躺在沙发上时，想看一眼任务跑完没有、按住语音像发微信一样说一句补充指令、传一张手机截图，或者发现跑偏了立即叫停。
 - **多台电脑来回切**：公司一台 Mac、家里两台 Mac mini 都在跑任务，想在一个手机页面里统一看管。
 
-**PocketAgents** 把你电脑上正在跑的 AI 编程会话装进手机浏览器里（内置**微信同款「按住说话」语音转文字 + 智能中文标点**、**`🔊 播报` 纯算法一键听回复（支持 `⚡ 重点` / `📖 全文` 切换与原地无损倍速）**，支持 iOS 16.4+ 添加到主屏幕开启原生锁屏推送，支持中英文自动识别与一键切换）。
+**PocketAgents** 把你电脑上正在跑的 AI 编程会话装进手机浏览器里 —— 内置**微信同款「按住说话」语音转文字**、**`🔊 播报` 纯算法一键听回复**、可选 **BYOK `🎧 全屏 OLED 随行耳机模式`**（自由混搭豆包 / Gemini / DeepSeek / OpenAI 兼容耳朵、大脑与嘴巴，高危命令自带 1ms 3 位语音确认码护栏）、**零信任手机审批门禁与入侵推送告警**，支持 iOS 16.4+ 添加到主屏幕开启原生锁屏推送与中英文自动切换。
 
 ---
 
@@ -234,9 +234,21 @@ HUB_TOKEN="自定义一个安全密码" \
 
 > 💡 按**自然日**折叠汇总，每条内保留完整子版本号；逐版本详细变更请见 [`CHANGELOG.md`](CHANGELOG.md)。
 
-<details>
-<summary><strong><code>2026-11-20 · v0.9.1–v0.9.4</code> — 滑卡批阅「🔊 播报全文」、多电脑双向改名自动迁移与三端原生插件</strong></summary>
+<details open>
+<summary><strong><code>2026-11-23 · v0.9.9–v0.9.10</code> — 零信任手机审批门禁、实时入侵告警与 BYOK 随行耳机语音总管</strong></summary>
 
+- **零信任「手机审批接入保护」与实时入侵告警监控（`v0.9.10`）**：设置页新增一键开关 **「新设备 / 新电脑接入需我手机审批」**——开启后每个已批准浏览器持有独立 `dev_...` 凭证，就算管理密码 `HUB_TOKEN` 泄露，陌生浏览器输密码也会卡在 6 位核对码等待页，你手机锁屏立刻收到推送与顶部审批横幅（`✓ 允许登录` / `🚫 拒绝`），直接持裸密码调接口将被 `403 DEVICE_APPROVAL_REQUIRED` 拦截并报警；新电脑配对接入也强制进入 `pending_approval` 隔离态，需你手机点头才放行（支持随时踢出旧设备与 `HUB_RESET_TRUSTED_DEVICES=1` 紧急逃生）。同步上线实时入侵监控告警（伪造 `hst_` 令牌、敏感凭证路径探测、密码爆破、高频扫描，支持 `TRUST_PROXY=1` 真实公网 IP 与 `[REDACTED]` 自动脱敏）、`voice-vault.js` 云内网元数据 SSRF 拦截、原子化状态落盘（`tmp + rename`）、`/api/health` 公网去敏与 CORS 收紧。
+- **BYOK 随行耳机语音总管、全屏 OLED 步行模式（`🎧`）与高危 3 位语音确认码（`v0.9.9`）**：开源中立零硬编码 Key，支持 AES-256-GCM 加密自填密钥池（`0600`），可三段独立混搭 Google Gemini、火山豆包 Flash ASR / Seed-TTS 2.0 及任意 OpenAI 兼容接口（DeepSeek / 方舟 Ark / OpenAI / OpenRouter / SiliconFlow / Groq / Ollama）并独立调优思考档位；内置纯黑省电 **OLED 步行盲操模式**（AirPods 硬件键联动、Auto-VAD 自动停顿收音、随时打断插话、屏幕常亮）、**1ms 确定性高危 3 位语音确认码护栏（L2）**（拦截 `rm -rf` / `git push --force` / `DROP TABLE` / `sudo` 等危险审批）与 **Voice Lab** 试跑延迟打点台；同步强化宿主机 HMAC 签名 `hst_...` 令牌校验与工作区敏感目录黑名单。
+
+</details>
+
+<details>
+<summary><strong><code>2026-11-20 · v0.9.1–v0.9.8</code> — 全文件与 Markdown 增强导出、Antigravity 插件卡片、离线 1 分钟感知、0-RTT 图片缓存与三端原生插件</strong></summary>
+
+- **全文件统一导出/分享引擎与 Markdown 5 项增强动作表（`v0.9.8`）**：手机与桌面文件预览顶栏新增防换行 `⤓` 导出入口；图片/视频/二进制一键直达原生保存分享，Markdown 文档支持 5 项高频动作——**保存/分享原文件**、**导出排版版独立 HTML**、**复制原文**、**复制去格式纯文本**与**打印/另存 PDF**，并采用 0ms 同步打包杜绝 iOS 分享手势超时。
+- **手机端原生渲染 Antigravity 插件卡片与远程一键启停（`v0.9.7`）**：聊天中 `<plugin-card>`、`customization://`、`sidecar://`、`conversation://` 全部渲染为原生交互卡片与胶囊，实时同步电脑端插件安装状态（`GetAllPlugins` RPC + `agy plugin list` 兜底），点开抽屉可查看完整组件清单并通过 `agy plugin enable/disable` 一键远程启停。
+- **电脑离线 1 分钟快速感知与 10 分钟排队发送（`v0.9.6`）**：离线判定收紧至 `60s` 并由 Hub 主动推送 `host_liveness` SSE 增量；离线会话原位变淡且降级灰态徽章，进入离线对话仍支持琥珀色 **`⏳ 排队发送`**（10 分钟内电脑上线自动执行）。
+- **0-RTT 图片直出流与 Hub 内存热缓存（`v0.9.5`）**：移除打开图片前的阻塞型 `/fs/read` 往返，新增 Hub `24 MiB` LRU / `90s` TTL / `304` 热缓存与单飞缩略图去重，彻底根治弱网加载慢或误跳回项目目录的问题。
 - **滑卡批阅「🔊 播报全文」&amp; 多电脑启动自动迁移旧改名（`v0.9.4`）**：在滑卡批阅结论卡与展开全文弹窗补齐一键 `🔊 播报全文` / `⏹ 停止` / `⚡ 重点 / 📖 全文` / `1x–1.5x` 变速与 `📋 复制全文`（自动后台拉满全文、滑走或长按说话自动静音）；守护进程启动新增 `migrateLegacyCustomTitles()`，其他电脑只需在手机点一下「⚡ 更新电脑端」，重启时即自动把本机 `~/.dsh/session-titles.json` 历史手机改名写回 Antigravity / Claude Code / DSH 并清理旧锁死覆写。
 - **全引擎手机 ↔ 电脑双向会话重命名同步（`v0.9.3`）**：新增 Antigravity IDE 原生 `setAntigravityConversationTitle`（直连 `UpdateConversationAnnotations` 更新 `annotations.title` 并提供保留 `pinned:true` 的 `.pbtxt` 离线回写，读取侧优先取实时 `annotations.title`）、Claude Code `.jsonl` `custom-title` 双向读写，以及 DSH 离线会话原生 zstd `session/title` 帧追加；原生改名成功后自动清理 `~/.dsh/session-titles.json` 旧覆写，彻底解决此前“手机改名不同步电脑、改过一次后电脑改名也不再同步手机”的问题，并补齐手机端乐观刷新。
 - **三端原生 Agent 插件配置 &amp; Claude Code 审批 Hook 零阻塞守卫（`v0.9.2`）**：新增 **Antigravity**（`plugin.json` + `skills/pocketagents/SKILL.md` + `assets/logo.svg`）、**Claude Code**（`.claude-plugin/plugin.json` + `.claude-plugin/marketplace.json` + 隔离 `.claude-plugin/hooks.json`）与 **OpenAI Codex**（`.codex-plugin/plugin.json` + `.agents/plugins/marketplace.json` → `plugins/pocketagents`）原生 GitHub 插件清单，全量通过 `agy plugin validate` 与 `claude plugin validate` 校验；`claude-permission-hook.js` 新增本机监听心跳/锁文件活性校验与 `--from-plugin` 防重复弹窗，未启动 PocketAgents 时 `<5ms` 无感退回终端审批绝不卡死。
@@ -361,8 +373,10 @@ HUB_TOKEN="自定义一个安全密码" \
 
 ## 安全与隐私设计
 
-- **强制密码保护**：未设置 `HUB_TOKEN` 时服务端拒绝裸奔启动，登录与配对接口均内置防暴力破解限流。
-- **一机一证随时吊销**：每台接入的电脑使用独立凭证 (`hst_...`)，如果某台旧电脑不用了，在手机「设置 → 已接入电脑」里点一下 **「🚫 吊销凭证」** 即可单独断开，不影响其他电脑。
+- **零信任「手机审批门禁」（`v0.9.10`）**：在手机设置页一键开启 **「新设备 / 新电脑接入需我手机审批」** 后，即便管理密码 `HUB_TOKEN` 泄露，任何陌生浏览器或新配对电脑都必须在你已信任的手机上核对 6 位码并点击「允许」才能放行，支持随时踢出旧设备与 `HUB_RESET_TRUSTED_DEVICES=1` 紧急逃生。
+- **实时入侵检测与锁屏告警**：自动识别并拦截伪造 `hst_` 令牌、敏感路径探测、密码爆破与高频扫描，按真实公网 IP（`TRUST_PROXY=1`）脱敏记录并推送至手机锁屏。
+- **强制密码保护与 HMAC 签名一机一证**：未设置 `HUB_TOKEN` 时服务端拒绝裸奔启动；每台接入电脑签发绑定 `hostId` 与 Ed25519 指纹的独立签名凭证 (`hst_...`)，单独吊销某台电脑或轮换主密码均可立即失效旧凭证。
+- **加密语音密钥库与工作区敏感路径隔离**：可选 BYOK 语音 API Key 采用 AES-256-GCM 加密落盘（`0600`）并内置云元数据 SSRF 拦截；电脑端文件隧道强制 `realpath` 前缀校验并屏蔽敏感家目录凭证（`~/.ssh`、`~/.aws`、`~/.dsh`、`.env` 等）。
 - **端到端加密回放分享**：生成的会话分享链接在你的电脑本地完成 AES-256-GCM 加密，解密密钥只存在于链接末尾的 `#k=` 锚点中，不经过服务端。
 - **插件本地权限透明披露**：作为 DSH 插件运行时，仅读取本机已安装 AI 编程工具的本地会话状态（如 `~/.dsh`、Antigravity、Codex、Claude Code、WorkBuddy、豆包会话目录）及你在手机端主动点开的工作区文件；**内置零第三方遥测与零外部厂商中转**，默认仅在本机局域网监听（需本机随机强密码或一次性配对码鉴权），仅在你主动配置 `FEISHU_HUB_URL` 或飞书自建应用凭证时才会向你指定的地址发起连接。
 
