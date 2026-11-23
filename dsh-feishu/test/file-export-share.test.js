@@ -52,7 +52,7 @@ test('stripMarkdownToPlainText converts Markdown into clean paste-ready plain te
     '# 纯算法语音清洗对照稿',
     '',
     '测试脚本：[algo_speech_pipeline.mjs](file:///Users/cc/repo/algo_speech_pipeline.mjs)',
-    '官网文档：[PocketAgents](https://harness.agentrun.vip) 与 **核心指标** `6.7ms`',
+    '官网文档：[PocketAgents](https://pocketagents.agentrun.vip/?demo=1) 与 **核心指标** `6.7ms`',
     '',
     '> [!NOTE] 这是一段引用说明',
     '> 第二行引用内容',
@@ -75,7 +75,7 @@ test('stripMarkdownToPlainText converts Markdown into clean paste-ready plain te
   assert.match(plain, /^纯算法语音清洗对照稿/m)
   assert.match(plain, /测试脚本：algo_speech_pipeline\.mjs/)
   assert.doesNotMatch(plain, /file:\/\//)
-  assert.match(plain, /PocketAgents \(https:\/\/harness\.agentrun\.vip\)/)
+  assert.match(plain, /PocketAgents \(https:\/\/pocketagents\.agentrun\.vip\/\?demo=1\)/)
   assert.match(plain, /核心指标 6\.7ms/)
   assert.doesNotMatch(plain, /\*\*|`|~~|plugin-card/)
   assert.match(plain, /这是一段引用说明/)

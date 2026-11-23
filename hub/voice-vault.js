@@ -135,10 +135,40 @@ export function maskSecret(value = '') {
   return `${s.slice(0, 4)}••••${s.slice(-4)}`
 }
 
+const BLOCKED_METADATA_HOSTS = new Set([
+  '169.254.169.254',
+  'metadata.google.internal',
+  'metadata.goog',
+  'metadata',
+  '100.100.100.200',
+  'fd00:ec2::254',
+  '0.0.0.0',
+  '[::]',
+])
+
+export function isBlockedVoiceBaseUrl(rawUrl = '') {
+  const s = String(rawUrl ?? '').trim()
+  if (!s) return false
+  let parsed
+  try {
+    parsed = new URL(s)
+  } catch {
+    return true
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return true
+  const host = String(parsed.hostname || '').toLowerCase().replace(/^\[|\]$/g, '')
+  if (!host) return true
+  if (BLOCKED_METADATA_HOSTS.has(host)) return true
+  if (host.startsWith('169.254.') || host.endsWith('.internal')) return true
+  if (host.startsWith('fe80:') || host === '::' || host === '::ffff:169.254.169.254') return true
+  return false
+}
+
 function sanitizeUrl(url = '') {
   const s = String(url ?? '').trim()
   if (!s) return ''
   if (!/^https?:\/\//i.test(s)) return ''
+  if (isBlockedVoiceBaseUrl(s)) return ''
   return s.replace(/\/+$/, '')
 }
 
@@ -263,9 +293,9 @@ export class VoiceVault {
       const generated = randomBytes(32)
       const tmpKeyPath = `${keyPath}.tmp.${process.pid}.${randomBytes(4).toString('hex')}`
       await writeFile(tmpKeyPath, `${generated.toString('hex')}\n`, { encoding: 'utf8', mode: 0o600 })
-      await chmod(tmpKeyPath, 0o600).catch(() => {})
+      await chmod(tmpKeyPath, 0o600).catch(() => { })
       await rename(tmpKeyPath, keyPath)
-      await chmod(keyPath, 0o600).catch(() => {})
+      await chmod(keyPath, 0o600).catch(() => { })
       this._keyBytes = generated
       return this._keyBytes
     }
@@ -323,17 +353,17 @@ export class VoiceVault {
     }
     const customProfiles = Array.isArray(parsed?.profiles)
       ? parsed.profiles
-          .filter(p => p && p.id && p.id !== 'native')
-          .map(p => ({
-            id: String(p.id).slice(0, 80),
-            name: String(p.name || p.id).trim().slice(0, 80),
-            builtin: false,
-            stt: normalizeStageConfig(p.stt, 'stt'),
-            brain: normalizeStageConfig(p.brain, 'brain'),
-            tts: normalizeStageConfig(p.tts, 'tts'),
-            createdAt: Number(p.createdAt) || this.now(),
-            updatedAt: Number(p.updatedAt) || this.now(),
-          }))
+        .filter(p => p && p.id && p.id !== 'native')
+        .map(p => ({
+          id: String(p.id).slice(0, 80),
+          name: String(p.name || p.id).trim().slice(0, 80),
+          builtin: false,
+          stt: normalizeStageConfig(p.stt, 'stt'),
+          brain: normalizeStageConfig(p.brain, 'brain'),
+          tts: normalizeStageConfig(p.tts, 'tts'),
+          createdAt: Number(p.createdAt) || this.now(),
+          updatedAt: Number(p.updatedAt) || this.now(),
+        }))
       : []
     next.profiles = [structuredClone(DEFAULT_NATIVE_PROFILE), ...customProfiles]
     next.prefs = normalizePrefs(parsed?.prefs)
@@ -366,12 +396,12 @@ export class VoiceVault {
       }
       const tmpPath = `${this.vaultFile}.tmp.${process.pid}.${randomBytes(4).toString('hex')}`
       await writeFile(tmpPath, JSON.stringify(envelope, null, 2), { encoding: 'utf8', mode: 0o600 })
-      await chmod(tmpPath, 0o600).catch(() => {})
+      await chmod(tmpPath, 0o600).catch(() => { })
       await rename(tmpPath, this.vaultFile)
-      await chmod(this.vaultFile, 0o600).catch(() => {})
+      await chmod(this.vaultFile, 0o600).catch(() => { })
       return { ok: true }
     })
-    this._persistChain = writeTask.catch(() => {})
+    this._persistChain = writeTask.catch(() => { })
     return writeTask
   }
 
@@ -469,6 +499,9 @@ export class VoiceVault {
     }
 
     const baseUrlRaw = input?.baseUrl !== undefined ? String(input.baseUrl).trim() : existing?.baseUrl || ''
+    if (baseUrlRaw && isBlockedVoiceBaseUrl(baseUrlRaw)) {
+      return { ok: false, error: '安全策略拦截：禁止将语音接口 Base URL 指向云厂商内网元数据或非法地址' }
+    }
     const baseUrl = sanitizeUrl(baseUrlRaw) || catalogMeta?.defaultBaseUrl || ''
     const label = String(input?.label ?? '').trim().slice(0, 80) || existing?.label || `${catalogMeta?.shortName || provider} 密钥`
     const resourceId = String(input?.resourceId ?? existing?.resourceId ?? catalogMeta?.defaultResourceId ?? '').trim().slice(0, 80)

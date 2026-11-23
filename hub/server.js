@@ -358,7 +358,7 @@ export function createHubServer({
     return bearer || headerToken || queryToken
   }
 
-  function checkAuth(headers = {}, urlObj) {
+  function checkMasterToken(headers = {}, urlObj) {
     if (!expectedToken) return !requireToken
     const candidate = extractCandidateToken(headers, urlObj)
     if (!candidate) return false
@@ -368,15 +368,30 @@ export function createHubServer({
     return timingSafeEqual(a, b)
   }
 
-  function checkHostOrAdminAuth(headers = {}, urlObj, hostId = '') {
+  function getAuthenticatedDevice(headers = {}, urlObj) {
+    const candidate = extractCandidateToken(headers, urlObj)
+    if (!candidate || !candidate.startsWith('dev_')) return null
+    return hub.verifyTrustedDeviceToken?.(candidate) || null
+  }
+
+  function checkAuth(headers = {}, urlObj) {
+    if (!expectedToken) return !requireToken
+    if (getAuthenticatedDevice(headers, urlObj)) return true
+    if (hub.deviceApprovalEnabled && hub.trustedDevices?.size > 0) {
+      return false
+    }
+    return checkMasterToken(headers, urlObj)
+  }
+
+  function checkHostOrAdminAuth(headers = {}, urlObj, hostId = '', { allowPending = false } = {}) {
     if (checkAuth(headers, urlObj)) return true
     const candidate = extractCandidateToken(headers, urlObj)
     if (!candidate) return false
     if (hostId) {
-      return hub.verifyHostCredential(hostId, candidate)
+      return hub.verifyHostCredential(hostId, candidate, { allowPending })
     }
     for (const h of hub.hosts.values()) {
-      if (hub.verifyHostCredential(h.hostId, candidate)) {
+      if (hub.verifyHostCredential(h.hostId, candidate, { allowPending })) {
         return true
       }
     }
@@ -410,21 +425,30 @@ export function createHubServer({
     const readMethod = method === 'HEAD' ? 'GET' : method
 
     if (method === 'OPTIONS') {
-      return { status: 204, headers: { 'access-control-allow-origin': '*' }, body: '' }
+      return { status: 204, headers: { 'cache-control': 'no-store' }, body: '' }
     }
 
     if (readMethod === 'GET' && (pathname === '/healthz' || pathname === '/ready' || pathname === '/api/health')) {
+      const cleanSock = String(remoteAddress || '').replace(/^::ffff:/i, '')
+      const isLocalProbe = cleanSock === '127.0.0.1' || cleanSock === '::1'
+      const showExtended = isLocalProbe || checkAuth(headers, urlObj)
       return {
         status: 200,
-        json: {
-          ok: true,
-          status: 'ok',
-          build: buildInfo,
-          activeHostId: hub.activeHostId,
-          hostsCount: hub.hosts.size,
-          snapshotsCount: hub.snapshots.size,
-          sharesCount: hub.shares.size,
-        },
+        json: showExtended
+          ? {
+            ok: true,
+            status: 'ok',
+            build: buildInfo,
+            activeHostId: hub.activeHostId,
+            hostsCount: hub.hosts.size,
+            snapshotsCount: hub.snapshots.size,
+            sharesCount: hub.shares.size,
+          }
+          : {
+            ok: true,
+            status: 'ok',
+            build: buildInfo,
+          },
       }
     }
 
@@ -681,7 +705,11 @@ export function createHubServer({
 
     // One-line Host Install Script served directly from the Hub (pre-fills this Hub's origin URL)
     if (method === 'GET' && (pathname === '/install.sh' || pathname === '/connect-host.sh')) {
-      const originUrl = `${urlObj.protocol}//${urlObj.host}`
+      const configuredPublicUrl = String(process.env.PUBLIC_URL || '').trim().replace(/\/+$/, '')
+      const safeHost = /^[a-zA-Z0-9._:-]+$/.test(urlObj.host) ? urlObj.host : 'localhost:8080'
+      const originUrl = /^https?:\/\/[a-zA-Z0-9._:/-]+$/.test(configuredPublicUrl)
+        ? configuredPublicUrl
+        : `${urlObj.protocol}//${safeHost}`
       try {
         const rawScript = await readFile(CONNECT_SCRIPT_PATH, 'utf8')
         const injected = rawScript.replace(
@@ -698,13 +726,46 @@ export function createHubServer({
       }
     }
 
+    const reqClientIp = resolveClientIp(headers, remoteAddress, {
+      ...(trustProxy !== undefined ? { trustProxy } : {}),
+    })
+    const noteSecurityIncident = ({ kind = '', status = 401, detail = '' } = {}) => {
+      const candidate = extractCandidateToken(headers, urlObj)
+      const isForgedHostToken = /^hst_/i.test(candidate)
+      const resolvedKind = kind || (isForgedHostToken ? 'forged_host_token' : 'unauth_api_scan')
+      hub.recordSecurityEvent?.({
+        kind: resolvedKind,
+        ip: reqClientIp,
+        method,
+        path: `${pathname}${urlObj.search || ''}`,
+        status,
+        detail: detail || (isForgedHostToken ? '携带伪造或已吊销的 hst_ 主机令牌' : ''),
+      })
+    }
+
     // One-Time Pairing Code Exchange (allows mobile QR scan / 6-digit code login without typing HUB_TOKEN)
     if (method === 'POST' && pathname === '/api/pairing/exchange') {
-      const clientKey = resolveClientIp(headers, remoteAddress, {
-        ...(trustProxy !== undefined ? { trustProxy } : {}),
-      })
+      const clientKey = reqClientIp
       const outcome = hub.exchangePairingCode(body.code, { clientKey })
       if (!outcome.ok) return { status: outcome.rateLimited ? 429 : 401, json: outcome }
+      // Pairing codes are generated on an already-trusted phone, so mint an approved device token when device approval is enabled (or client passes deviceId)
+      if (hub.deviceApprovalEnabled || body?.deviceId) {
+        const reg = hub.registerTrustedDevice({
+          deviceId: body?.deviceId || '',
+          name: body?.deviceName || '扫码配对设备',
+          userAgent: headers['user-agent'] || '',
+          ip: reqClientIp,
+        })
+        return {
+          status: 200,
+          json: {
+            ...outcome,
+            token: hub.deviceApprovalEnabled ? reg.deviceToken : expectedToken,
+            deviceToken: reg.deviceToken,
+            deviceId: reg.device.id,
+          },
+        }
+      }
       return {
         status: 200,
         json: {
@@ -712,6 +773,14 @@ export function createHubServer({
           token: expectedToken,
         },
       }
+    }
+
+    // Pending Device Login Poll (unauthenticated by design; 128-bit random requestId; one-time token delivery after phone approval)
+    const devReqPollMatch = /^\/api\/auth\/device-request\/([^/]+)$/.exec(pathname)
+    if (method === 'GET' && devReqPollMatch) {
+      const reqId = decodeURIComponent(devReqPollMatch[1])
+      const outcome = hub.getPendingDeviceLoginStatus(reqId)
+      return { status: outcome.status === 'rejected' ? 403 : outcome.status === 'expired' ? 410 : 200, json: outcome }
     }
 
     // Host Join by Multi-Use Time-Limited Enrollment Code (issues independent per-host token, never master HUB_TOKEN)
@@ -733,32 +802,90 @@ export function createHubServer({
     }
 
     if (pathname === '/api/auth/verify' && method === 'POST') {
-      const clientKey = resolveClientIp(headers, remoteAddress, {
-        ...(trustProxy !== undefined ? { trustProxy } : {}),
-      })
+      const clientKey = reqClientIp
       const nowMs = hub.now ? hub.now() : Date.now()
       const recentFails = (authVerifyFailBuckets.get(clientKey) || []).filter(ts => nowMs - ts < AUTH_VERIFY_WINDOW_MS)
       if (recentFails.length >= AUTH_VERIFY_MAX_FAILS) {
         authVerifyFailBuckets.set(clientKey, recentFails)
+        noteSecurityIncident({ kind: 'auth_bruteforce', status: 429, detail: '登录密码爆破触发 429 限流' })
         return {
           status: 429,
           json: { ok: false, rateLimited: true, error: '尝试次数过多，请 1 分钟后再试', authRequired: Boolean(expectedToken) },
         }
       }
-      const ok = checkAuth(headers, urlObj)
-      if (ok) {
+      const existingDev = getAuthenticatedDevice(headers, urlObj)
+      if (existingDev) {
         authVerifyFailBuckets.delete(clientKey)
-      } else {
-        recentFails.push(nowMs)
-        authVerifyFailBuckets.set(clientKey, recentFails)
-        if (authVerifyFailBuckets.size > 1000) {
-          const oldestKey = authVerifyFailBuckets.keys().next().value
-          authVerifyFailBuckets.delete(oldestKey)
+        return {
+          status: 200,
+          json: {
+            ok: true,
+            authRequired: Boolean(expectedToken),
+            deviceApproved: true,
+            deviceId: existingDev.id,
+            deviceApprovalEnabled: Boolean(hub.deviceApprovalEnabled),
+          },
         }
       }
+      const masterOk = checkMasterToken(headers, urlObj)
+      if (masterOk) {
+        authVerifyFailBuckets.delete(clientKey)
+        if (hub.deviceApprovalEnabled && hub.trustedDevices.size > 0) {
+          const pending = hub.createPendingDeviceLogin({
+            deviceId: body?.deviceId || headers['x-device-id'] || '',
+            name: body?.deviceName || headers['x-device-name'] || '新浏览器设备',
+            userAgent: headers['user-agent'] || '',
+            ip: reqClientIp,
+          })
+          return {
+            status: 202,
+            json: {
+              ok: false,
+              pendingApproval: true,
+              requestId: pending.requestId,
+              verifyCode: pending.verifyCode,
+              expiresAt: pending.expiresAt,
+              authRequired: Boolean(expectedToken),
+              error: '已向你的已信任手机发送登录审批请求，请核对码后在手机点击「允许登录」',
+            },
+          }
+        }
+        const reqDevId = String(body?.deviceId || headers['x-device-id'] || '').trim()
+        if (reqDevId) {
+          const reg = hub.registerTrustedDevice({
+            deviceId: reqDevId,
+            name: body?.deviceName || headers['x-device-name'] || '我的设备',
+            userAgent: headers['user-agent'] || '',
+            ip: reqClientIp,
+          })
+          return {
+            status: 200,
+            json: {
+              ok: true,
+              authRequired: Boolean(expectedToken),
+              deviceToken: reg.deviceToken,
+              deviceId: reg.device.id,
+              deviceApprovalEnabled: Boolean(hub.deviceApprovalEnabled),
+            },
+          }
+        }
+        return {
+          status: 200,
+          json: { ok: true, authRequired: Boolean(expectedToken), deviceApprovalEnabled: Boolean(hub.deviceApprovalEnabled) },
+        }
+      }
+      recentFails.push(nowMs)
+      authVerifyFailBuckets.set(clientKey, recentFails)
+      if (recentFails.length >= 3) {
+        noteSecurityIncident({ kind: 'auth_bruteforce', status: 401, detail: `1 分钟内连续猜错密码 ${recentFails.length} 次` })
+      }
+      if (authVerifyFailBuckets.size > 1000) {
+        const oldestKey = authVerifyFailBuckets.keys().next().value
+        authVerifyFailBuckets.delete(oldestKey)
+      }
       return {
-        status: ok ? 200 : 401,
-        json: { ok, authRequired: Boolean(expectedToken) },
+        status: 401,
+        json: { ok: false, authRequired: Boolean(expectedToken) },
       }
     }
 
@@ -766,8 +893,9 @@ export function createHubServer({
       // Host-level reporting endpoints accept either the Admin HUB_TOKEN or that specific host's dedicated hostToken
       if (method === 'POST' && pathname === '/api/heartbeat') {
         const targetHostId = String(body?.hostId ?? '').trim()
-        const isAdminReq = checkAuth(headers, urlObj)
-        if (!isAdminReq && (!targetHostId || !checkHostOrAdminAuth(headers, urlObj, targetHostId))) {
+        const isAdminReq = checkAuth(headers, urlObj) || checkMasterToken(headers, urlObj)
+        if (!isAdminReq && (!targetHostId || !checkHostOrAdminAuth(headers, urlObj, targetHostId, { allowPending: true }))) {
+          noteSecurityIncident({ status: 401, detail: targetHostId ? `未授权心跳 hostId=${targetHostId}` : '未授权心跳' })
           return {
             status: 401,
             json: {
@@ -857,6 +985,7 @@ export function createHubServer({
       if (isSharedHostEndpoint) {
         const claimedHostId = String(body?.hostId || body?.fromHostId || body?.meta?.hostId || '').trim()
         if (!checkHostOrAdminAuth(headers, urlObj, claimedHostId)) {
+          noteSecurityIncident({ status: 401 })
           return {
             status: 401,
             json: {
@@ -868,6 +997,7 @@ export function createHubServer({
         }
       } else if (isReadOnlyMediaEndpoint) {
         if (!checkMediaOrAdminAuth(headers, urlObj)) {
+          noteSecurityIncident({ status: 401 })
           return {
             status: 401,
             json: {
@@ -878,6 +1008,29 @@ export function createHubServer({
           }
         }
       } else if (!checkAuth(headers, urlObj)) {
+        const usedMasterWithoutApproval = Boolean(hub.deviceApprovalEnabled && checkMasterToken(headers, urlObj))
+        if (usedMasterWithoutApproval) {
+          hub.recordSecurityEvent?.({
+            kind: 'unauth_api_scan',
+            severity: 'high',
+            ip: reqClientIp,
+            method,
+            path: pathname,
+            status: 403,
+            detail: '未审批设备尝试直接持管理员密码访问接口，已拦截',
+            pushImmediately: true,
+          })
+          return {
+            status: 403,
+            json: {
+              ok: false,
+              code: 'DEVICE_APPROVAL_REQUIRED',
+              error: '已开启新设备手机审批保护：请先通过登录页发起请求并在已信任手机上点击批准',
+              authRequired: true,
+            },
+          }
+        }
+        noteSecurityIncident({ status: 401 })
         return {
           status: 401,
           json: {
@@ -920,13 +1073,17 @@ export function createHubServer({
       if (method === 'GET' && pathname === '/api/state') {
         const reqPort = Number(urlObj.port || process.env.PORT || process.env.HUB_PORT || 8080)
         const lite = urlObj.searchParams.get('lite') === '1'
+        const curDev = getAuthenticatedDevice(headers, urlObj)
+        const fullState = hub.getFullState({ lite })
         return {
           status: 200,
           json: {
             ok: true,
             authRequired: Boolean(expectedToken),
+            currentDeviceId: curDev?.id || '',
             lanOrigins: detectLanOrigins(reqPort, { scheme }),
-            ...hub.getFullState({ lite }),
+            ...fullState,
+            accessControl: hub.getAccessControlState(curDev?.id || ''),
           },
         }
       }
@@ -1036,6 +1193,7 @@ export function createHubServer({
         const raw = urlObj.searchParams.get('raw') === '1'
         const isAdminReq = checkAuth(headers, urlObj)
         if (isBlockedHubFsPath({ cwd, path: reqPath, op: 'stream', isAdmin: isAdminReq })) {
+          noteSecurityIncident({ kind: 'sensitive_path_probe', status: 403, detail: `HLS 探测敏感路径 ${cwd}/${reqPath}` })
           return {
             status: 403,
             json: { ok: false, error: '安全策略拦截：禁止远程读取敏感凭证或系统密钥路径' },
@@ -1150,6 +1308,7 @@ export function createHubServer({
         const agentId = urlObj.searchParams.get('agentId') || ''
         const isAdminReq = checkAuth(headers, urlObj)
         if (isBlockedHubFsPath({ cwd, path: reqPath, op: fsOp, isAdmin: isAdminReq })) {
+          noteSecurityIncident({ kind: 'sensitive_path_probe', status: 403, detail: `FS/${fsOp} 探测敏感路径 ${cwd}/${reqPath}` })
           return {
             status: 403,
             json: { ok: false, error: '安全策略拦截：禁止远程读取敏感凭证或系统密钥路径' },
@@ -1566,6 +1725,67 @@ export function createHubServer({
         }
       }
 
+      // Real-time Security & Intrusion Monitor endpoints (strictly behind admin HUB_TOKEN)
+      if (method === 'GET' && pathname === '/api/security/events') {
+        return {
+          status: 200,
+          json: {
+            ok: true,
+            securitySummary: hub.getSecuritySummary(),
+          },
+        }
+      }
+
+      if (method === 'POST' && pathname === '/api/security/clear') {
+        return {
+          status: 200,
+          json: hub.clearSecurityEvents(),
+        }
+      }
+
+      if (method === 'POST' && pathname === '/api/security/test-alert') {
+        const out = hub.recordSecurityEvent({
+          kind: 'forged_host_token',
+          severity: 'high',
+          ip: reqClientIp,
+          method: 'POST',
+          path: '/api/security/test-alert',
+          status: 401,
+          detail: '手动触发的安全入侵告警演练',
+          pushImmediately: true,
+        })
+        return {
+          status: 200,
+          json: { ok: true, ...out, securitySummary: hub.getSecuritySummary() },
+        }
+      }
+
+      if (method === 'POST' && pathname === '/api/security/device-approval') {
+        const curDev = getAuthenticatedDevice(headers, urlObj)
+        const outcome = hub.setDeviceApprovalEnabled(Boolean(body?.enabled), {
+          deviceId: curDev?.id || body?.deviceId || headers['x-device-id'] || '',
+          name: body?.deviceName || headers['x-device-name'] || curDev?.name || '我的信任手机',
+          userAgent: headers['user-agent'] || '',
+          ip: reqClientIp,
+        })
+        return { status: outcome.ok ? 200 : 400, json: outcome }
+      }
+
+      if (method === 'POST' && pathname === '/api/security/device-login/decide') {
+        const outcome = hub.decidePendingDeviceLogin(body?.requestId || '', body?.allow !== false)
+        return { status: outcome.ok ? 200 : 404, json: outcome }
+      }
+
+      if (method === 'POST' && pathname === '/api/security/devices/revoke') {
+        const outcome = hub.revokeTrustedDevice(body?.deviceId || '')
+        return { status: outcome.ok ? 200 : 400, json: outcome }
+      }
+
+      if (method === 'POST' && pathname === '/api/security/host-join/decide') {
+        const outcome = hub.decidePendingHostJoin(body?.hostId || '', body?.allow !== false)
+        return { status: outcome.ok ? 200 : 404, json: outcome }
+      }
+
       // SSE fallback for in-memory fetchAdapter testing
       if (method === 'GET' && pathname === '/api/events') {
         return {
@@ -1673,6 +1893,18 @@ export function createHubServer({
           // mediaTicket, enrollment code, and all connected hosts). They may ONLY open mode=host
           // strictly scoped to their own hostId.
           if (!isHostModeRequested || !authHostId) {
+            const sseClientIp = resolveClientIp(req.headers, req.socket?.remoteAddress || '', {
+              ...(trustProxy !== undefined ? { trustProxy } : {}),
+            })
+            const isForgedHost = /^hst_/i.test(candidateToken)
+            hub.recordSecurityEvent?.({
+              kind: isForgedHost ? 'forged_host_token' : 'unauth_api_scan',
+              ip: sseClientIp,
+              method: 'GET',
+              path: `${urlObj.pathname}${urlObj.search || ''}`,
+              status: 401,
+              detail: isForgedHost ? 'SSE 事件流收到伪造或已吊销的 hst_ 令牌' : '未授权订阅 /api/events',
+            })
             await sendJson(
               res,
               401,
@@ -1696,7 +1928,6 @@ export function createHubServer({
             'cache-control': 'no-cache, no-transform',
             'x-accel-buffering': 'no',
             connection: 'keep-alive',
-            'access-control-allow-origin': '*',
           })
           res.flushHeaders?.()
           let closed = false
@@ -1766,7 +1997,6 @@ export function createHubServer({
           'cache-control': 'no-cache, no-store, no-transform',
           'x-accel-buffering': 'no',
           connection: 'keep-alive',
-          'access-control-allow-origin': '*',
         })
         res.flushHeaders?.()
         let closed = false
@@ -2681,7 +2911,6 @@ async function sendJson(res, status, data, reqHeaders = {}) {
         'content-encoding': 'gzip',
         'content-length': String(gz.length),
         'cache-control': 'no-store',
-        'access-control-allow-origin': '*',
       })
       res.end(gz)
       return
@@ -2692,7 +2921,6 @@ async function sendJson(res, status, data, reqHeaders = {}) {
   res.writeHead(status, {
     'content-type': 'application/json; charset=utf-8',
     'cache-control': 'no-store',
-    'access-control-allow-origin': '*',
   })
   res.end(payload)
 }

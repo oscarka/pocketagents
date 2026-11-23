@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ -f "${SCRIPT_DIR}/.deploy.env" ]] && [[ "${FORCE_CLOUDRUN:-0}" != "1" ]]; then
   if grep -Eq '^DEPLOY_TARGET=vm' "${SCRIPT_DIR}/.deploy.env"; then
-    echo "⛔ 已拦截误操作：当前环境已切换至服务器部署 (.deploy.env -> dsh-remotecontrol-hub / https://harness.agentrun.vip)。"
+    echo "⛔ 已拦截误操作：当前环境已切换至服务器部署 (.deploy.env -> DEPLOY_TARGET=vm)。"
     echo "👉 请改用服务器部署命令: ./deploy-vm.sh  (或 npm run deploy)"
     echo "   (如确需部署到 Google Cloud Run，请显式指定 FORCE_CLOUDRUN=1 ./deploy-cloudrun.sh)"
     exit 1

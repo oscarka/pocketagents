@@ -1,7 +1,13 @@
 const PRIVATE_KEY = /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g
 const BEARER = /\bBearer\s+[A-Za-z0-9._~+/=-]{8,}/gi
 const SK_KEY = /\bsk-[A-Za-z0-9_-]{8,}\b/g
-const ASSIGNMENT = /\b(api[_-]?key|access[_-]?token|refresh[_-]?token|app[_-]?secret|client[_-]?secret|password|secret)\b(\s*[:=]\s*)(["']?)[^\s"',;]{6,}\3/gi
+const ARK_KEY = /\bark-[A-Za-z0-9_-]{12,}\b/g
+const HST_TOKEN = /\bhst_[0-9a-f]{32,}\b/gi
+const GEMINI_AIZA = /\bAIza[0-9A-Za-z_-]{20,}\b/g
+const GEMINI_AQ = /\bAQ\.Ab[0-9A-Za-z_-]{16,}\b/g
+const GITHUB_TOKEN = /\bgh[pousr]_[A-Za-z0-9_]{20,}\b/g
+const MEDIA_TICKET = /\bmt1\.\d+\.[A-Za-z0-9_-]{16,}\b/g
+const ASSIGNMENT = /\b(api[_-]?key|access[_-]?token|refresh[_-]?token|app[_-]?secret|client[_-]?secret|hub[_-]?token|password|secret)\b(\s*[:=]\s*)(["']?)[^\s"',;]{6,}\3/gi
 
 /** Best-effort redaction for chat output and audit fields. Never a substitute for not sending secrets. */
 export function redactText(value) {
@@ -9,6 +15,12 @@ export function redactText(value) {
   text = text.replace(PRIVATE_KEY, '[REDACTED PRIVATE KEY]')
   text = text.replace(BEARER, 'Bearer [REDACTED]')
   text = text.replace(SK_KEY, 'sk-[REDACTED]')
+  text = text.replace(ARK_KEY, 'ark-[REDACTED]')
+  text = text.replace(HST_TOKEN, 'hst_[REDACTED]')
+  text = text.replace(GEMINI_AIZA, 'AIza[REDACTED]')
+  text = text.replace(GEMINI_AQ, 'AQ.Ab[REDACTED]')
+  text = text.replace(GITHUB_TOKEN, 'gh_[REDACTED]')
+  text = text.replace(MEDIA_TICKET, 'mt1.[REDACTED]')
   text = text.replace(ASSIGNMENT, (_match, key, separator, quote) => `${key}${separator}${quote}[REDACTED]${quote}`)
   return text
 }

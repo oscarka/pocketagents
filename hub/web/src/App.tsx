@@ -204,6 +204,29 @@ export function App() {
           >
             🔓 解锁进入总控台
           </button>
+          <div
+            id="authPendingBox"
+            style="display:none;margin-top:14px;padding:14px 12px;border-radius:14px;background:var(--amber-soft);border:1.5px solid var(--amber);text-align:center;"
+          >
+            <div style="font-size:13.5px;font-weight:800;color:#b45309;">🔐 等待已在信任手机上批准此设备登录</div>
+            <div
+              id="authPendingCode"
+              style="font-family:var(--mono);font-size:30px;font-weight:900;letter-spacing:5px;color:var(--text);margin:8px 0 4px;"
+            >
+              000000
+            </div>
+            <div id="authPendingHint" style="font-size:12px;color:var(--text-secondary);line-height:1.5;">
+              已向你的信任手机发送通知，请核对上方 6 位码后在手机点击「允许登录」
+            </div>
+            <button
+              type="button"
+              class="pill-action-btn"
+              style="margin-top:10px;"
+              onClick={() => (window as any).cancelPendingAuthWait?.()}
+            >
+              取消等待
+            </button>
+          </div>
         </div>
       </div>
 
@@ -211,6 +234,7 @@ export function App() {
         {/* 左栏主面板 */}
         <div class="primary-pane">
           <TopBar />
+          <div id="accessApprovalBannerSlot"></div>
           <div class="pull-refresh-slot" id="pullRefreshSlot" aria-hidden="true">
             <div class="pull-refresh-pill" id="pullRefreshPill">
               <span id="pullRefreshLabel">↓ 下拉刷新状态</span>

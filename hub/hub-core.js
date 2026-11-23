@@ -57,6 +57,12 @@ export class HubCore {
     this.hostTaskStates = new Map()
     this.lastObservedConclusionSigs = new Map()
     this.pushHistory = []
+    this.securityEvents = []
+    this.securityIpHits = new Map()
+    this.securityAlertCooldowns = new Map()
+    this.deviceApprovalEnabled = false
+    this.trustedDevices = new Map()
+    this.pendingDeviceLogins = new Map()
     this.sseListeners = new Set()
     this.hostCommandListeners = new Set()
     this.hostFsListeners = new Set()
@@ -87,6 +93,418 @@ export class HubCore {
       return createHmac('sha256', this.tokenSecret).update('dsh-media-ticket-v1').digest()
     }
     return Buffer.from(this.mediaSeed, 'hex')
+  }
+
+  recordSecurityEvent({
+    kind = 'unauth_api_scan',
+    severity = 'warn',
+    ip = 'unknown',
+    method = 'GET',
+    path = '',
+    status = 401,
+    detail = '',
+    pushImmediately = false,
+  } = {}) {
+    const now = this.now()
+    const cleanIp = String(ip || 'unknown').trim().slice(0, 80) || 'unknown'
+    const cleanKind = String(kind || 'unauth_api_scan').trim().slice(0, 40)
+    // Strip sensitive query tokens/tickets from logged paths so security logs never persist credentials
+    const cleanPath = String(path || '')
+      .replace(/([?&](?:token|mt|key)=)[^&\s]+/gi, '$1[REDACTED]')
+      .slice(0, 200)
+    const cleanDetail = String(detail || '').slice(0, 180)
+
+    // Track rolling 2-minute hit burst per IP to detect scanners & brute-force without noisy single-miss false positives
+    const windowMs = 2 * 60_000
+    const prevHits = (this.securityIpHits.get(cleanIp) || []).filter(ts => now - ts < windowMs)
+    prevHits.push(now)
+    this.securityIpHits.set(cleanIp, prevHits)
+    if (this.securityIpHits.size > 500) {
+      const oldestIp = this.securityIpHits.keys().next().value
+      this.securityIpHits.delete(oldestIp)
+    }
+
+    const highSignalKind =
+      cleanKind === 'forged_host_token' ||
+      cleanKind === 'sensitive_path_probe' ||
+      cleanKind === 'auth_bruteforce'
+    const isBurstScan = prevHits.length >= 3
+    if (!highSignalKind && !isBurstScan && !pushImmediately) {
+      return { recorded: false, alerted: false, burstCount: prevHits.length }
+    }
+
+    const entry = {
+      id: `sec-${now.toString(36)}-${randomBytes(3).toString('hex')}`,
+      at: now,
+      kind: cleanKind,
+      severity: highSignalKind ? 'high' : severity,
+      ip: cleanIp,
+      method: String(method || 'GET').toUpperCase().slice(0, 12),
+      path: cleanPath,
+      status: Number(status) || 401,
+      detail: cleanDetail,
+      burstCount: prevHits.length,
+    }
+    this.securityEvents.push(entry)
+    if (this.securityEvents.length > 100) {
+      this.securityEvents.splice(0, this.securityEvents.length - 100)
+    }
+    void this.persist()
+    this.emitStateChange('security_alert')
+
+    const cooldownKey = `${cleanIp}:${cleanKind}`
+    const cooldownMs = 5 * 60_000
+    const lastAlertAt = this.securityAlertCooldowns.get(cooldownKey) || 0
+    let alerted = false
+    if (pushImmediately || now - lastAlertAt >= cooldownMs) {
+      this.securityAlertCooldowns.set(cooldownKey, now)
+      if (this.securityAlertCooldowns.size > 500) {
+        const oldestKey = this.securityAlertCooldowns.keys().next().value
+        this.securityAlertCooldowns.delete(oldestKey)
+      }
+      const kindLabels = {
+        forged_host_token: '伪造主机令牌攻击',
+        sensitive_path_probe: '敏感凭证路径探测',
+        auth_bruteforce: '密码暴力破解拦截',
+        unauth_api_scan: '高频未授权接口扫描',
+      }
+      const label = kindLabels[cleanKind] || '异常访问拦截'
+      alerted = true
+      void this.broadcastWebPush({
+        title: `🚨 安全警报：拦截到${label}`,
+        body: `来源 IP ${cleanIp} 请求 ${entry.method} ${cleanPath}（已返回 ${entry.status}，2 分钟内累计 ${prevHits.length} 次）${cleanDetail ? ` · ${cleanDetail}` : ''}`,
+        tag: `dsh-sec-${cleanKind}-${cleanIp}`,
+        badgeCount: 1,
+        data: {
+          type: 'security_alert',
+          eventId: entry.id,
+          ip: cleanIp,
+          kind: cleanKind,
+          url: '/#settings',
+        },
+      })
+    }
+    return { recorded: true, alerted, event: entry }
+  }
+
+  getSecuritySummary(now = this.now()) {
+    const cutoff24h = now - 24 * 60 * 60_000
+    const recent24h = this.securityEvents.filter(e => e && e.at >= cutoff24h)
+    const ips = new Set(recent24h.map(e => e.ip).filter(Boolean))
+    return {
+      total24h: recent24h.length,
+      high24h: recent24h.filter(e => e.severity === 'high').length,
+      uniqueIps24h: ips.size,
+      totalStored: this.securityEvents.length,
+      recentEvents: this.securityEvents.slice(-25).reverse(),
+    }
+  }
+
+  clearSecurityEvents() {
+    this.securityEvents = []
+    this.securityIpHits.clear()
+    this.securityAlertCooldowns.clear()
+    void this.persist()
+    this.emitStateChange('security_cleared')
+    return { ok: true, securitySummary: this.getSecuritySummary() }
+  }
+
+  registerTrustedDevice({ deviceId = '', name = '', userAgent = '', ip = '' } = {}) {
+    const now = this.now()
+    const cleanId =
+      String(deviceId || '')
+        .trim()
+        .replace(/[^a-zA-Z0-9._-]/g, '')
+        .slice(0, 64) || `devid_${randomBytes(6).toString('hex')}`
+    const existing = this.trustedDevices.get(cleanId)
+    const token = existing?.token || `dev_${randomBytes(24).toString('hex')}`
+    const entry = {
+      id: cleanId,
+      name: String(name || existing?.name || '已信任设备').trim().slice(0, 80) || '已信任设备',
+      userAgent: String(userAgent || existing?.userAgent || '').slice(0, 180),
+      ip: String(ip || existing?.ip || '').slice(0, 64),
+      token,
+      tokenPreview: `${token.slice(0, 8)}...${token.slice(-4)}`,
+      approvedAt: existing?.approvedAt || now,
+      lastSeen: now,
+    }
+    this.trustedDevices.set(cleanId, entry)
+    void this.persist()
+    return { device: entry, deviceToken: token }
+  }
+
+  verifyTrustedDeviceToken(candidateToken = '') {
+    const candidate = String(candidateToken ?? '').trim()
+    if (!candidate || !candidate.startsWith('dev_')) return null
+    const a = Buffer.from(candidate)
+    for (const dev of this.trustedDevices.values()) {
+      if (!dev?.token) continue
+      const b = Buffer.from(String(dev.token))
+      if (a.length === b.length && timingSafeEqual(a, b)) {
+        dev.lastSeen = this.now()
+        return dev
+      }
+    }
+    return null
+  }
+
+  setDeviceApprovalEnabled(enabled, { deviceId = '', name = '', userAgent = '', ip = '' } = {}) {
+    const next = Boolean(enabled)
+    let issuedDeviceToken = ''
+    let registeredDevice = null
+    if (next) {
+      if (deviceId || this.trustedDevices.size === 0) {
+        const reg = this.registerTrustedDevice({ deviceId, name: name || '本机已信任设备', userAgent, ip })
+        issuedDeviceToken = reg.deviceToken
+        registeredDevice = reg.device
+      }
+    }
+    this.deviceApprovalEnabled = next
+    void this.persist()
+    this.emitStateChange('access_control_updated')
+    return {
+      ok: true,
+      deviceApprovalEnabled: this.deviceApprovalEnabled,
+      ...(issuedDeviceToken ? { deviceToken: issuedDeviceToken, deviceId: registeredDevice?.id } : {}),
+      accessControl: this.getAccessControlState(registeredDevice?.id || deviceId),
+    }
+  }
+
+  createPendingDeviceLogin({ deviceId = '', name = '', userAgent = '', ip = 'unknown', ttlMs = 3 * 60_000 } = {}) {
+    const now = this.now()
+    for (const [k, v] of this.pendingDeviceLogins.entries()) {
+      if (now > v.expiresAt) this.pendingDeviceLogins.delete(k)
+    }
+    const cleanDeviceId =
+      String(deviceId || '')
+        .trim()
+        .replace(/[^a-zA-Z0-9._-]/g, '')
+        .slice(0, 64) || `devid_${randomBytes(6).toString('hex')}`
+    const cleanName = String(name || '未知浏览器设备').trim().slice(0, 80) || '未知浏览器设备'
+    const cleanIp = String(ip || 'unknown').trim().slice(0, 64)
+
+    for (const req of this.pendingDeviceLogins.values()) {
+      if (req.deviceId === cleanDeviceId && req.status === 'pending' && now <= req.expiresAt) {
+        return {
+          ok: true,
+          pendingApproval: true,
+          requestId: req.id,
+          verifyCode: req.verifyCode,
+          expiresAt: req.expiresAt,
+        }
+      }
+    }
+
+    const requestId = `dreq_${randomBytes(8).toString('hex')}`
+    const verifyCode = String(randomInt(100000, 1000000))
+    const entry = {
+      id: requestId,
+      deviceId: cleanDeviceId,
+      name: cleanName,
+      userAgent: String(userAgent || '').slice(0, 180),
+      ip: cleanIp,
+      verifyCode,
+      status: 'pending',
+      createdAt: now,
+      expiresAt: now + ttlMs,
+      issuedToken: '',
+      claimed: false,
+    }
+    this.pendingDeviceLogins.set(requestId, entry)
+    this.emitStateChange('device_login_pending')
+
+    void this.broadcastWebPush({
+      title: '🔐 新设备请求访问你的总控台',
+      body: `${cleanName}（IP ${cleanIp}）输入了密码请求登录，核对码 ${verifyCode}。请在手机上点击「允许」或「拒绝」。`,
+      tag: `dsh-dev-login-${requestId}`,
+      badgeCount: 1,
+      data: {
+        type: 'device_login_pending',
+        requestId,
+        verifyCode,
+        url: '/',
+      },
+    })
+
+    return {
+      ok: true,
+      pendingApproval: true,
+      requestId,
+      verifyCode,
+      expiresAt: entry.expiresAt,
+    }
+  }
+
+  getPendingDeviceLoginStatus(requestId = '') {
+    const cleanId = String(requestId || '').trim()
+    const entry = this.pendingDeviceLogins.get(cleanId)
+    const now = this.now()
+    if (!entry) {
+      return { ok: false, status: 'expired', error: '审批请求不存在或已过期' }
+    }
+    if (now > entry.expiresAt) {
+      this.pendingDeviceLogins.delete(cleanId)
+      return { ok: false, status: 'expired', error: '审批请求已超时，请重新发起登录' }
+    }
+    if (entry.status === 'rejected') {
+      this.pendingDeviceLogins.delete(cleanId)
+      return { ok: false, status: 'rejected', error: '已在信任手机上拒绝该设备登录' }
+    }
+    if (entry.status === 'approved' && entry.issuedToken && !entry.claimed) {
+      entry.claimed = true
+      const token = entry.issuedToken
+      const deviceId = entry.deviceId
+      this.pendingDeviceLogins.delete(cleanId)
+      return {
+        ok: true,
+        status: 'approved',
+        token,
+        deviceToken: token,
+        deviceId,
+      }
+    }
+    return {
+      ok: true,
+      status: 'pending',
+      verifyCode: entry.verifyCode,
+      expiresAt: entry.expiresAt,
+    }
+  }
+
+  decidePendingDeviceLogin(requestId = '', allow = true) {
+    const cleanId = String(requestId || '').trim()
+    const entry = this.pendingDeviceLogins.get(cleanId)
+    const now = this.now()
+    if (!entry || now > entry.expiresAt) {
+      if (entry) this.pendingDeviceLogins.delete(cleanId)
+      return { ok: false, error: '该登录审批已过期或不存在' }
+    }
+    if (allow) {
+      const reg = this.registerTrustedDevice({
+        deviceId: entry.deviceId,
+        name: entry.name,
+        userAgent: entry.userAgent,
+        ip: entry.ip,
+      })
+      entry.status = 'approved'
+      entry.issuedToken = reg.deviceToken
+      entry.expiresAt = now + 60_000
+      this.emitStateChange('device_login_approved')
+      return {
+        ok: true,
+        decision: 'approved',
+        device: {
+          id: reg.device.id,
+          name: reg.device.name,
+          ip: reg.device.ip,
+          tokenPreview: reg.device.tokenPreview,
+        },
+        accessControl: this.getAccessControlState(),
+      }
+    }
+    entry.status = 'rejected'
+    this.recordSecurityEvent({
+      kind: 'unauth_api_scan',
+      severity: 'high',
+      ip: entry.ip,
+      method: 'POST',
+      path: '/api/auth/verify',
+      status: 403,
+      detail: `管理员已在手机拒绝新设备「${entry.name}」的登录请求`,
+      pushImmediately: false,
+    })
+    this.emitStateChange('device_login_rejected')
+    return {
+      ok: true,
+      decision: 'rejected',
+      accessControl: this.getAccessControlState(),
+    }
+  }
+
+  revokeTrustedDevice(deviceId = '') {
+    const cleanId = String(deviceId || '').trim()
+    if (!this.trustedDevices.has(cleanId)) {
+      return { ok: false, error: '未找到指定信任设备' }
+    }
+    if (this.deviceApprovalEnabled && this.trustedDevices.size <= 1) {
+      return { ok: false, error: '这是最后一台受信任设备，为防止将自己锁在外面，请先关闭「新设备登录审批」或先批准另一台设备' }
+    }
+    this.trustedDevices.delete(cleanId)
+    void this.persist()
+    this.emitStateChange('device_revoked')
+    return { ok: true, revokedId: cleanId, accessControl: this.getAccessControlState() }
+  }
+
+  decidePendingHostJoin(hostId = '', allow = true) {
+    const cleanHostId = String(hostId || '').trim()
+    const host = this.hosts.get(cleanHostId)
+    if (!host) {
+      return { ok: false, error: '未找到待审批电脑' }
+    }
+    if (allow) {
+      host.trust = {
+        status: host.identity?.publicKey ? 'pinned' : 'unpinned',
+        pinnedPublicKey: host.identity?.publicKey || '',
+        pinnedFingerprint: host.identity?.fingerprint || '',
+        pinnedAt: this.now(),
+      }
+      if (!this.activeHostId) this.activeHostId = cleanHostId
+      void this.persist()
+      this.emitStateChange('host_approved')
+      return { ok: true, decision: 'approved', hostId: cleanHostId, accessControl: this.getAccessControlState() }
+    }
+    host.trust = { status: 'revoked', pinnedPublicKey: '', pinnedFingerprint: '', revokedAt: this.now() }
+    host.hostToken = ''
+    host.hostTokenPreview = ''
+    void this.persist()
+    this.emitStateChange('host_rejected')
+    return { ok: true, decision: 'rejected', hostId: cleanHostId, accessControl: this.getAccessControlState() }
+  }
+
+  getAccessControlState(currentDeviceId = '') {
+    const now = this.now()
+    for (const [k, v] of this.pendingDeviceLogins.entries()) {
+      if (now > v.expiresAt) this.pendingDeviceLogins.delete(k)
+    }
+    const trustedDevices = [...this.trustedDevices.values()]
+      .sort((a, b) => (b.lastSeen || 0) - (a.lastSeen || 0))
+      .map(d => ({
+        id: d.id,
+        name: d.name,
+        ip: d.ip,
+        tokenPreview: d.tokenPreview,
+        approvedAt: d.approvedAt,
+        lastSeen: d.lastSeen,
+        isCurrent: Boolean(currentDeviceId && d.id === currentDeviceId),
+      }))
+    const pendingDeviceLogins = [...this.pendingDeviceLogins.values()]
+      .filter(r => r.status === 'pending' && now <= r.expiresAt)
+      .sort((a, b) => b.createdAt - a.createdAt)
+      .map(r => ({
+        id: r.id,
+        deviceId: r.deviceId,
+        name: r.name,
+        ip: r.ip,
+        verifyCode: r.verifyCode,
+        createdAt: r.createdAt,
+        expiresAt: r.expiresAt,
+      }))
+    const pendingHosts = [...this.hosts.values()]
+      .filter(h => h?.trust?.status === 'pending_approval')
+      .map(h => ({
+        hostId: h.hostId,
+        hostName: h.hostName || h.hostId,
+        platform: h.platform || '',
+        arch: h.arch || '',
+        ip: h.trust?.ip || '',
+        requestedAt: h.trust?.requestedAt || h.lastSeen || now,
+      }))
+    return {
+      deviceApprovalEnabled: Boolean(this.deviceApprovalEnabled),
+      trustedDevices,
+      pendingDeviceLogins,
+      pendingHosts,
+    }
   }
 
   getHostTokenSigningKey() {
@@ -287,6 +705,35 @@ export class HubCore {
               source: String(v.source || 'client'),
             })
           }
+        }
+      }
+      if (Array.isArray(data.securityEvents)) {
+        this.securityEvents = data.securityEvents
+          .filter(e => e && typeof e === 'object' && e.at)
+          .slice(-100)
+      }
+      if (process.env.HUB_RESET_TRUSTED_DEVICES !== '1') {
+        if (typeof data.deviceApprovalEnabled === 'boolean') {
+          this.deviceApprovalEnabled = data.deviceApprovalEnabled
+        }
+        if (Array.isArray(data.trustedDevices)) {
+          for (const d of data.trustedDevices) {
+            if (d?.id && d?.token) {
+              this.trustedDevices.set(String(d.id), {
+                id: String(d.id),
+                name: String(d.name || '已信任设备').slice(0, 80),
+                userAgent: String(d.userAgent || '').slice(0, 180),
+                ip: String(d.ip || '').slice(0, 64),
+                token: String(d.token),
+                tokenPreview: String(d.tokenPreview || `${String(d.token).slice(0, 8)}...${String(d.token).slice(-4)}`),
+                approvedAt: Number(d.approvedAt) || now,
+                lastSeen: Number(d.lastSeen) || now,
+              })
+            }
+          }
+        }
+        if (this.deviceApprovalEnabled && this.trustedDevices.size === 0) {
+          this.deviceApprovalEnabled = false
         }
       }
       if (data.enrollment && typeof data.enrollment === 'object' && data.enrollment.code) {
@@ -568,6 +1015,9 @@ export class HubCore {
             approvalLedger: [...this.approvalLedger.entries()],
             sessionReadState: Object.fromEntries(this.sessionReadState),
             sessionPinState: Object.fromEntries(this.sessionPinState),
+            securityEvents: this.securityEvents.slice(-100),
+            deviceApprovalEnabled: Boolean(this.deviceApprovalEnabled),
+            trustedDevices: [...this.trustedDevices.values()],
             enrollment: this.enrollment,
           }
           await writeFile(this.stateFile, JSON.stringify(payload), 'utf8')
@@ -1162,6 +1612,8 @@ export class HubCore {
       vapidPublicKey: this.vapidKeys.publicKey,
       pushSubscriptions: this.listPushSubscriptions(),
       pushHistory: this.pushHistory.slice(-10).reverse(),
+      securitySummary: this.getSecuritySummary(now),
+      accessControl: this.getAccessControlState(),
       stats: this.getUsageStats(),
       enrollment: this.getOrCreateEnrollmentCode(),
       sessionReadState: Object.fromEntries(this.sessionReadState),
@@ -1570,6 +2022,20 @@ export class HubCore {
         ok: false,
         code: 'DEVICE_REVOKED',
         error: `设备 ${hostId} 已被吊销访问权限`,
+      }
+    }
+    if (record?.trust?.status === 'pending_approval') {
+      record.lastSeen = now
+      record.hostName = hostName
+      return {
+        ok: true,
+        pendingApproval: true,
+        hostId,
+        activeHostId: this.activeHostId,
+        isActive: false,
+        commands: [],
+        serverTime: now,
+        message: '该电脑正在等待手机管理员审批放行',
       }
     }
 
@@ -2111,12 +2577,38 @@ export class HubCore {
     record.hostToken = hostToken
     record.hostTokenCreatedAt = now
     record.hostTokenPreview = hostTokenPreview
-    if (record.trust?.status === 'revoked') {
+    const needsHostApproval = Boolean(
+      this.deviceApprovalEnabled &&
+      (!existing || existing.trust?.status === 'revoked' || existing.trust?.status === 'pending_approval'),
+    )
+    if (needsHostApproval) {
+      record.trust = {
+        status: 'pending_approval',
+        pinnedPublicKey: '',
+        pinnedFingerprint: '',
+        requestedAt: now,
+        ip: String(clientKey || '').slice(0, 64),
+      }
+    } else if (record.trust?.status === 'revoked') {
       record.trust = { status: 'unpinned', pinnedPublicKey: '', pinnedFingerprint: '' }
     }
     this.hosts.set(cleanHostId, record)
-    if (!this.activeHostId) {
+    if (!this.activeHostId && !needsHostApproval) {
       this.activeHostId = cleanHostId
+    }
+
+    if (needsHostApproval) {
+      void this.broadcastWebPush({
+        title: '💻 新电脑请求接入总控台',
+        body: `电脑「${cleanHostName}」（IP ${clientKey || 'unknown'}）尝试接入，请在手机上点击「允许接入」或「拒绝」。`,
+        tag: `dsh-host-join-${cleanHostId}`,
+        badgeCount: 1,
+        data: {
+          type: 'host_join_pending',
+          hostId: cleanHostId,
+          url: '/',
+        },
+      })
     }
 
     if (!Array.isArray(this.enrollment.joinedHostIds)) {
@@ -2132,6 +2624,7 @@ export class HubCore {
 
     return {
       ok: true,
+      pendingApproval: needsHostApproval,
       hostId: cleanHostId,
       hostName: cleanHostName,
       hostToken,
@@ -2141,13 +2634,15 @@ export class HubCore {
     }
   }
 
-  verifyHostCredential(hostId, candidateToken) {
+  verifyHostCredential(hostId, candidateToken, { allowPending = false } = {}) {
     const cleanHostId = String(hostId ?? '').trim()
     const candidate = String(candidateToken ?? '').trim()
     if (!candidate) return false
+    const isAllowedTrust = status =>
+      status !== 'revoked' && (allowPending || status !== 'pending_approval')
     if (!cleanHostId) {
       for (const h of this.hosts.values()) {
-        if (h.hostToken && h.trust?.status !== 'revoked') {
+        if (h.hostToken && isAllowedTrust(h.trust?.status)) {
           const a = Buffer.from(candidate)
           const b = Buffer.from(String(h.hostToken))
           if (a.length === b.length && timingSafeEqual(a, b)) return true
@@ -2157,7 +2652,7 @@ export class HubCore {
     }
     const record = this.hosts.get(cleanHostId)
     if (record) {
-      if (record.trust?.status === 'revoked') return false
+      if (!isAllowedTrust(record.trust?.status)) return false
       if (!record.hostToken) return false
       const a = Buffer.from(candidate)
       const b = Buffer.from(String(record.hostToken))

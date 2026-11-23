@@ -47,9 +47,9 @@ test('push-formatter: cleans internal tool jargon, env vars, and absolute paths 
     cwd: '/Users/cc/deepseekharness-remote',
     toolName: 'run_command (BypassSandbox)',
     commandLine:
-      'CLOUDSDK_METRICS_ENVIRONMENT=datacloud.antigravity gcloud run deploy dsh-remotecontrol-hub --project gen-lang-client-0884226164',
+      'CLOUDSDK_METRICS_ENVIRONMENT=datacloud.antigravity gcloud run deploy dsh-remotecontrol-hub --project my-demo-gcp-project',
     reason:
-      'Deploy hub to Google Cloud Run: CLOUDSDK_METRICS_ENVIRONMENT=datacloud.antigravity gcloud run deploy dsh-remotecontrol-hub --project gen-lang-client-0884226164',
+      'Deploy hub to Google Cloud Run: CLOUDSDK_METRICS_ENVIRONMENT=datacloud.antigravity gcloud run deploy dsh-remotecontrol-hub --project my-demo-gcp-project',
   }
 
   // Single host: omits machine name completely
@@ -256,7 +256,7 @@ test('FeishuBridge push cards: suppresses subagents, exposes visible conclusion 
       get: id => (id === mainAgent.id ? mainAgent : id === subAgent.id ? subAgent : undefined),
     },
     transport: {
-      async sendText() {},
+      async sendText() { },
       async sendCard(chatId, card) {
         sentCards.push({ chatId, card })
         return { data: { message_id: `msg-${sentCards.length}` } }

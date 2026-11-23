@@ -295,3 +295,175 @@ test('Security Hardening: daemon workspace-ops blocks sensitive credential files
     await rm(fakeHome, { recursive: true, force: true })
   }
 })
+
+
+test('v0.9.10 Phone-Approved Access Gate: new browser/computer requires trusted phone approval even with valid HUB_TOKEN, plus SSRF/redact/health/intrusion-monitor checks', async () => {
+  const { VoiceVault } = await import('../../hub/voice-vault.js')
+  const { redactText } = await import('../lib/redact.js')
+
+  // 1. VoiceVault blocks cloud metadata SSRF URLs while allowing local Ollama
+  const vault = new VoiceVault({ vaultFile: '' })
+  await vault.init()
+  const ssrf1 = await vault.upsertCredential({
+    provider: 'openai_compat',
+    label: 'bad-metadata',
+    baseUrl: 'http://169.254.169.254/latest/meta-data',
+    apiKey: 'test-key-123',
+  })
+  assert.equal(ssrf1.ok, false)
+  const ssrf2 = await vault.upsertCredential({
+    provider: 'openai_compat',
+    label: 'bad-gcp',
+    baseUrl: 'http://metadata.google.internal/computeMetadata/v1',
+    apiKey: 'test-key-123',
+  })
+  assert.equal(ssrf2.ok, false)
+  const localOllama = await vault.upsertCredential({
+    provider: 'openai_compat',
+    label: 'local-ollama',
+    baseUrl: 'http://127.0.0.1:11434/v1',
+    apiKey: 'ollama',
+  })
+  assert.equal(localOllama.ok, true)
+
+  // 2. redactText masks Volcengine Ark, Host Token, Gemini AIza/AQ.Ab, GitHub token, mediaTicket
+  const sampleLog =
+    'ark-1234567890abcdef hst_0123456789abcdef0123456789abcdef0123456789abcdef AIzaSyAbCdEfGhIjKlMnOpQrStUvWxYz AQ.AbTestKey9876543210 ghp_abcdefghijklmnopqrstuvwxyz123456 mt1.1795000000000.abcdef1234567890abcdef'
+  const redacted = redactText(sampleLog)
+  assert.equal(redacted.includes('ark-1234567890abcdef'), false)
+  assert.equal(redacted.includes('hst_0123456789abcdef'), false)
+  assert.equal(redacted.includes('AIzaSyAbCdEf'), false)
+  assert.equal(redacted.includes('AQ.AbTestKey'), false)
+  assert.equal(redacted.includes('ghp_abcdef'), false)
+  assert.equal(redacted.includes('mt1.1795000000000'), false)
+
+  // 3. Phone-approved zero-trust device login & host join + intrusion push alerts
+  let pushCalls = []
+  const hub = new HubCore({
+    pushFetch: async (url, init) => {
+      pushCalls.push({ url, init })
+      return { ok: true, status: 201 }
+    },
+  })
+  const adminToken = 'MasterStrongToken_2026_v0910'
+  const { dispatchRequest } = createHubServer({
+    hub,
+    token: adminToken,
+    requireToken: true,
+    voiceVaultFile: '',
+  })
+
+  // Unauthenticated /api/health hides internal host details
+  const pubHealth = await dispatchRequest({ method: 'GET', url: '/api/health', remoteAddress: '8.8.8.8' })
+  assert.equal(pubHealth.status, 200)
+  assert.equal(pubHealth.json.ok, true)
+  assert.equal(pubHealth.json.hostsCount, undefined)
+  assert.equal(pubHealth.json.activeHostId, undefined)
+
+  // Trusted iPhone enables Device Approval Guard -> receives dedicated dev_... token
+  const enableRes = await dispatchRequest({
+    method: 'POST',
+    url: '/api/security/device-approval',
+    headers: { authorization: `Bearer ${adminToken}`, 'user-agent': 'iPhone Safari' },
+    remoteAddress: '1.1.1.1',
+    body: { enabled: true, deviceId: 'iphone-owner', deviceName: 'Owner iPhone' },
+  })
+  assert.equal(enableRes.status, 200)
+  assert.equal(enableRes.json.deviceApprovalEnabled, true)
+  const ownerDevToken = enableRes.json.deviceToken
+  assert.ok(ownerDevToken.startsWith('dev_'))
+
+  // Attacker holding LEAKED master HUB_TOKEN tries calling /api/state directly -> BLOCKED with 403 + security event!
+  const directSteal = await dispatchRequest({
+    method: 'GET',
+    url: '/api/state',
+    headers: { authorization: `Bearer ${adminToken}` },
+    remoteAddress: '104.190.190.167',
+  })
+  assert.equal(directSteal.status, 403)
+  assert.equal(directSteal.json.code, 'DEVICE_APPROVAL_REQUIRED')
+  assert.ok(hub.getSecuritySummary().total24h >= 1)
+
+  // New browser enters master HUB_TOKEN at /api/auth/verify -> 202 pendingApproval (NOT logged in!)
+  const newLogin = await dispatchRequest({
+    method: 'POST',
+    url: '/api/auth/verify',
+    headers: { authorization: `Bearer ${adminToken}`, 'user-agent': 'Chrome macOS' },
+    remoteAddress: '203.0.113.55',
+    body: { deviceId: 'mac-chrome-new', deviceName: 'Mac Chrome' },
+  })
+  assert.equal(newLogin.status, 202)
+  assert.equal(newLogin.json.pendingApproval, true)
+  assert.match(newLogin.json.verifyCode, /^\d{6}$/)
+  const reqId = newLogin.json.requestId
+
+  // Poll before approval -> still pending
+  const pollBefore = await dispatchRequest({ method: 'GET', url: `/api/auth/device-request/${reqId}` })
+  assert.equal(pollBefore.json.status, 'pending')
+
+  // Owner phone sees pendingDeviceLogins in /api/state and taps Approve!
+  const ownerState = await dispatchRequest({
+    method: 'GET',
+    url: '/api/state',
+    headers: { authorization: `Bearer ${ownerDevToken}` },
+  })
+  assert.equal(ownerState.status, 200)
+  assert.equal(ownerState.json.accessControl.pendingDeviceLogins.length, 1)
+
+  const approveDev = await dispatchRequest({
+    method: 'POST',
+    url: '/api/security/device-login/decide',
+    headers: { authorization: `Bearer ${ownerDevToken}` },
+    body: { requestId: reqId, allow: true },
+  })
+  assert.equal(approveDev.status, 200)
+
+  // Waiting browser polls -> gets one-time dev_... token, can now access /api/state!
+  const pollAfter = await dispatchRequest({ method: 'GET', url: `/api/auth/device-request/${reqId}` })
+  assert.equal(pollAfter.json.status, 'approved')
+  assert.ok(pollAfter.json.token.startsWith('dev_'))
+  const newDevState = await dispatchRequest({
+    method: 'GET',
+    url: '/api/state',
+    headers: { authorization: `Bearer ${pollAfter.json.token}` },
+  })
+  assert.equal(newDevState.status, 200)
+
+  // New computer joining via enrollment code enters pending_approval until phone approves!
+  const enroll = hub.getOrCreateEnrollmentCode({ forceNew: true })
+  const joinRes = await dispatchRequest({
+    method: 'POST',
+    url: '/api/hosts/join',
+    remoteAddress: '198.51.100.7',
+    body: { code: enroll.code, hostId: 'new-mac-mini', hostName: 'New Mac mini', platform: 'darwin' },
+  })
+  assert.equal(joinRes.status, 200)
+  assert.equal(joinRes.json.pendingApproval, true)
+  const newHostToken = joinRes.json.hostToken
+
+  // Pending host heartbeat stays quarantined in pendingApproval mode (cannot sync tasks or pull commands)
+  const pendingHb = await dispatchRequest({
+    method: 'POST',
+    url: '/api/heartbeat',
+    headers: { authorization: `Bearer ${newHostToken}` },
+    body: { hostId: 'new-mac-mini', hostName: 'New Mac mini' },
+  })
+  assert.equal(pendingHb.status, 200)
+  assert.equal(pendingHb.json.pendingApproval, true)
+
+  // Owner phone rejects & revokes the suspicious host
+  const rejectHost = await dispatchRequest({
+    method: 'POST',
+    url: '/api/security/host-join/decide',
+    headers: { authorization: `Bearer ${ownerDevToken}` },
+    body: { hostId: 'new-mac-mini', allow: false },
+  })
+  assert.equal(rejectHost.status, 200)
+  const afterRevokeHb = await dispatchRequest({
+    method: 'POST',
+    url: '/api/heartbeat',
+    headers: { authorization: `Bearer ${newHostToken}` },
+    body: { hostId: 'new-mac-mini', hostName: 'New Mac mini' },
+  })
+  assert.equal(afterRevokeHb.status, 401)
+})

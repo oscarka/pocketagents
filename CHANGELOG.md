@@ -2,6 +2,16 @@
 
 本项目的重要变更都记录在这里。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [0.9.10] - 2026-11-23
+
+### Security & Added
+
+- **零信任「手机审批接入保护」与实时入侵告警监控（`hub/hub-core.js` / `hub/server.js` / `hub/web/src/App.tsx` / `hub/web/src/controller.js`）**：
+  - **新设备登录必须经已信任手机审批**：开启「新设备 / 新电脑接入需我手机审批」后，每个已批准浏览器持有独立 `dev_...` 信任凭证；即使管理员密码 `HUB_TOKEN` 泄露，陌生浏览器输入密码也会停在 6 位核对码等待页，同时立即推送到你的已信任手机顶部横幅与 iPhone 锁屏通知（`✓ 允许登录` / `🚫 拒绝`）；直接持裸密码调 API 将被 `403 DEVICE_APPROVAL_REQUIRED` 硬拦截并报警；
+  - **新电脑接入也需手机审批**：新主机接入后默认进入 `pending_approval` 隔离态（无法拉取指令或同步对话），直到你在手机点击「允许接入」，点「拒绝并拉黑」则立即吊销；并支持在设置页随时查看与一键踢出任意已信任设备（支持 `HUB_RESET_TRUSTED_DEVICES=1` 紧急逃生）；
+  - **实时入侵监控与锁屏告警**：自动监测伪造 `hst_` 令牌、敏感凭证路径探测（403）、密码爆破（429）与未审批直连，带 5 分钟同类冷却防刷屏推送至 iPhone 锁屏，并在设置页实时展示近 24 小时拦截详情；
+  - **深度纵深加固**：`voice-vault.js` 拉黑云厂商内网元数据 SSRF 地址（`169.254.169.254` / `metadata.google.internal` 等）、`redact.js` 扩充 `ark-` / `hst_` / `AIza` / `AQ.Ab` / `ghp_` / `mt1.` 脱敏、`/api/health` 未登录响应不再暴露主机数与主机名、收紧管理接口 `Access-Control-Allow-Origin: *`、`GET /install.sh` 防止 Host 头注入，并清理测试文件内残留示例域名与项目 ID。
+
 ## [0.9.9] - 2026-11-23
 
 ### Added
@@ -147,7 +157,7 @@
 - **一行 `npx` 零配置终端出码秒开（`scripts/cli.mjs` / `dsh-feishu/lib/terminal-qr.js` / `package.json`）**：
   - 在 `package.json` 暴露 `"bin"` 可执行命令（`deepseekharness-remotecontrol` 与 `dsh-remote`）：任何开发者只需在终端运行 `npx deepseekharness-remotecontrol`（无需 `git clone`、无需 Railway、无需配密码），即可在 3 秒内自动拉起本机嵌入式总控台与本地会话发现进程（自动接入 Claude Code / OpenAI Codex / Antigravity IDE / DSH / WorkBuddy / 豆包），并用零依赖 ISO/IEC 18004 Unicode 半块编码直接在终端打印手机可扫二维码（支持深/浅色终端自适应黑字白底静区）与 24h 一次性免密配对码。
 - **零后端、零数据泄露交互式沙盒演示模式 `?demo=1`（`hub/web/src/demo-sandbox.js` / `hub/web/src/controller.js` / `hub/web/src/components/TopBar.tsx`）**：
-  - 打开任意总控台网址加 `?demo=1`（如 `https://harness.agentrun.vip/?demo=1`）即刻进入纯浏览器内存沙盒，**零网络 API 请求、零读取真实 `HUB_TOKEN`、零写入真实缓存**；内置双主机（`MacBook Pro · Office` + `Mac mini · Home`）与 5 大引擎（Claude Code、Antigravity IDE、Codex、DSH、WorkBuddy）演示会话，完整可交互体验滑卡批阅、一键放行命令、多选架构提问、HTML 交互沙盒预览、`🔊 播报` 与自由发消息模拟回复，并提供顶部一键复制 `npx` 命令与重置按钮。
+  - 打开任意总控台网址加 `?demo=1`（如 `https://pocketagents.agentrun.vip/?demo=1`）即刻进入纯浏览器内存沙盒，**零网络 API 请求、零读取真实 `HUB_TOKEN`、零写入真实缓存**；内置双主机（`MacBook Pro · Office` + `Mac mini · Home`）与 5 大引擎（Claude Code、Antigravity IDE、Codex、DSH、WorkBuddy）演示会话，完整可交互体验滑卡批阅、一键放行命令、多选架构提问、HTML 交互沙盒预览、`🔊 播报` 与自由发消息模拟回复，并提供顶部一键复制 `npx` 命令与重置按钮。
 - **README 首屏与视觉全面焕新（`README.md` / `README.en.md` / `README.zh-CN.md` / `docs/assets/*`）**：
   - 重新定位首屏主叙事为 **Claude Code、OpenAI Codex、Antigravity IDE 与 DeepSeek Harness 统一手机总控台**，将「在线交互式 Demo (`?demo=1`)」与「一行 `npx` 终端扫码」前置到首屏第一折叠，替换全套最新高清移动端截图（含置顶对话、滑卡批阅与审批卡片）并补全多处英文 i18n 细节。
 

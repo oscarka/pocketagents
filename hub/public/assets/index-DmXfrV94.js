@@ -3141,7 +3141,21 @@ function App() {
 		type: "button",
 		class: "primary-block-btn",
 		onClick: () => window.submitAuthLogin?.()
-	}, "🔓 解锁进入总控台"))), /* @__PURE__ */ k$1("div", { class: "app-shell" }, /* @__PURE__ */ k$1("div", { class: "primary-pane" }, /* @__PURE__ */ k$1(TopBar, null), /* @__PURE__ */ k$1("div", {
+	}, "🔓 解锁进入总控台"), /* @__PURE__ */ k$1("div", {
+		id: "authPendingBox",
+		style: "display:none;margin-top:14px;padding:14px 12px;border-radius:14px;background:var(--amber-soft);border:1.5px solid var(--amber);text-align:center;"
+	}, /* @__PURE__ */ k$1("div", { style: "font-size:13.5px;font-weight:800;color:#b45309;" }, "🔐 等待已在信任手机上批准此设备登录"), /* @__PURE__ */ k$1("div", {
+		id: "authPendingCode",
+		style: "font-family:var(--mono);font-size:30px;font-weight:900;letter-spacing:5px;color:var(--text);margin:8px 0 4px;"
+	}, "000000"), /* @__PURE__ */ k$1("div", {
+		id: "authPendingHint",
+		style: "font-size:12px;color:var(--text-secondary);line-height:1.5;"
+	}, "已向你的信任手机发送通知，请核对上方 6 位码后在手机点击「允许登录」"), /* @__PURE__ */ k$1("button", {
+		type: "button",
+		class: "pill-action-btn",
+		style: "margin-top:10px;",
+		onClick: () => window.cancelPendingAuthWait?.()
+	}, "取消等待")))), /* @__PURE__ */ k$1("div", { class: "app-shell" }, /* @__PURE__ */ k$1("div", { class: "primary-pane" }, /* @__PURE__ */ k$1(TopBar, null), /* @__PURE__ */ k$1("div", { id: "accessApprovalBannerSlot" }), /* @__PURE__ */ k$1("div", {
 		class: "pull-refresh-slot",
 		id: "pullRefreshSlot",
 		"aria-hidden": "true"
@@ -10803,6 +10817,67 @@ function initHubController() {
 		return h;
 	}
 	let authLockConfirmed = false;
+	function getOrCreateClientDeviceId() {
+		try {
+			let id = localStorage.getItem("dsh_client_device_id") || "";
+			if (!id) {
+				id = "web_" + Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
+				localStorage.setItem("dsh_client_device_id", id);
+			}
+			return id;
+		} catch {
+			return "web_ephemeral";
+		}
+	}
+	function detectClientDeviceName() {
+		const ua = navigator.userAgent || "";
+		if (/iPhone/i.test(ua)) return "iPhone Safari";
+		if (/iPad/i.test(ua)) return "iPad Safari";
+		if (/Android/i.test(ua)) return "Android 手机";
+		if (/Macintosh/i.test(ua)) return /Chrome/i.test(ua) ? "Mac Chrome" : "Mac Safari";
+		if (/Windows/i.test(ua)) return "Windows 浏览器";
+		return "浏览器设备";
+	}
+	let pendingAuthPollTimer = null;
+	function cancelPendingAuthWait() {
+		if (pendingAuthPollTimer) {
+			clearInterval(pendingAuthPollTimer);
+			pendingAuthPollTimer = null;
+		}
+		const box = document.getElementById("authPendingBox");
+		if (box) box.style.display = "none";
+	}
+	function startPendingAuthPolling(requestId, verifyCode) {
+		cancelPendingAuthWait();
+		const box = document.getElementById("authPendingBox");
+		const codeEl = document.getElementById("authPendingCode");
+		const hintEl = document.getElementById("authPendingHint");
+		if (codeEl) codeEl.textContent = String(verifyCode || "");
+		if (hintEl) hintEl.textContent = "已向你的信任手机发送通知，请核对上方 6 位码后在手机点击「允许登录」";
+		if (box) box.style.display = "block";
+		pendingAuthPollTimer = setInterval(async () => {
+			try {
+				const r = await fetch(`/api/auth/device-request/${encodeURIComponent(requestId)}`);
+				const d = await r.json().catch(() => ({}));
+				if (d.status === "approved" && d.token) {
+					cancelPendingAuthWait();
+					authLockConfirmed = false;
+					localStorage.setItem("dsh_hub_token", d.token);
+					if (d.deviceId) localStorage.setItem("dsh_client_device_id", d.deviceId);
+					document.getElementById("authOverlay")?.classList.remove("show");
+					showToast("🔓 手机已批准此设备登录");
+					await fetchState({ forceFresh: true });
+					connectSSE();
+				} else if (d.status === "rejected") {
+					cancelPendingAuthWait();
+					showToast("🚫 已在信任手机上拒绝本次登录请求");
+				} else if (d.status === "expired" || r.status === 410) {
+					cancelPendingAuthWait();
+					showToast("⏱️ 登录审批已超时，请重新输入密码发起");
+				}
+			} catch {}
+		}, 2e3);
+	}
 	async function verifyCandidateToken(candidateToken, timeoutMs = 25e3) {
 		const ctrl = typeof AbortController === "function" ? new AbortController() : null;
 		const timer = ctrl ? setTimeout(() => {
@@ -10820,17 +10895,30 @@ function initHubController() {
 			const res = await fetch("/api/auth/verify", {
 				method: "POST",
 				headers,
-				body: "{}",
+				body: JSON.stringify({
+					deviceId: getOrCreateClientDeviceId(),
+					deviceName: detectClientDeviceName()
+				}),
 				...ctrl ? { signal: ctrl.signal } : {}
 			});
+			const data = await res.json().catch(() => ({}));
+			if (res.status === 202 && data?.pendingApproval) return {
+				ok: false,
+				pendingApproval: true,
+				requestId: data.requestId,
+				verifyCode: data.verifyCode,
+				expiresAt: data.expiresAt,
+				error: data.error
+			};
 			if (res.status === 401) return {
 				ok: false,
 				unauthorized: true
 			};
-			const data = await res.json().catch(() => ({}));
 			if (res.ok && data?.ok) return {
 				ok: true,
-				authRequired: Boolean(data.authRequired)
+				authRequired: Boolean(data.authRequired),
+				deviceToken: data.deviceToken || "",
+				deviceId: data.deviceId || ""
 			};
 			return {
 				ok: false,
@@ -10858,12 +10946,19 @@ function initHubController() {
 			...options,
 			headers: authHeaders(options.headers || {})
 		});
-		if (res.status === 401) {
-			if (getToken() !== sentToken) throw new Error("Superseded");
-			authLockConfirmed = true;
-			closeSSE();
-			document.getElementById("authOverlay").classList.add("show");
-			throw new Error("Unauthorized");
+		if (res.status === 401 || res.status === 403) {
+			let errCode = "";
+			if (res.status === 403) {
+				const errData = await res.clone().json().catch(() => ({}));
+				errCode = String(errData?.code || "");
+			}
+			if (res.status === 401 || errCode === "DEVICE_APPROVAL_REQUIRED") {
+				if (getToken() !== sentToken) throw new Error("Superseded");
+				authLockConfirmed = true;
+				closeSSE();
+				document.getElementById("authOverlay").classList.add("show");
+				throw new Error("Unauthorized");
+			}
 		}
 		authLockConfirmed = false;
 		document.getElementById("authOverlay").classList.remove("show");
@@ -10873,6 +10968,7 @@ function initHubController() {
 		const inputEl = document.getElementById("authTokenInput");
 		const raw = inputEl.value.trim();
 		if (!raw) return;
+		cancelPendingAuthWait();
 		const btnEl = document.querySelector("#authOverlay button.primary-block-btn");
 		const origBtnText = btnEl ? btnEl.textContent : "";
 		if (btnEl) {
@@ -10884,12 +10980,17 @@ function initHubController() {
 				const exRes = await fetch("/api/pairing/exchange", {
 					method: "POST",
 					headers: { "content-type": "application/json" },
-					body: JSON.stringify({ code: raw.toUpperCase() })
+					body: JSON.stringify({
+						code: raw.toUpperCase(),
+						deviceId: getOrCreateClientDeviceId(),
+						deviceName: detectClientDeviceName()
+					})
 				});
 				const exData = await exRes.json().catch(() => ({}));
 				if (exRes.ok && exData.token) {
 					authLockConfirmed = false;
 					localStorage.setItem("dsh_hub_token", exData.token);
+					if (exData.deviceId) localStorage.setItem("dsh_client_device_id", exData.deviceId);
 					document.getElementById("authOverlay").classList.remove("show");
 					showToast("🔓 配对解锁成功，正在加载数据...");
 					const paired = await fetchState({ forceFresh: true });
@@ -10906,6 +11007,13 @@ function initHubController() {
 				}
 			} catch {}
 			const check = await verifyCandidateToken(raw, 25e3);
+			if (check.pendingApproval && check.requestId) {
+				authLockConfirmed = true;
+				document.getElementById("authOverlay").classList.add("show");
+				showToast("🔐 已推送到信任手机，请在手机上点击批准");
+				startPendingAuthPolling(check.requestId, check.verifyCode);
+				return;
+			}
 			if (!check.ok) {
 				if (check.unauthorized) {
 					localStorage.removeItem("dsh_hub_token");
@@ -10919,7 +11027,8 @@ function initHubController() {
 				return;
 			}
 			authLockConfirmed = false;
-			localStorage.setItem("dsh_hub_token", raw);
+			localStorage.setItem("dsh_hub_token", check.deviceToken || raw);
+			if (check.deviceId) localStorage.setItem("dsh_client_device_id", check.deviceId);
 			document.getElementById("authOverlay").classList.remove("show");
 			showToast("🔓 解锁成功");
 			const state = await fetchState({ forceFresh: true });
@@ -17368,6 +17477,18 @@ function initHubController() {
 		const hosts = hubState.hosts || [];
 		const shares = hubState.shares || [];
 		const buildInfo = hubState.build || {};
+		const secSum = hubState.securitySummary || {
+			total24h: 0,
+			high24h: 0,
+			uniqueIps24h: 0,
+			recentEvents: []
+		};
+		const ac = hubState.accessControl || {
+			deviceApprovalEnabled: false,
+			trustedDevices: [],
+			pendingDeviceLogins: [],
+			pendingHosts: []
+		};
 		const currentTk = getToken();
 		const enrollmentCode = hubState.enrollment?.code || "";
 		`${location.origin}${enrollmentCode}`;
@@ -17380,6 +17501,8 @@ function initHubController() {
 			enrollmentCode,
 			joinedCount: hubState.enrollment?.joinedCount || 0,
 			pushCount: (hubState.pushSubscriptions || []).length,
+			secSig: `${secSum.total24h}:${secSum.high24h}:${secSum.recentEvents?.[0]?.id || ""}`,
+			acSig: `${ac.deviceApprovalEnabled ? 1 : 0}:${(ac.trustedDevices || []).length}:${(ac.pendingDeviceLogins || []).map((x) => x.id).join(",")}:${(ac.pendingHosts || []).map((x) => x.hostId).join(",")}`,
 			build: buildInfo.uiBuild || buildInfo.version || "",
 			hosts: hosts.map((h) => ({
 				id: h.hostId,
@@ -17666,6 +17789,95 @@ function initHubController() {
                   <div class="settings-item-desc">暂无加密分享记录。可在任意会话右上角「⋯ → 生成 AES-256 端到端加密回放链接」创建。</div>
                 </div>
               `}
+            </div>
+          </div>
+
+          <div>
+            <div class="settings-group-title">🛡️ 接入审批保护与入侵告警</div>
+            <div class="settings-card">
+              <div class="settings-item">
+                <div>
+                  <div class="settings-item-title">
+                    🔐 新设备 / 新电脑接入需我手机审批
+                    <span style="margin-left:6px;font-size:10.5px;padding:2px 7px;border-radius:999px;background:${ac.deviceApprovalEnabled ? "var(--green-soft)" : "var(--amber-soft)"};color:${ac.deviceApprovalEnabled ? "var(--green)" : "#d97706"};">
+                      ${ac.deviceApprovalEnabled ? "已开启保护" : "未开启"}
+                    </span>
+                  </div>
+                  <div class="settings-item-desc">
+                    开启后，即使有人拿到管理员密码，新浏览器登录或新电脑接入都必须先经你这台手机点击「允许」，否则一律拦截，看不到任何对话与文件。
+                  </div>
+                </div>
+                <button
+                  class="pill-action-btn ${ac.deviceApprovalEnabled ? "" : "primary"}"
+                  onclick="toggleDeviceApprovalGuard(${ac.deviceApprovalEnabled ? "false" : "true"})"
+                >
+                  ${ac.deviceApprovalEnabled ? "关闭保护" : "立即开启"}
+                </button>
+              </div>
+
+              ${(ac.trustedDevices || []).length > 0 ? `
+                <div class="settings-item" style="display:block;">
+                  <div class="settings-item-title">📱 已信任的手机 / 浏览器 (${(ac.trustedDevices || []).length})</div>
+                  <div style="margin-top:8px;display:flex;flex-direction:column;gap:6px;">
+                    ${(ac.trustedDevices || []).map((dev) => `
+                      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;border-radius:10px;background:var(--subtle);border:1px solid var(--border);font-size:12px;">
+                        <div style="min-width:0;flex:1;">
+                          <div style="font-weight:700;color:var(--text);">
+                            ${esc$1(dev.name || "已信任设备")}
+                            ${dev.isCurrent || dev.id === hubState.currentDeviceId || dev.id === getOrCreateClientDeviceId() ? `<span style="margin-left:4px;font-size:10.5px;padding:1px 6px;border-radius:999px;background:var(--primary-soft);color:var(--primary);">本机</span>` : ""}
+                          </div>
+                          <div style="font-size:11px;color:var(--muted);margin-top:2px;">
+                            IP: <code>${esc$1(dev.ip || "-")}</code> · 最近活跃 ${formatTime(dev.lastSeen || dev.approvedAt)}
+                          </div>
+                        </div>
+                        <button class="pill-action-btn" style="color:var(--red);padding:4px 8px;font-size:11px;" onclick="revokeTrustedDeviceById('${esc$1(dev.id)}')">🚫 踢出</button>
+                      </div>
+                    `).join("")}
+                  </div>
+                </div>
+              ` : ""}
+
+              <div class="settings-item" style="display:block;">
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
+                  <div class="settings-item-title">
+                    ${secSum.total24h > 0 ? `<span style="color:var(--red);">🚨 近 24 小时已拦截 ${secSum.total24h} 次异常探测（${secSum.uniqueIps24h} 个来源 IP）</span>` : `<span style="color:var(--green);">🟢 运行安全 · 近 24 小时 0 次攻击探测</span>`}
+                  </div>
+                </div>
+                <div class="settings-item-desc" style="margin-top:4px;">
+                  监测伪造 <code>hst_</code> 令牌、敏感路径探测（403）、密码爆破（429）与未审批设备直连，命中后立即推送到你的 iPhone 锁屏。
+                </div>
+                <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
+                  <button class="pill-action-btn" onclick="sendTestSecurityAlert()">🚨 演练告警</button>
+                  ${(secSum.recentEvents || []).length > 0 ? `<button class="pill-action-btn" onclick="clearSecurityAlerts()">🧹 清空日志</button>` : ""}
+                </div>
+                ${(secSum.recentEvents || []).length > 0 ? `
+                  <div style="margin-top:10px;display:flex;flex-direction:column;gap:6px;max-height:220px;overflow-y:auto;">
+                    ${(secSum.recentEvents || []).slice(0, 12).map((ev) => {
+			const badge = {
+				forged_host_token: "伪造令牌",
+				sensitive_path_probe: "敏感路径",
+				auth_bruteforce: "密码爆破",
+				unauth_api_scan: "异常直连"
+			}[ev.kind] || ev.kind || "异常";
+			return `
+                        <div style="padding:8px 10px;border-radius:10px;background:var(--subtle);border:1px solid var(--border);font-size:11.5px;line-height:1.45;">
+                          <div style="display:flex;justify-content:space-between;gap:6px;align-items:center;flex-wrap:wrap;">
+                            <span>
+                              <strong style="color:${ev.severity === "high" ? "var(--red)" : "#d97706"};">[${esc$1(badge)} · ${esc$1(String(ev.status || 401))}]</strong>
+                              <code style="margin-left:4px;">${esc$1(ev.ip || "unknown")}</code>
+                            </span>
+                            <span style="color:var(--muted);">${formatTime(ev.at)}</span>
+                          </div>
+                          <div style="color:var(--text-secondary);font-family:var(--mono);font-size:11px;margin-top:3px;word-break:break-all;">
+                            ${esc$1(ev.method || "GET")} ${esc$1(ev.path || "")}
+                          </div>
+                          ${ev.detail ? `<div style="color:var(--muted);margin-top:2px;">${esc$1(ev.detail)}</div>` : ""}
+                        </div>
+                      `;
+		}).join("")}
+                  </div>
+                ` : ""}
+              </div>
             </div>
           </div>
 
@@ -19433,6 +19645,7 @@ function initHubController() {
 		}
 		preservePreviewUiState(nextState);
 		hubState = nextState;
+		renderAccessApprovalBanner();
 		try {
 			window.__dshLastHubState = nextState;
 			window.__dshActiveSessionId = activeSessionId;
@@ -19757,7 +19970,187 @@ function initHubController() {
 			setConnectionBanner(true, "⚠️ 当前手机网络已断开，恢复网络后将自动重连");
 		});
 	}
+	function renderAccessApprovalBanner() {
+		const slot = document.getElementById("accessApprovalBannerSlot");
+		if (!slot) return;
+		const ac = hubState.accessControl || {};
+		const pendingLogins = Array.isArray(ac.pendingDeviceLogins) ? ac.pendingDeviceLogins : [];
+		const pendingHosts = Array.isArray(ac.pendingHosts) ? ac.pendingHosts : [];
+		if (pendingLogins.length === 0 && pendingHosts.length === 0) {
+			if (slot.innerHTML) slot.innerHTML = "";
+			return;
+		}
+		slot.innerHTML = `
+      <div style="padding:8px 12px 4px;display:flex;flex-direction:column;gap:8px;">
+        ${pendingLogins.map((req) => `
+          <div style="padding:11px 13px;border-radius:14px;background:var(--red-soft);border:1.5px solid var(--red);display:flex;flex-direction:column;gap:8px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+              <strong style="font-size:13px;color:var(--red);">🔐 新设备请求访问你的总控台</strong>
+              <span style="font-family:var(--mono);font-size:13px;font-weight:800;padding:2px 8px;border-radius:8px;background:var(--surface);color:var(--text);">核对码 ${esc$1(req.verifyCode)}</span>
+            </div>
+            <div style="font-size:12px;color:var(--text-secondary);">
+              设备：<strong>${esc$1(req.name)}</strong> · 来源 IP：<code>${esc$1(req.ip || "unknown")}</code>
+            </div>
+            <div style="display:flex;gap:8px;">
+              <button type="button" class="pill-action-btn primary" style="flex:1;justify-content:center;" onclick="decideDeviceLoginRequest('${esc$1(req.id)}', true)">✓ 允许此设备登录</button>
+              <button type="button" class="pill-action-btn" style="flex:1;justify-content:center;color:var(--red);" onclick="decideDeviceLoginRequest('${esc$1(req.id)}', false)">🚫 拒绝</button>
+            </div>
+          </div>
+        `).join("")}
+        ${pendingHosts.map((h) => `
+          <div style="padding:11px 13px;border-radius:14px;background:var(--amber-soft);border:1.5px solid var(--amber);display:flex;flex-direction:column;gap:8px;">
+            <div style="font-size:13px;font-weight:800;color:#b45309;">💻 新电脑请求接入总控台</div>
+            <div style="font-size:12px;color:var(--text-secondary);">
+              电脑：<strong>${esc$1(h.hostName || h.hostId)}</strong> (${esc$1(h.platform || "host")}) · IP：<code>${esc$1(h.ip || "unknown")}</code>
+            </div>
+            <div style="display:flex;gap:8px;">
+              <button type="button" class="pill-action-btn primary" style="flex:1;justify-content:center;" onclick="decideHostJoinRequest('${esc$1(h.hostId)}', true)">✓ 允许此电脑接入</button>
+              <button type="button" class="pill-action-btn" style="flex:1;justify-content:center;color:var(--red);" onclick="decideHostJoinRequest('${esc$1(h.hostId)}', false)">🚫 拒绝并拉黑</button>
+            </div>
+          </div>
+        `).join("")}
+      </div>
+    `;
+	}
+	async function toggleDeviceApprovalGuard(enable) {
+		try {
+			const res = await apiFetch("/api/security/device-approval", {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({
+					enabled: Boolean(enable),
+					deviceId: getOrCreateClientDeviceId(),
+					deviceName: detectClientDeviceName()
+				})
+			});
+			const data = await res.json().catch(() => ({}));
+			if (res.ok && data?.ok) {
+				if (data.deviceToken) localStorage.setItem("dsh_hub_token", data.deviceToken);
+				if (data.deviceId) localStorage.setItem("dsh_client_device_id", data.deviceId);
+				if (data.accessControl) {
+					hubState.accessControl = data.accessControl;
+					lastRenderedSettingsKey = "";
+					renderSettingsTab();
+					renderAccessApprovalBanner();
+				}
+				showToast(enable ? "🔐 已开启新设备/新电脑手机审批保护（本机已设为信任设备）" : "🔓 已关闭新设备手机审批保护");
+			} else showToast("❌ " + (data?.error || "切换失败"));
+		} catch {
+			showToast("❌ 网络异常，请重试");
+		}
+	}
+	async function decideDeviceLoginRequest(requestId, allow) {
+		try {
+			const res = await apiFetch("/api/security/device-login/decide", {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({
+					requestId,
+					allow: Boolean(allow)
+				})
+			});
+			const data = await res.json().catch(() => ({}));
+			if (res.ok && data?.ok) {
+				if (data.accessControl) hubState.accessControl = data.accessControl;
+				renderAccessApprovalBanner();
+				if (currentTab === "settings") {
+					lastRenderedSettingsKey = "";
+					renderSettingsTab();
+				}
+				showToast(allow ? "✅ 已允许该设备登录" : "🚫 已拒绝该设备登录请求");
+			} else showToast("❌ " + (data?.error || "审批操作失败"));
+		} catch {
+			showToast("❌ 网络异常");
+		}
+	}
+	async function decideHostJoinRequest(hostId, allow) {
+		try {
+			const res = await apiFetch("/api/security/host-join/decide", {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({
+					hostId,
+					allow: Boolean(allow)
+				})
+			});
+			const data = await res.json().catch(() => ({}));
+			if (res.ok && data?.ok) {
+				if (data.accessControl) hubState.accessControl = data.accessControl;
+				renderAccessApprovalBanner();
+				await fetchState({ forceFresh: true });
+				showToast(allow ? "✅ 已允许新电脑接入" : "🚫 已拒绝并吊销该电脑");
+			} else showToast("❌ " + (data?.error || "操作失败"));
+		} catch {
+			showToast("❌ 网络异常");
+		}
+	}
+	async function revokeTrustedDeviceById(deviceId) {
+		try {
+			const res = await apiFetch("/api/security/devices/revoke", {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ deviceId })
+			});
+			const data = await res.json().catch(() => ({}));
+			if (res.ok && data?.ok) {
+				if (data.accessControl) hubState.accessControl = data.accessControl;
+				lastRenderedSettingsKey = "";
+				renderSettingsTab();
+				showToast("🚫 已踢出该信任设备");
+			} else showToast("❌ " + (data?.error || "无法踢出"));
+		} catch {
+			showToast("❌ 网络异常");
+		}
+	}
+	async function sendTestSecurityAlert() {
+		try {
+			const res = await apiFetch("/api/security/test-alert", {
+				method: "POST",
+				body: "{}"
+			});
+			const data = await res.json().catch(() => ({}));
+			if (res.ok && data?.ok) {
+				if (data.securitySummary) {
+					hubState.securitySummary = data.securitySummary;
+					lastRenderedSettingsKey = "";
+					renderSettingsTab();
+				}
+				showToast("🚨 已触发安全告警演练并推送至已订阅手机");
+			} else showToast("❌ " + (data?.error || "安全告警测试失败"));
+		} catch {
+			showToast("❌ 网络异常，无法触发安全告警测试");
+		}
+	}
+	async function clearSecurityAlerts() {
+		try {
+			const res = await apiFetch("/api/security/clear", {
+				method: "POST",
+				body: "{}"
+			});
+			const data = await res.json().catch(() => ({}));
+			if (res.ok && data?.ok) {
+				hubState.securitySummary = data.securitySummary || {
+					total24h: 0,
+					high24h: 0,
+					uniqueIps24h: 0,
+					recentEvents: []
+				};
+				lastRenderedSettingsKey = "";
+				renderSettingsTab();
+				showToast("🧹 已清空安全拦截日志");
+			}
+		} catch {
+			showToast("❌ 清空失败，请重试");
+		}
+	}
 	Object.assign(window, {
+		cancelPendingAuthWait,
+		toggleDeviceApprovalGuard,
+		decideDeviceLoginRequest,
+		decideHostJoinRequest,
+		revokeTrustedDeviceById,
+		sendTestSecurityAlert,
+		clearSecurityAlerts,
 		getToken,
 		authHeaders,
 		apiFetch,
