@@ -1,7 +1,18 @@
 import { randomBytes } from 'node:crypto'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
+
+function isProcessAlive(pid) {
+  const n = Number(pid)
+  if (!Number.isInteger(n) || n <= 0) return false
+  try {
+    process.kill(n, 0)
+    return true
+  } catch (err) {
+    return err?.code === 'EPERM'
+  }
+}
 
 export async function resolveOrCreateLocalHubToken({ dshHome = '', explicitToken = '' } = {}) {
   const cleanExplicit = String(explicitToken || '').trim()
@@ -13,19 +24,38 @@ export async function resolveOrCreateLocalHubToken({ dshHome = '', explicitToken
   try {
     const existing = (await readFile(tokenFile, 'utf8')).trim()
     if (existing.length >= 16) {
+      await chmod(tokenFile, 0o600).catch(() => {})
       return { token: existing, tokenFile }
     }
   } catch {
     // generate fresh local token below
   }
   const token = randomBytes(16).toString('hex')
-  await mkdir(dirname(tokenFile), { recursive: true })
+  await mkdir(dirname(tokenFile), { recursive: true, mode: 0o700 })
+  await chmod(dirname(tokenFile), 0o700).catch(() => {})
   await writeFile(tokenFile, `${token}\n`, { mode: 0o600 })
+  await chmod(tokenFile, 0o600).catch(() => {})
   return { token, tokenFile }
 }
 
-async function probeExistingLocalHub(port, token) {
+async function probeExistingLocalHub(port, token, homeDir = '') {
+  // Never transmit `local-hub.token` over loopback to an unverified listener!
+  // Only probe when our own `local-hub-info.json` in `homeDir` confirms this port belongs to a live PID we started,
+  // AND an unauthenticated `/api/health` pre-check confirms it is a PocketAgents Hub.
   try {
+    if (!homeDir) return { ok: false }
+    const infoRaw = await readFile(join(homeDir, 'local-hub-info.json'), 'utf8')
+    const info = JSON.parse(infoRaw)
+    if (Number(info?.port) !== Number(port)) return { ok: false }
+    if (!info?.pid || !isProcessAlive(info.pid)) return { ok: false }
+
+    const healthRes = await fetch(`http://127.0.0.1:${port}/api/health`, {
+      signal: AbortSignal.timeout(800),
+    })
+    if (!healthRes.ok) return { ok: false }
+    const healthData = await healthRes.json().catch(() => null)
+    if (healthData?.ok !== true || typeof healthData?.build?.version !== 'string') return { ok: false }
+
     const res = await fetch(`http://127.0.0.1:${port}/api/state`, {
       headers: { authorization: `Bearer ${token}` },
       signal: AbortSignal.timeout(1200),
@@ -76,7 +106,8 @@ export async function startEmbeddedLocalHub({
   ])
 
   const homeDir = dshHome || join(homedir(), '.dsh')
-  await mkdir(homeDir, { recursive: true })
+  await mkdir(homeDir, { recursive: true, mode: 0o700 })
+  await chmod(homeDir, 0o700).catch(() => {})
   const { token, tokenFile } = await resolveOrCreateLocalHubToken({
     dshHome: homeDir,
     explicitToken,
@@ -96,7 +127,7 @@ export async function startEmbeddedLocalHub({
   let attempt = await listenOnce(activeServer, targetPort, bindHost)
   if (!attempt.ok) {
     if (attempt.error?.code === 'EADDRINUSE' && targetPort > 0) {
-      const existing = await probeExistingLocalHub(targetPort, token)
+      const existing = await probeExistingLocalHub(targetPort, token, homeDir)
       if (existing.ok) {
         let reusedPairCode = ''
         try {
@@ -166,10 +197,12 @@ export async function startEmbeddedLocalHub({
   const pairUrl = `${primaryLan}/?pair=${pairing.code}`
 
   try {
+    const infoFile = join(homeDir, 'local-hub-info.json')
     await writeFile(
-      join(homeDir, 'local-hub-info.json'),
+      infoFile,
       JSON.stringify(
         {
+          pid: process.pid,
           port: actualPort,
           localUrl,
           lanOrigins,
@@ -184,6 +217,7 @@ export async function startEmbeddedLocalHub({
       ),
       { mode: 0o600 },
     )
+    await chmod(infoFile, 0o600).catch(() => {})
   } catch {
     // ignore non-critical info file write failures
   }

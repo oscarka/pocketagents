@@ -101,9 +101,9 @@ function resolveStreamMime(ext, { download = false, isText = false } = {}) {
   if (IMAGE_MIME[lower]) return IMAGE_MIME[lower]
   const docMime = DOCUMENT_MIME[lower]
   if (isText) {
-    // Keep .html/.htm as text/plain on inline stream requests to prevent same-origin HTML execution;
-    // return text/html only when download=true (which sets Content-Disposition: attachment).
-    if ((lower === '.html' || lower === '.htm') && !download) {
+    // Keep .html/.htm/.xml as text/plain on inline stream requests to prevent same-origin active content execution;
+    // return original MIME only when download=true (which sets Content-Disposition: attachment).
+    if ((lower === '.html' || lower === '.htm' || lower === '.xml') && !download) {
       return 'text/plain; charset=utf-8'
     }
     const base =
@@ -113,7 +113,7 @@ function resolveStreamMime(ext, { download = false, isText = false } = {}) {
         : 'text/plain'
     return `${base}; charset=utf-8`
   }
-  if ((lower === '.html' || lower === '.htm') && !download) {
+  if ((lower === '.html' || lower === '.htm' || lower === '.xml') && !download) {
     return 'text/plain; charset=utf-8'
   }
   return docMime || 'application/octet-stream'
@@ -2040,8 +2040,17 @@ export async function deleteAgentSession(agents, agentId, dshHome = '') {
 
   let removedDisk = false
   if (dshHome) {
-    const safeId = basename(id)
+    const safeId = basename(String(id || '').trim())
+    if (!safeId || safeId === '.' || safeId === '..' || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(safeId) || safeId.includes('..')) {
+      return { ok: false, id, error: '无效的会话 ID' }
+    }
     const sessionsDir = join(resolve(dshHome), 'sessions')
+    let realSessionsDir = sessionsDir
+    try {
+      realSessionsDir = await realpath(sessionsDir)
+    } catch {
+      realSessionsDir = sessionsDir
+    }
     const candidates = [
       join(sessionsDir, safeId),
       join(sessionsDir, `${safeId}.json`),
@@ -2058,8 +2067,12 @@ export async function deleteAgentSession(agents, agentId, dshHome = '') {
     }
     for (const candidate of candidates) {
       try {
-        await stat(candidate)
-        await rm(candidate, { recursive: true, force: true })
+        const realCand = await realpath(candidate)
+        if (realCand === realSessionsDir || !realCand.startsWith(realSessionsDir + sep)) {
+          continue
+        }
+        await stat(realCand)
+        await rm(realCand, { recursive: true, force: true })
         removedDisk = true
       } catch {
         // ignore missing file
@@ -2075,21 +2088,22 @@ export async function deleteAgentSession(agents, agentId, dshHome = '') {
   return { ok: true, id, removedLive, removedDisk }
 }
 
-const SENSITIVE_HOST_SYSTEM_ROOT_RE = /^(?:\/etc|\/private\/etc|\/proc|\/sys|\/var\/lib\/dsh-hub)(?:\/|$)/i
+const SENSITIVE_HOST_SYSTEM_ROOT_RE = /^(?:\/(?:private\/)?etc|\/proc|\/sys|\/(?:private\/)?var\/lib\/dsh-hub)(?:\/|$)/i
 const SENSITIVE_HOST_DIR_SEGMENT_RE =
-  /(?:^|\/)(?:\.ssh|\.aws|\.gnupg|\.kube|Library\/Keychains|Library\/LaunchAgents|\.config\/(?:gcloud|gh|op|1password)|\.docker\/config\.json)(?:\/|$)/i
-const SENSITIVE_HOST_DSH_RE =
-  /(?:^|\/)\.dsh(?:$|\/(?:\.credentials\.yaml|feishu\.env|feishu-host\.json|hub-state\.json|dsh-hub-state\.json|hub-daemon\.log|headless-remote-patch\.yml|profiles|sessions|dsh-runtimes|storages|cache)(?:\/|$))/i
+  /(?:^|\/)(?:\.ssh|\.aws|\.azure|\.gnupg|\.kube|Library\/Keychains|Library\/LaunchAgents|Library\/Cookies|\.config\/(?:gcloud|gh|op|1password|stripe|vercel|railway|rclone)|\.docker\/config\.json|\.cargo\/credentials\.toml|\.codex\/auth\.json|\.claude\/\.credentials\.json|\.gemini\/oauth_creds\.json|CodeBuddyExtension\/.*\/workbuddy-cli\.info)(?:\/|$)/i
+const SENSITIVE_HOST_DSH_RE = /(?:^|\/)\.dsh(?:\/|$)/i
 const SENSITIVE_HOST_BASENAME_RE =
-  /^(?:\.credentials\.yaml|feishu\.env|feishu-host\.json|hub-state\.json|dsh-hub-state\.json|session\.v\d+\.jsonl\.zstd|id_rsa|id_ed25519|id_ecdsa|id_dsa|\.netrc|\.npmrc|\.pypirc|\.git-credentials|\.pgpass|\.my\.cnf)$/i
+  /^(?:\.credentials\.yaml|\.credentials\.json|feishu\.env|feishu-host\.json|local-hub\.token|local-hub-info\.json|hub-state\.json|dsh-hub-state\.json|voice-vault\.enc\.json|\.voice-vault\.key|\.claude\.json|oauth_creds\.json|workbuddy-cli\.info|session\.v\d+\.jsonl\.zstd|id_rsa(?:\.pub)?|id_ed25519(?:\.pub)?|id_ecdsa(?:\.pub)?|id_dsa(?:\.pub)?|\.netrc|\.npmrc|\.pypirc|\.git-credentials|\.pgpass|\.my\.cnf)$/i
 const SENSITIVE_HOME_REL_RE =
   /^\.(?:zshenv|zshrc|zprofile|zlogin|zlogout|zsh_history|bashrc|bash_profile|bash_history|profile|local\/bin\/env)$/i
 const SENSITIVE_RAW_STREAM_BASENAME_RE =
-  /^(?:\.env(?:\.(?!example$|sample$|template$|dist$)[^/]+)?|[^/]+\.env|.*\.(?:pem|key|p12|pfx|jks|keystore)|credentials\.json|service-account[^/]*\.json)$/i
+  /^(?:\.env(?:\.(?!example$|sample$|template$|dist$)[^/]+)?|\.envrc|[^/]+\.env|.*\.(?:pem|key|p8|p12|pfx|ppk|kdbx|ovpn|jks|keystore)|credentials\.json|service-account[^/]*\.json|auth\.json)$/i
 
 export function isSensitiveHostPath(targetPath = '', { isStream = false, homeRoot = '' } = {}) {
-  const norm = String(targetPath || '').replace(/\\/g, '/').replace(/\/{2,}/g, '/').replace(/\/+$/, '')
+  let norm = String(targetPath || '').replace(/\\/g, '/').replace(/\/{2,}/g, '/').replace(/\/+$/, '')
   if (!norm) return false
+  // Strip macOS APFS firmlink prefix (/System/Volumes/Data) so canonicalized paths cannot bypass anchor rules
+  norm = norm.replace(/^\/System\/Volumes\/Data(?=\/|$)/i, '') || '/'
   if (
     SENSITIVE_HOST_SYSTEM_ROOT_RE.test(norm) ||
     SENSITIVE_HOST_DIR_SEGMENT_RE.test(norm) ||
@@ -2098,10 +2112,13 @@ export function isSensitiveHostPath(targetPath = '', { isStream = false, homeRoo
     return true
   }
   const base = norm.split('/').pop() || ''
-  if (base && SENSITIVE_HOST_BASENAME_RE.test(base)) {
+  if (base && (SENSITIVE_HOST_BASENAME_RE.test(base) || SENSITIVE_RAW_STREAM_BASENAME_RE.test(base))) {
     return true
   }
-  const normHome = String(homeRoot || homedir() || '').replace(/\\/g, '/').replace(/\/+$/, '')
+  const normHome = String(homeRoot || homedir() || '')
+    .replace(/\\/g, '/')
+    .replace(/^\/System\/Volumes\/Data(?=\/|$)/i, '')
+    .replace(/\/+$/, '')
   if (normHome && norm.toLowerCase().startsWith(`${normHome.toLowerCase()}/`)) {
     const relFromHome = norm.slice(normHome.length + 1)
     if (SENSITIVE_HOME_REL_RE.test(relFromHome)) {
@@ -2110,9 +2127,7 @@ export function isSensitiveHostPath(targetPath = '', { isStream = false, homeRoo
   } else if (/^\/(?:Users|home)\/[^/]+\/\.(?:zshenv|zshrc|zprofile|zlogin|zlogout|zsh_history|bashrc|bash_profile|bash_history|profile|local\/bin\/env)$/i.test(norm)) {
     return true
   }
-  if (isStream && base && SENSITIVE_RAW_STREAM_BASENAME_RE.test(base)) {
-    return true
-  }
+  void isStream
   return false
 }
 
@@ -2861,7 +2876,7 @@ async function getOrCreateFastRemuxMp4(
     try {
       await execImpl(
         'ffmpeg',
-        ['-y', '-i', realFile, '-map', '0:v:0', '-map', '0:a?', '-c', 'copy', '-movflags', '+faststart', tmpOut],
+        ['-y', '-protocol_whitelist', 'file', '-i', realFile, '-map', '0:v:0', '-map', '0:a?', '-c', 'copy', '-movflags', '+faststart', tmpOut],
         { timeout: 25_000 },
       )
       const outInfo = await stat(tmpOut)
@@ -2910,6 +2925,8 @@ async function getOrCreateFastPreviewMp4(
           'ffmpeg',
           [
             '-y',
+            '-protocol_whitelist',
+            'file',
             '-i',
             realFile,
             '-vf',
@@ -2948,6 +2965,8 @@ async function getOrCreateFastPreviewMp4(
           'ffmpeg',
           [
             '-y',
+            '-protocol_whitelist',
+            'file',
             '-i',
             realFile,
             '-vf',
@@ -3034,6 +3053,8 @@ async function getOrCreateCompatibleMp4(
           'ffmpeg',
           [
             '-y',
+            '-protocol_whitelist',
+            'file',
             '-i',
             realFile,
             '-vf',
@@ -3069,6 +3090,8 @@ async function getOrCreateCompatibleMp4(
           'ffmpeg',
           [
             '-y',
+            '-protocol_whitelist',
+            'file',
             '-i',
             realFile,
             '-vf',
@@ -3430,6 +3453,72 @@ export async function prepareWorkspaceFileStream(
     : isVideoPlayback
       ? 1024 * 1024 // parseHttpByteRange uses 2x for closed ranges -> 2 MiB max per HTTP video slice (eliminates Cloud Run 60s GFE buffering 504s!)
       : maxChunkBytes
+
+  // Text files (non-image, non-video) MUST undergo secret redaction BEFORE any Range slicing
+  // so callers cannot bypass redactText() by sending a Range: bytes=0- header.
+  if (!IMAGE_MIME[ext] && !VIDEO_MIME[ext] && streamSize <= 16 * 1024 * 1024) {
+    const fullBuf = await readFile(streamFile)
+    if (!fullBuf.includes(0)) {
+      const redacted = Buffer.from(redactText(fullBuf.toString('utf8')), 'utf8')
+      const textMime = resolveStreamMime(ext, { download, isText: true })
+      const parsedTextRange = parseHttpByteRange(rangeHeader, redacted.length, effectiveRangeCap)
+      if (parsedTextRange) {
+        if (!parsedTextRange.ok) {
+          const contentRange = `bytes */${redacted.length}`
+          return {
+            ok: false,
+            status: 416,
+            contentRange,
+            headers: { 'content-range': contentRange },
+            error: 'Requested Range Not Satisfiable',
+          }
+        }
+        const { start, end } = parsedTextRange
+        const slice = redacted.subarray(start, end + 1)
+        const contentRange = `bytes ${start}-${end}/${redacted.length}`
+        return {
+          ok: true,
+          status: 206,
+          name,
+          mime: textMime,
+          etag,
+          variant,
+          isThumb,
+          transcoded,
+          remuxed,
+          transcodeUnavailable,
+          contentRange,
+          byteLength: slice.length,
+          headers: {
+            ...baseHeaders,
+            'content-type': textMime,
+            'content-range': contentRange,
+            'content-length': String(slice.length),
+          },
+          buffer: slice,
+        }
+      }
+      return {
+        ok: true,
+        status: 200,
+        name,
+        mime: textMime,
+        etag,
+        variant,
+        isThumb,
+        transcoded,
+        remuxed,
+        transcodeUnavailable,
+        byteLength: redacted.length,
+        headers: {
+          ...baseHeaders,
+          'content-type': textMime,
+          'content-length': String(redacted.length),
+        },
+        buffer: redacted,
+      }
+    }
+  }
 
   const parsedRange = parseHttpByteRange(rangeHeader, streamSize, effectiveRangeCap)
   if (parsedRange) {

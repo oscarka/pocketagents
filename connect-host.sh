@@ -10,7 +10,30 @@ unset HTTP_PROXY HTTPS_PROXY http_proxy https_proxy ALL_PROXY all_proxy \
 DEFAULT_HUB_URL=""
 
 DSH_DIR="${DSH_HOME:-$HOME/.dsh}"
-mkdir -p "$DSH_DIR"
+mkdir -p -m 700 "$DSH_DIR"
+chmod 700 "$DSH_DIR" 2>/dev/null || true
+
+strip_newlines() {
+  printf '%s' "$1" | tr -d '\r\n'
+}
+
+json_escape() {
+  local s
+  s="$(printf '%s' "$1" | tr -d '\r\n')"
+  s="${s//\\/\\\\}"
+  s="${s//\"/\\\"}"
+  printf '%s' "$s"
+}
+
+xml_escape() {
+  local s="$1"
+  s="${s//&/&amp;}"
+  s="${s//</&lt;}"
+  s="${s//>/&gt;}"
+  s="${s//\"/&quot;}"
+  s="${s//\'/&apos;}"
+  printf '%s' "$s"
+}
 
 ENV_FILE="$DSH_DIR/feishu.env"
 
@@ -83,9 +106,9 @@ done
 DEFAULT_NAME="$(scutil --get ComputerName 2>/dev/null || hostname -s 2>/dev/null || hostname)"
 if [ "$EXISTING_HOST_NAME" = "--name" ]; then EXISTING_HOST_NAME=""; fi
 if [ "$EXISTING_HOST_ID" = "--id" ]; then EXISTING_HOST_ID=""; fi
-HOST_NAME="${OPT_NAME:-${POS_ARGS[0]:-${FEISHU_HOST_NAME:-${EXISTING_HOST_NAME:-$DEFAULT_NAME}}}}"
+HOST_NAME="$(strip_newlines "${OPT_NAME:-${POS_ARGS[0]:-${FEISHU_HOST_NAME:-${EXISTING_HOST_NAME:-$DEFAULT_NAME}}}}")"
 
-ARG_TOKEN="${OPT_TOKEN:-${POS_ARGS[1]:-}}"
+ARG_TOKEN="$(strip_newlines "${OPT_TOKEN:-${POS_ARGS[1]:-}}")"
 
 RAW_HOST_ID="${OPT_ID:-${POS_ARGS[2]:-${FEISHU_HOST_ID:-${EXISTING_HOST_ID:-$(hostname -s 2>/dev/null || hostname)}}}}"
 HOST_ID="$(echo "$RAW_HOST_ID" | tr '[:upper:] ' '[:lower:]-' | tr -cd 'a-z0-9-_')"
@@ -100,7 +123,7 @@ elif [ -z "${OPT_ID:-}" ] && [ -z "${POS_ARGS[2]:-}" ] && [ -z "${FEISHU_HOST_ID
   esac
 fi
 
-HUB_URL="${OPT_URL:-${FEISHU_HUB_URL:-${DEFAULT_HUB_URL:-$EXISTING_HUB_URL}}}"
+HUB_URL="$(strip_newlines "${OPT_URL:-${FEISHU_HUB_URL:-${DEFAULT_HUB_URL:-$EXISTING_HUB_URL}}}")"
 HUB_URL="${HUB_URL%/}"
 
 if [ -z "$HUB_URL" ]; then
@@ -110,21 +133,32 @@ if [ -z "$HUB_URL" ]; then
   exit 1
 fi
 
-JOIN_CODE="${OPT_CODE:-${FEISHU_JOIN_CODE:-}}"
-HUB_TOKEN="${ARG_TOKEN:-${FEISHU_HUB_TOKEN:-$EXISTING_TOKEN}}"
+JOIN_CODE="$(strip_newlines "${OPT_CODE:-${FEISHU_JOIN_CODE:-}}")"
+HUB_TOKEN="$(strip_newlines "${ARG_TOKEN:-${FEISHU_HUB_TOKEN:-$EXISTING_TOKEN}}")"
 
 # 凭配对码加入：自动向控制台换取本机独立凭证（不需要管理员主密码）
 if [ -n "$JOIN_CODE" ]; then
   echo "🔗 正在使用配对码 (${JOIN_CODE}) 将【${HOST_NAME}】接入总控台 ${HUB_URL} ..."
-  PLATFORM_STR="$(uname -s 2>/dev/null || echo unknown)"
-  ARCH_STR="$(uname -m 2>/dev/null || echo unknown)"
+  PLATFORM_STR="$(strip_newlines "$(uname -s 2>/dev/null || echo unknown)")"
+  ARCH_STR="$(strip_newlines "$(uname -m 2>/dev/null || echo unknown)")"
+  if command -v node >/dev/null 2>&1; then
+    JOIN_BODY="$(JOIN_CODE="$JOIN_CODE" HOST_ID="$HOST_ID" HOST_NAME="$HOST_NAME" PLATFORM_STR="$PLATFORM_STR" ARCH_STR="$ARCH_STR" node -e 'process.stdout.write(JSON.stringify({code:process.env.JOIN_CODE,hostId:process.env.HOST_ID,hostName:process.env.HOST_NAME,platform:process.env.PLATFORM_STR,arch:process.env.ARCH_STR}))')"
+  elif command -v python3 >/dev/null 2>&1; then
+    JOIN_BODY="$(JOIN_CODE="$JOIN_CODE" HOST_ID="$HOST_ID" HOST_NAME="$HOST_NAME" PLATFORM_STR="$PLATFORM_STR" ARCH_STR="$ARCH_STR" python3 -c 'import json,os; print(json.dumps({"code":os.environ["JOIN_CODE"],"hostId":os.environ["HOST_ID"],"hostName":os.environ["HOST_NAME"],"platform":os.environ["PLATFORM_STR"],"arch":os.environ["ARCH_STR"]}))')"
+  else
+    JOIN_BODY="{\"code\":\"$(json_escape "$JOIN_CODE")\",\"hostId\":\"$(json_escape "$HOST_ID")\",\"hostName\":\"$(json_escape "$HOST_NAME")\",\"platform\":\"$(json_escape "$PLATFORM_STR")\",\"arch\":\"$(json_escape "$ARCH_STR")\"}"
+  fi
   JOIN_RESP="$(curl -sS -X POST "${HUB_URL}/api/hosts/join" \
     -H "Content-Type: application/json" \
-    -d "{\"code\":\"${JOIN_CODE}\",\"hostId\":\"${HOST_ID}\",\"hostName\":\"${HOST_NAME}\",\"platform\":\"${PLATFORM_STR}\",\"arch\":\"${ARCH_STR}\"}" || true)"
-  EXTRACTED_TOKEN="$(printf '%s' "$JOIN_RESP" | sed -n 's/.*"hostToken"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+    -d "$JOIN_BODY" || true)"
+  EXTRACTED_TOKEN="$(printf '%s' "$JOIN_RESP" | sed -n 's/.*"hostToken"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | tr -d '\r\n')"
   if [ -z "$EXTRACTED_TOKEN" ]; then
     ERR_MSG="$(printf '%s' "$JOIN_RESP" | sed -n 's/.*"error"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
     echo "❌ 配对码接入失败: ${ERR_MSG:-$JOIN_RESP}"
+    exit 1
+  fi
+  if ! printf '%s' "$EXTRACTED_TOKEN" | grep -Eq '^hst_[0-9a-f]{48}$'; then
+    echo "❌ 配对码返回了非法的独立凭证格式，已中止写入配置文件。"
     exit 1
   fi
   HUB_TOKEN="$EXTRACTED_TOKEN"
@@ -215,7 +249,8 @@ if [ -z "$SCRIPT_DIR" ] && [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0
 fi
 
 if [ -z "$SCRIPT_DIR" ]; then
-  for local_candidate in "$PWD" "$HOME/pocketagents" "$HOME/pocketagent" "$HOME/deepseekharness-remote" "$HOME/deepseekharness-remotecontrol"; do
+  # Security: never auto-execute untrusted $PWD when invoked via `curl | bash` (`BASH_SOURCE[0]` is empty)
+  for local_candidate in "$HOME/pocketagents" "$HOME/pocketagent" "$HOME/deepseekharness-remote" "$HOME/deepseekharness-remotecontrol"; do
     if [ -f "$local_candidate/dsh-feishu/daemon.mjs" ]; then
       SCRIPT_DIR="$(cd "$local_candidate" && pwd)"
       echo "📦 检测到本地客户端代码目录，直接复用: $SCRIPT_DIR"
@@ -343,6 +378,12 @@ fi
 SERVICE_OK=0
 NEW_PID=""
 if [ "$(uname -s)" = "Darwin" ] && mkdir -p "$PLIST_DIR" 2>/dev/null; then
+  XML_NODE_BIN="$(xml_escape "$NODE_BIN")"
+  XML_SCRIPT_DIR="$(xml_escape "$SCRIPT_DIR")"
+  XML_HOME="$(xml_escape "$HOME")"
+  XML_DSH_DIR="$(xml_escape "$DSH_DIR")"
+  XML_AGY_ADDR="$(xml_escape "${ANTIGRAVITY_LS_ADDRESS:-}")"
+  XML_AGY_CSRF="$(xml_escape "${ANTIGRAVITY_CSRF_TOKEN:-}")"
   cat > "$PLIST_FILE" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -352,8 +393,8 @@ if [ "$(uname -s)" = "Darwin" ] && mkdir -p "$PLIST_DIR" 2>/dev/null; then
   <string>com.dsh.remotecontrol</string>
   <key>ProgramArguments</key>
   <array>
-    <string>${NODE_BIN}</string>
-    <string>${SCRIPT_DIR}/dsh-feishu/daemon.mjs</string>
+    <string>${XML_NODE_BIN}</string>
+    <string>${XML_SCRIPT_DIR}/dsh-feishu/daemon.mjs</string>
     <string>--replace</string>
   </array>
   <key>EnvironmentVariables</key>
@@ -361,26 +402,26 @@ if [ "$(uname -s)" = "Darwin" ] && mkdir -p "$PLIST_DIR" 2>/dev/null; then
     <key>PATH</key>
     <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
     <key>HOME</key>
-    <string>${HOME}</string>
+    <string>${XML_HOME}</string>
     <key>DSH_HOME</key>
-    <string>${DSH_DIR}</string>
+    <string>${XML_DSH_DIR}</string>
     <key>ELECTRON_RUN_AS_NODE</key>
     <string>${USE_ELECTRON_NODE}</string>
     <key>ANTIGRAVITY_LS_ADDRESS</key>
-    <string>${ANTIGRAVITY_LS_ADDRESS:-}</string>
+    <string>${XML_AGY_ADDR}</string>
     <key>ANTIGRAVITY_CSRF_TOKEN</key>
-    <string>${ANTIGRAVITY_CSRF_TOKEN:-}</string>
+    <string>${XML_AGY_CSRF}</string>
   </dict>
   <key>WorkingDirectory</key>
-  <string>${SCRIPT_DIR}</string>
+  <string>${XML_SCRIPT_DIR}</string>
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>
   <true/>
   <key>StandardOutPath</key>
-  <string>${DSH_DIR}/hub-daemon.log</string>
+  <string>${XML_DSH_DIR}/hub-daemon.log</string>
   <key>StandardErrorPath</key>
-  <string>${DSH_DIR}/hub-daemon.log</string>
+  <string>${XML_DSH_DIR}/hub-daemon.log</string>
 </dict>
 </plist>
 EOF
@@ -404,10 +445,10 @@ After=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=${SCRIPT_DIR}
-Environment=HOME=${HOME}
-Environment=DSH_HOME=${DSH_DIR}
+Environment="HOME=${HOME}"
+Environment="DSH_HOME=${DSH_DIR}"
 Environment=PATH=/usr/local/bin:/usr/bin:/bin
-ExecStart=${NODE_BIN} ${SCRIPT_DIR}/dsh-feishu/daemon.mjs --replace
+ExecStart="${NODE_BIN}" "${SCRIPT_DIR}/dsh-feishu/daemon.mjs" --replace
 Restart=always
 RestartSec=3
 StandardOutput=append:${DSH_DIR}/hub-daemon.log

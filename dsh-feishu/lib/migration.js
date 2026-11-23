@@ -11,11 +11,28 @@ const SKIP_DIRS = new Set([
   'tmp',
   '.dsh-tmp',
   'logs',
+  'remotecontrol',
+  'profiles',
+  'cache',
+  'dsh-runtimes',
 ])
 
 const SKIP_FILES = new Set([
   '.DS_Store',
   'Thumbs.db',
+  '.credentials.yaml',
+  'feishu-host.json',
+  'local-hub.token',
+  'local-hub-info.json',
+  'hub-state.json',
+  'dsh-hub-state.json',
+  'voice-vault.enc.json',
+  '.voice-vault.key',
+  'headless-remote-patch.yml',
+  'hub-daemon.log',
+  'hub-daemon.pid',
+  'daemon.lock',
+  'feishu-audit.jsonl',
 ])
 
 const CREDENTIAL_FILES = new Set([
@@ -25,9 +42,30 @@ const CREDENTIAL_FILES = new Set([
 const KEEP_ON_SOFT_WIPE = new Set([
   'feishu.env',
   'feishu-host.json',
+  'remotecontrol',
 ])
 
 const MAX_SINGLE_FILE_BYTES = 20 * 1024 * 1024 // 20 MiB per file cap for portable snapshot
+const MAX_SNAPSHOT_UNCOMPRESSED_BYTES = 100 * 1024 * 1024 // 100 MiB decompression bomb guard
+const MAX_RESTORE_FILES = 2000
+
+function isAllowedPortableSnapshotPath(relPath = '', { allowFeishuEnv = false } = {}) {
+  const norm = String(relPath || '').replace(/\\/g, '/').replace(/^\/+/, '')
+  if (!norm || norm.includes('..') || norm.includes('\0')) return false
+  const lower = norm.toLowerCase()
+  const base = lower.split('/').pop() || ''
+  if (SKIP_FILES.has(base) || SKIP_FILES.has(norm)) return false
+  const topSeg = lower.split('/')[0] || ''
+  if (SKIP_DIRS.has(topSeg)) return false
+  if (lower === 'feishu.env') return Boolean(allowFeishuEnv)
+  return (
+    lower.startsWith('sessions/')
+    || lower === 'storages/workspace.json'
+    || lower === 'settings.json'
+    || lower === 'session-titles.json'
+    || lower === 'pinned-sessions.json'
+  )
+}
 
 /**
  * Inspect the local ~/.dsh directory and return statistics for the Web UI & Feishu card.
@@ -143,8 +181,11 @@ export async function restoreSnapshotBuffer(dshHome, inputBuffer, options = {}) 
   const rawBuffer = Buffer.isBuffer(inputBuffer) ? inputBuffer : Buffer.from(inputBuffer)
   let jsonText
   if (rawBuffer.length >= 2 && rawBuffer[0] === 0x1f && rawBuffer[1] === 0x8b) {
-    jsonText = gunzipSync(rawBuffer).toString('utf8')
+    jsonText = gunzipSync(rawBuffer, { maxOutputLength: MAX_SNAPSHOT_UNCOMPRESSED_BYTES }).toString('utf8')
   } else {
+    if (rawBuffer.length > MAX_SNAPSHOT_UNCOMPRESSED_BYTES) {
+      throw new Error('Snapshot payload exceeds maximum allowed size')
+    }
     jsonText = rawBuffer.toString('utf8')
   }
 
@@ -158,27 +199,55 @@ export async function restoreSnapshotBuffer(dshHome, inputBuffer, options = {}) 
   if (payload?.format !== 'dsh-snapshot-v1' || !Array.isArray(payload.files)) {
     throw new Error('Unsupported snapshot format (expected dsh-snapshot-v1)')
   }
+  if (payload.files.length > MAX_RESTORE_FILES) {
+    throw new Error(`Snapshot file count exceeds limit (${MAX_RESTORE_FILES})`)
+  }
 
   await mkdir(root, { recursive: true, mode: 0o700 })
 
   let restoredFiles = 0
+  let restoredBytes = 0
+  const allowFeishuEnv = options.skipCredentials !== true
   for (const item of payload.files) {
-    const relPath = normalize(String(item?.relPath ?? '')).replace(/^([/\\])+/, '')
-    if (!relPath || relPath.startsWith('..') || relPath.includes(`..${sep}`) || relPath.includes('../')) {
+    const relPath = normalize(String(item?.relPath ?? '')).replace(/^([/\\])+/, '').split(sep).join('/')
+    if (!relPath || relPath.startsWith('..') || relPath.includes('../') || relPath.includes('..\\')) {
       throw new Error(`Unsafe relative path in snapshot: ${item?.relPath}`)
     }
-    if (options.skipCredentials && CREDENTIAL_FILES.has(relPath)) {
+    if (options.skipCredentials && CREDENTIAL_FILES.has(relPath.toLowerCase())) {
+      continue
+    }
+    if (!isAllowedPortableSnapshotPath(relPath, { allowFeishuEnv })) {
       continue
     }
     const target = resolve(root, relPath)
     if (target !== root && !target.startsWith(root + sep)) {
       throw new Error(`Path escapes target directory: ${relPath}`)
     }
+    // Verify no symlink exists along target path or parent directories before writing
+    const parts = relPath.split('/').filter(Boolean)
+    let cur = root
+    for (const part of parts) {
+      cur = join(cur, part)
+      try {
+        const st = await lstat(cur)
+        if (st.isSymbolicLink()) {
+          throw new Error(`Refusing to write through symlink in snapshot restore: ${relPath}`)
+        }
+      } catch (err) {
+        if (err?.code !== 'ENOENT') throw err
+        break
+      }
+    }
 
     await mkdir(dirname(target), { recursive: true, mode: 0o700 })
     const data = Buffer.from(String(item.dataBase64 ?? ''), 'base64')
-    const isSensitive = CREDENTIAL_FILES.has(relPath) || relPath.startsWith('feishu-')
-    const mode = isSensitive ? 0o600 : (typeof item.mode === 'number' ? (item.mode & 0o777) : 0o644)
+    if (data.length > MAX_SINGLE_FILE_BYTES) continue
+    restoredBytes += data.length
+    if (restoredBytes > MAX_SNAPSHOT_UNCOMPRESSED_BYTES) {
+      throw new Error('Snapshot restored byte total exceeds limit')
+    }
+    const isSensitive = CREDENTIAL_FILES.has(relPath.toLowerCase()) || relPath.toLowerCase().startsWith('feishu-')
+    const mode = isSensitive ? 0o600 : (typeof item.mode === 'number' ? (item.mode & 0o644) : 0o644)
     await writeFile(target, data, { mode })
     if (process.platform !== 'win32') {
       await chmod(target, isSensitive ? 0o600 : mode)
@@ -272,6 +341,7 @@ async function walkFiles(root, currentDir, { includeCredentials, collectData }) 
       totalBytes += sub.totalBytes
       if (sub.latestMtimeMs > latestMtimeMs) latestMtimeMs = sub.latestMtimeMs
     } else if (info.isFile()) {
+      if (!isAllowedPortableSnapshotPath(relPath, { allowFeishuEnv: includeCredentials })) continue
       if (info.size > MAX_SINGLE_FILE_BYTES) continue
       totalBytes += info.size
       if (info.mtimeMs > latestMtimeMs) latestMtimeMs = info.mtimeMs

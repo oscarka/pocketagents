@@ -44,7 +44,61 @@ import {
 } from './harnesses/doubao-adapter.js'
 import { discoverDshModels, DshHeadlessRunner } from './harnesses/dsh-headless-adapter.js'
 import { discoverWorkBuddyModels, WorkBuddyAdapter } from './harnesses/workbuddy-adapter.js'
-import { safeError } from './redact.js'
+import { redactText, safeError } from './redact.js'
+
+function redactOutboundBridgeState(state) {
+  if (!state || typeof state !== 'object') return state
+  const redactStr = v => (typeof v === 'string' && v ? redactText(v) : v)
+  if (Array.isArray(state.tasks)) {
+    for (const t of state.tasks) {
+      if (!t || typeof t !== 'object') continue
+      if (t.lastOutput) t.lastOutput = redactStr(t.lastOutput)
+      if (t.runningSummary) t.runningSummary = redactStr(t.runningSummary)
+      if (t.preview) t.preview = redactStr(t.preview)
+      if (Array.isArray(t.transcript)) {
+        for (const m of t.transcript) {
+          if (!m || typeof m !== 'object') continue
+          if (m.text) m.text = redactStr(m.text)
+          if (m.thinking) m.thinking = redactStr(m.thinking)
+          if (Array.isArray(m.tools)) {
+            for (const tl of m.tools) {
+              if (!tl || typeof tl !== 'object') continue
+              if (tl.commandLine) tl.commandLine = redactStr(tl.commandLine)
+              if (tl.summary) tl.summary = redactStr(tl.summary)
+            }
+          }
+          if (Array.isArray(m.toolCalls)) {
+            for (const tc of m.toolCalls) {
+              if (!tc || typeof tc !== 'object') continue
+              if (tc.argsSummary) tc.argsSummary = redactStr(tc.argsSummary)
+            }
+          }
+        }
+      }
+      if (t.pendingApproval && typeof t.pendingApproval === 'object') {
+        const pa = t.pendingApproval
+        if (pa.commandLine) pa.commandLine = redactStr(pa.commandLine)
+        if (pa.command) pa.command = redactStr(pa.command)
+        if (pa.reason) pa.reason = redactStr(pa.reason)
+        if (pa.subtitle) pa.subtitle = redactStr(pa.subtitle)
+        if (pa.summary) pa.summary = redactStr(pa.summary)
+        if (pa.toolInput) delete pa.toolInput
+      }
+    }
+  }
+  if (Array.isArray(state.approvals)) {
+    for (const a of state.approvals) {
+      if (!a || typeof a !== 'object') continue
+      if (a.commandLine) a.commandLine = redactStr(a.commandLine)
+      if (a.command) a.command = redactStr(a.command)
+      if (a.reason) a.reason = redactStr(a.reason)
+      if (a.subtitle) a.subtitle = redactStr(a.subtitle)
+      if (a.summary) a.summary = redactStr(a.summary)
+      if (a.toolInput) delete a.toolInput
+    }
+  }
+  return state
+}
 import {
   clearCustomSessionTitle,
   collectHostSystemTelemetry,
@@ -691,7 +745,10 @@ export class HubAgent {
   }
 
   async handleWebRtcStreamRequest(req = {}, ctx = {}) {
-    const rootCwd = this.resolveFsRootCwd(req.cwd || ctx.cwd || '', req.agentId || ctx.agentId || '')
+    // Lock WebRTC P2P file stream strictly to the workspace cwd/agentId bound when the authenticated offer was created
+    const lockedCwd = ctx.cwd || req.cwd || ''
+    const lockedAgentId = ctx.agentId || req.agentId || ''
+    const rootCwd = this.resolveFsRootCwd(lockedCwd, lockedAgentId)
     return prepareWorkspaceFileStream(rootCwd, String(req.path || ''), {
       rangeHeader: String(req.rangeHeader || ''),
       thumb: Boolean(req.thumb),
@@ -1202,6 +1259,7 @@ export class HubAgent {
           execImpl: this.execImpl,
         })
       } catch { }
+      redactOutboundBridgeState(bridgeState)
       const bridgeStateSig = this.computeBridgeStateSig(bridgeState)
       const isLiteHeartbeat = Boolean(
         this.lastAckedBridgeStateSig

@@ -2,6 +2,7 @@ import { createServer } from 'node:http'
 import { timingSafeEqual } from 'node:crypto'
 import { accessSync, constants, existsSync, readFileSync } from 'node:fs'
 import { readdir, readFile, stat } from 'node:fs/promises'
+import { isIP } from 'node:net'
 import { homedir, networkInterfaces } from 'node:os'
 import { dirname, join, posix as posixPath } from 'node:path'
 import { Readable, Transform } from 'node:stream'
@@ -31,22 +32,23 @@ function normalizeFsSecurityPath(raw = '') {
   }
   const cleaned = s.replace(/\\/g, '/').replace(/\/{2,}/g, '/')
   if (!cleaned) return ''
-  const norm = posixPath.normalize(cleaned)
+  let norm = posixPath.normalize(cleaned)
+  // Strip macOS APFS firmlink prefix so /System/Volumes/Data/Users/... cannot bypass path rules
+  norm = norm.replace(/^\/System\/Volumes\/Data(?=\/|$)/i, '') || '/'
   return norm === '/' ? '/' : norm.replace(/\/+$/, '')
 }
 
 const HOME_ROOT_RE = /^(?:~|\/(?:Users|home)\/[^/]+|\/root)$/i
-const SENSITIVE_SYSTEM_ROOT_RE = /^(?:\/etc|\/private\/etc|\/proc|\/sys|\/var\/lib\/dsh-hub)(?:\/|$)/i
+const SENSITIVE_SYSTEM_ROOT_RE = /^(?:\/(?:private\/)?etc|\/proc|\/sys|\/(?:private\/)?var\/lib\/dsh-hub)(?:\/|$)/i
 const SENSITIVE_DIR_SEGMENT_RE =
-  /(?:^|\/)(?:\.ssh|\.aws|\.gnupg|\.kube|Library\/Keychains|Library\/LaunchAgents|\.config\/(?:gcloud|gh|op|1password)|\.docker\/config\.json)(?:\/|$)/i
-const SENSITIVE_DSH_PATH_RE =
-  /(?:^|\/)\.dsh(?:$|\/(?:\.credentials\.yaml|feishu\.env|feishu-host\.json|hub-state\.json|dsh-hub-state\.json|hub-daemon\.log|headless-remote-patch\.yml|profiles|sessions|dsh-runtimes|storages|cache)(?:\/|$))/i
+  /(?:^|\/)(?:\.ssh|\.aws|\.azure|\.gnupg|\.kube|Library\/Keychains|Library\/LaunchAgents|Library\/Cookies|\.config\/(?:gcloud|gh|op|1password|stripe|vercel|railway|rclone)|\.docker\/config\.json|\.cargo\/credentials\.toml|\.codex\/auth\.json|\.claude\/\.credentials\.json|\.gemini\/oauth_creds\.json|CodeBuddyExtension\/.*\/workbuddy-cli\.info)(?:\/|$)/i
+const SENSITIVE_DSH_PATH_RE = /(?:^|\/)\.dsh(?:\/|$)/i
 const SENSITIVE_BASENAME_RE =
-  /^(?:\.credentials\.yaml|feishu\.env|feishu-host\.json|hub-state\.json|dsh-hub-state\.json|session\.v\d+\.jsonl\.zstd|id_rsa|id_ed25519|id_ecdsa|id_dsa|\.netrc|\.npmrc|\.pypirc|\.git-credentials|\.pgpass|\.my\.cnf)$/i
+  /^(?:\.credentials\.yaml|\.credentials\.json|feishu\.env|feishu-host\.json|local-hub\.token|local-hub-info\.json|hub-state\.json|dsh-hub-state\.json|voice-vault\.enc\.json|\.voice-vault\.key|\.claude\.json|oauth_creds\.json|workbuddy-cli\.info|session\.v\d+\.jsonl\.zstd|id_rsa(?:\.pub)?|id_ed25519(?:\.pub)?|id_ecdsa(?:\.pub)?|id_dsa(?:\.pub)?|\.netrc|\.npmrc|\.pypirc|\.git-credentials|\.pgpass|\.my\.cnf)$/i
 const HOME_DOTFILE_SECRET_RE =
   /^(?:~|\/(?:Users|home)\/[^/]+|\/root)\/\.(?:zshenv|zshrc|zprofile|zlogin|zlogout|zsh_history|bashrc|bash_profile|bash_history|profile|local\/bin\/env)$/i
 const RAW_STREAM_SECRET_BASENAME_RE =
-  /^(?:\.env(?:\.(?!example$|sample$|template$|dist$)[^/]+)?|[^/]+\.env|.*\.(?:pem|key|p12|pfx|jks|keystore)|credentials\.json|service-account[^/]*\.json)$/i
+  /^(?:\.env(?:\.(?!example$|sample$|template$|dist$)[^/]+)?|\.envrc|[^/]+\.env|.*\.(?:pem|key|p8|p12|pfx|ppk|kdbx|ovpn|jks|keystore)|credentials\.json|service-account[^/]*\.json|auth\.json)$/i
 
 export function isBlockedHubFsPath({ cwd = '', path = '', op = 'read', isAdmin = true } = {}) {
   const normCwd = normalizeFsSecurityPath(cwd)
@@ -57,7 +59,8 @@ export function isBlockedHubFsPath({ cwd = '', path = '', op = 'read', isAdmin =
       : normCwd && normPath
         ? `${normCwd}/${normPath.replace(/^\/+/, '')}`
         : normPath || normCwd
-  const combined = rawCombined ? posixPath.normalize(rawCombined).replace(/\/+$/, '') || '/' : ''
+  let combined = rawCombined ? posixPath.normalize(rawCombined).replace(/\/+$/, '') || '/' : ''
+  combined = combined.replace(/^\/System\/Volumes\/Data(?=\/|$)/i, '') || '/'
 
   if (
     SENSITIVE_SYSTEM_ROOT_RE.test(combined) ||
@@ -73,10 +76,10 @@ export function isBlockedHubFsPath({ cwd = '', path = '', op = 'read', isAdmin =
   if (base && SENSITIVE_BASENAME_RE.test(base)) {
     return true
   }
+  if (base && RAW_STREAM_SECRET_BASENAME_RE.test(base)) {
+    return true
+  }
   if (op === 'stream') {
-    if (base && RAW_STREAM_SECRET_BASENAME_RE.test(base)) {
-      return true
-    }
     if (!isAdmin && (HOME_ROOT_RE.test(normCwd) || normCwd === '/') && normPath.replace(/^\.\/+/, '').startsWith('.')) {
       return true
     }
@@ -147,6 +150,16 @@ const PACKAGE_JSON_PATH = join(__dirname, '..', 'package.json')
 const CONNECT_SCRIPT_PATH = join(__dirname, '..', 'connect-host.sh')
 const MAX_BODY_BYTES = 50 * 1024 * 1024 // 50 MiB for snapshot uploads
 
+function getRouteMaxBodyBytes(pathname = '') {
+  const isLargeBodyRoute =
+    pathname === '/api/heartbeat'
+    || pathname === '/api/snapshots'
+    || pathname === '/api/shares'
+    || pathname === '/api/voice/stt'
+    || /^\/api\/hosts\/[^/]+\/command$/.test(pathname)
+  return isLargeBodyRoute ? MAX_BODY_BYTES : 256 * 1024
+}
+
 export function resolveClientIp(
   headers = {},
   remoteAddress = '',
@@ -155,6 +168,7 @@ export function resolveClientIp(
     process.env.TRUST_PROXY === 'true' ||
     Boolean(process.env.K_SERVICE) ||
     Boolean(process.env.RAILWAY_ENVIRONMENT),
+    trustedHops = Math.max(1, Number(process.env.TRUST_PROXY_HOPS) || 1),
   } = {},
 ) {
   const cleanSocket = String(remoteAddress || '')
@@ -168,16 +182,19 @@ export function resolveClientIp(
     const hops = xffRaw
       .split(',')
       .map(s => s.trim().replace(/^::ffff:/i, ''))
-      .filter(Boolean)
-    // Behind a trusted reverse proxy (Cloud Run / Railway / Nginx), the proxy appends the real client IP at the rightmost hop.
+      .filter(ip => ip && isIP(ip) !== 0)
     if (hops.length > 0) {
-      return hops[hops.length - 1]
+      const idx = Math.max(0, hops.length - trustedHops)
+      return hops[idx]
     }
   }
   const realIp = String(headers['x-real-ip'] ?? headers['X-Real-IP'] ?? '')
     .trim()
     .replace(/^::ffff:/i, '')
-  return realIp || cleanSocket || 'socket-local'
+  if (realIp && isIP(realIp) !== 0) {
+    return realIp
+  }
+  return cleanSocket || 'socket-local'
 }
 
 export function validateHubStartupToken(token, { allowInsecureNoToken = false } = {}) {
@@ -271,8 +288,14 @@ export function formatStartupBanner({
   if (!publicUrl && Array.isArray(lanOrigins) && lanOrigins.length > 0) {
     lines.push(`📡 局域网地址: ${lanOrigins.join(' / ')} （手机连同一 Wi-Fi 可直接访问/扫码）`)
   }
+  const isProdLog = process.env.NODE_ENV === 'production'
+  const displayToken = !token
+    ? '(未设置)'
+    : isProdLog
+      ? `${String(token).slice(0, 4)}••••${String(token).slice(-4)} (已脱敏)`
+      : token
   lines.push(
-    `🔑 管理密码: ${token || '(未设置)'}`,
+    `🔑 管理密码: ${displayToken}`,
     `💾 数据存储: ${stateFile}`,
     '------------------------------------------------------------',
     '👉 首次使用 3 步闭环：',
@@ -349,6 +372,53 @@ export function createHubServer({
   const authVerifyFailBuckets = new Map()
   const AUTH_VERIFY_WINDOW_MS = 60_000
   const AUTH_VERIFY_MAX_FAILS = 10
+  const apiAuthFailBuckets = new Map()
+  const API_AUTH_FAIL_WINDOW_MS = 60_000
+  const API_AUTH_MAX_FAILS = 30
+  let activeAdminSseCount = 0
+  const activeHostSseCounts = new Map()
+
+  function checkApiAuthRateLimited(clientIp, nowMs = hub.now ? hub.now() : Date.now()) {
+    const key = String(clientIp || 'unknown')
+    const prev = (apiAuthFailBuckets.get(key) || []).filter(ts => nowMs - ts < API_AUTH_FAIL_WINDOW_MS)
+    if (prev.length >= API_AUTH_MAX_FAILS) {
+      apiAuthFailBuckets.set(key, prev)
+      return true
+    }
+    return false
+  }
+
+  function recordApiAuthFailure(clientIp, nowMs = hub.now ? hub.now() : Date.now()) {
+    const key = String(clientIp || 'unknown')
+    const prev = (apiAuthFailBuckets.get(key) || []).filter(ts => nowMs - ts < API_AUTH_FAIL_WINDOW_MS)
+    prev.push(nowMs)
+    apiAuthFailBuckets.set(key, prev)
+    if (apiAuthFailBuckets.size > 2000) {
+      const oldestKey = apiAuthFailBuckets.keys().next().value
+      apiAuthFailBuckets.delete(oldestKey)
+    }
+    return prev.length
+  }
+
+  function resolveHostOrAdminIdentity(headers = {}, urlObj, hostId = '', { allowPending = false } = {}) {
+    if (checkAuth(headers, urlObj)) {
+      return { ok: true, isAdmin: true, authHostId: String(hostId || '').trim() }
+    }
+    const candidate = extractCandidateToken(headers, urlObj)
+    if (!candidate) return { ok: false, isAdmin: false, authHostId: '' }
+    const cleanClaimed = String(hostId || '').trim()
+    if (cleanClaimed) {
+      if (hub.verifyHostCredential(cleanClaimed, candidate, { allowPending })) {
+        return { ok: true, isAdmin: false, authHostId: cleanClaimed }
+      }
+      return { ok: false, isAdmin: false, authHostId: '' }
+    }
+    const resolvedId = hub.resolveAuthenticatedHostId(candidate, '')
+    if (resolvedId) {
+      return { ok: true, isAdmin: false, authHostId: resolvedId }
+    }
+    return { ok: false, isAdmin: false, authHostId: '' }
+  }
 
   function extractCandidateToken(headers = {}, urlObj) {
     const authHeader = String(headers.authorization ?? headers.Authorization ?? '').trim()
@@ -384,7 +454,10 @@ export function createHubServer({
   }
 
   function checkHostOrAdminAuth(headers = {}, urlObj, hostId = '', { allowPending = false } = {}) {
-    if (checkAuth(headers, urlObj)) return true
+    const isAdminAllowed = hub.deviceApprovalEnabled
+      ? Boolean(getAuthenticatedDevice(headers, urlObj))
+      : checkAuth(headers, urlObj)
+    if (isAdminAllowed) return true
     const candidate = extractCandidateToken(headers, urlObj)
     if (!candidate) return false
     if (hostId) {
@@ -670,7 +743,12 @@ export function createHubServer({
       }
       return {
         status: 200,
-        headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' },
+        headers: {
+          'content-type': 'text/html; charset=utf-8',
+          'cache-control': 'no-store',
+          'content-security-policy':
+            "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'",
+        },
         body: renderShareReplayHtml(share),
       }
     }
@@ -893,11 +971,42 @@ export function createHubServer({
     }
 
     if (pathname.startsWith('/api/')) {
-      // Host-level reporting endpoints accept either the Admin HUB_TOKEN or that specific host's dedicated hostToken
+      if (checkApiAuthRateLimited(reqClientIp)) {
+        return {
+          status: 429,
+          json: { ok: false, error: '请求失败次数过多，请 1 分钟后再试', rateLimited: true },
+        }
+      }
+
+      // Host-level reporting endpoints accept either an authenticated Admin (dev_ token when device approval is ON)
+      // or that specific host's dedicated signed hostToken (NEVER bare master HUB_TOKEN when device approval is enabled).
       if (method === 'POST' && pathname === '/api/heartbeat') {
         const targetHostId = String(body?.hostId ?? '').trim()
-        const isAdminReq = checkAuth(headers, urlObj) || checkMasterToken(headers, urlObj)
+        const isAdminDevice = Boolean(getAuthenticatedDevice(headers, urlObj))
+        const isAdminReq = hub.deviceApprovalEnabled ? isAdminDevice : checkAuth(headers, urlObj)
         if (!isAdminReq && (!targetHostId || !checkHostOrAdminAuth(headers, urlObj, targetHostId, { allowPending: true }))) {
+          recordApiAuthFailure(reqClientIp)
+          if (hub.deviceApprovalEnabled && checkMasterToken(headers, urlObj)) {
+            hub.recordSecurityEvent?.({
+              kind: 'unauth_api_scan',
+              severity: 'high',
+              ip: reqClientIp,
+              method,
+              path: pathname,
+              status: 403,
+              detail: `未审批设备尝试持主密码伪造心跳 hostId=${targetHostId || 'unknown'}`,
+              pushImmediately: true,
+            })
+            return {
+              status: 403,
+              json: {
+                ok: false,
+                code: 'DEVICE_APPROVAL_REQUIRED',
+                error: '已开启手机审批保护：电脑端必须使用专属独立主机凭证（hst_...）发送心跳',
+                authRequired: true,
+              },
+            }
+          }
           noteSecurityIncident({ status: 401, detail: targetHostId ? `未授权心跳 hostId=${targetHostId}` : '未授权心跳' })
           return {
             status: 401,
@@ -911,6 +1020,7 @@ export function createHubServer({
         const candidateToken = extractCandidateToken(headers, urlObj)
         const outcome = hub.handleHeartbeat({
           ...body,
+          _strictIdentityCheck: !isAdminReq,
           ...(candidateToken && targetHostId && hub.verifySignedHostToken(targetHostId, candidateToken)
             ? { presentedHostToken: candidateToken }
             : {}),
@@ -937,7 +1047,8 @@ export function createHubServer({
         const targetHostId = String(meta?.hostId ?? '').trim()
         const isAdminReq = checkAuth(headers, urlObj)
         if (!isAdminReq && (!targetHostId || !checkHostOrAdminAuth(headers, urlObj, targetHostId))) {
-          rawStream?.resume?.()
+          recordApiAuthFailure(reqClientIp)
+          rawStream?.destroy?.()
           return {
             status: 401,
             json: {
@@ -958,7 +1069,7 @@ export function createHubServer({
           isZeroBody ? null : rawStream,
         )
         if (!outcome.ok) {
-          rawStream?.resume?.()
+          rawStream?.destroy?.()
           return { status: outcome.status || 404, json: outcome }
         }
         if (outcome.streamDone) {
@@ -977,17 +1088,19 @@ export function createHubServer({
         pathname === '/api/v1/turn/credentials'
 
       // mediaTicket is strictly limited to read-only media/preview streaming endpoints;
-      // directory listing (/fs/list) and text/meta reads (/fs/read) always require Admin HUB_TOKEN.
+      // directory listing (/fs/list), text/meta reads (/fs/read), and WebRTC P2P (/fs/rtc-offer) always require Admin auth.
       const isReadOnlyMediaEndpoint =
-        (method === 'GET' &&
-          (/^\/api\/hosts\/([^/]+)\/file-preview$/.test(pathname) ||
-            /^\/api\/hosts\/([^/]+)\/fs\/stream$/.test(pathname) ||
-            /^\/api\/hosts\/([^/]+)\/fs\/hls\/(?:index\.m3u8|seg_\d{5}\.ts)$/.test(pathname))) ||
-        (method === 'POST' && /^\/api\/hosts\/([^/]+)\/fs\/rtc-offer$/.test(pathname))
+        method === 'GET' &&
+        (/^\/api\/hosts\/([^/]+)\/file-preview$/.test(pathname) ||
+          /^\/api\/hosts\/([^/]+)\/fs\/stream$/.test(pathname) ||
+          /^\/api\/hosts\/([^/]+)\/fs\/hls\/(?:index\.m3u8|seg_\d{5}\.ts)$/.test(pathname))
 
+      let sharedAuth = { ok: false, isAdmin: false, authHostId: '' }
       if (isSharedHostEndpoint) {
         const claimedHostId = String(body?.hostId || body?.fromHostId || body?.meta?.hostId || '').trim()
-        if (!checkHostOrAdminAuth(headers, urlObj, claimedHostId)) {
+        sharedAuth = resolveHostOrAdminIdentity(headers, urlObj, claimedHostId)
+        if (!sharedAuth.ok) {
+          recordApiAuthFailure(reqClientIp)
           noteSecurityIncident({ status: 401 })
           return {
             status: 401,
@@ -1000,6 +1113,7 @@ export function createHubServer({
         }
       } else if (isReadOnlyMediaEndpoint) {
         if (!checkMediaOrAdminAuth(headers, urlObj)) {
+          recordApiAuthFailure(reqClientIp)
           noteSecurityIncident({ status: 401 })
           return {
             status: 401,
@@ -1011,6 +1125,7 @@ export function createHubServer({
           }
         }
       } else if (!checkAuth(headers, urlObj)) {
+        recordApiAuthFailure(reqClientIp)
         const usedMasterWithoutApproval = Boolean(hub.deviceApprovalEnabled && checkMasterToken(headers, urlObj))
         if (usedMasterWithoutApproval) {
           hub.recordSecurityEvent?.({
@@ -1104,6 +1219,19 @@ export function createHubServer({
       const activateMatch = /^\/api\/hosts\/([^/]+)\/activate$/.exec(pathname)
       if (method === 'POST' && activateMatch) {
         const hostId = decodeURIComponent(activateMatch[1])
+        if (!sharedAuth.isAdmin) {
+          const fromHostId = String(body?.fromHostId ?? '').trim()
+          const isSelfActivate = sharedAuth.authHostId === hostId
+          const isActiveHostHandoff =
+            Boolean(fromHostId && fromHostId === sharedAuth.authHostId) &&
+            (!hub.activeHostId || hub.activeHostId === sharedAuth.authHostId)
+          if (!isSelfActivate && !isActiveHostHandoff) {
+            return {
+              status: 403,
+              json: { ok: false, error: 'Forbidden: host can only activate itself or hand off active Feishu ownership' },
+            }
+          }
+        }
         const outcome = hub.activateHost(hostId)
         return { status: outcome.ok ? 200 : 404, json: outcome }
       }
@@ -1142,12 +1270,18 @@ export function createHubServer({
           }
           if (blob.dataBase64) {
             const buf = Buffer.from(blob.dataBase64, 'base64')
+            const rawPreviewMime = String(blob.mime || 'application/octet-stream').toLowerCase()
+            const safePreviewMime = /^(?:text\/html|application\/xhtml\+xml|text\/javascript|application\/javascript)\b/.test(rawPreviewMime)
+              ? 'text/plain; charset=utf-8'
+              : (blob.mime || 'application/octet-stream')
             return {
               status: 200,
               headers: {
-                'content-type': blob.mime || 'application/octet-stream',
+                'content-type': safePreviewMime,
                 'content-length': String(buf.length),
                 'cache-control': 'private, max-age=300',
+                'x-content-type-options': 'nosniff',
+                'content-security-policy': "default-src 'none'; sandbox",
               },
               buffer: buf,
             }
@@ -1157,6 +1291,8 @@ export function createHubServer({
             headers: {
               'content-type': 'text/plain; charset=utf-8',
               'cache-control': 'private, max-age=300',
+              'x-content-type-options': 'nosniff',
+              'content-security-policy': "default-src 'none'; sandbox",
             },
             body: String(blob.content ?? ''),
           }
@@ -1204,7 +1340,7 @@ export function createHubServer({
         }
         const mtParam = String(urlObj.searchParams.get('mt') ?? '').trim()
         const tokenParam = String(urlObj.searchParams.get('token') ?? '').trim()
-        const effectiveMt = (mtParam && hub.verifyMediaTicket(mtParam)) ? mtParam : hub.getMediaTicket()
+        const effectiveMt = (mtParam && hub.verifyMediaTicket(mtParam)) ? mtParam : hub.issueMediaTicket()
 
         if (hlsItem === 'index.m3u8') {
           const out = await hub.dispatchFastFsRequest(
@@ -1221,7 +1357,6 @@ export function createHubServer({
           if (!out.ok || !out.meta?.m3u8) {
             return {
               status: out.status || 404,
-              headers: { 'access-control-allow-origin': '*' },
               json: out.meta || { ok: false, error: 'HLS playlist unavailable' },
             }
           }
@@ -1242,7 +1377,6 @@ export function createHubServer({
               'content-type': 'application/vnd.apple.mpegurl; charset=utf-8',
               'cache-control': 'no-store',
               'x-accel-buffering': 'no',
-              'access-control-allow-origin': '*',
               ...(out.meta.mode ? { 'x-dsh-hls-mode': String(out.meta.mode) } : {}),
             },
             body: rewrittenM3u8,
@@ -1266,7 +1400,6 @@ export function createHubServer({
           out.onStreamDone?.()
           return {
             status: out.status || 404,
-            headers: { 'access-control-allow-origin': '*' },
             json: out.meta || { ok: false, error: 'HLS segment failed' },
           }
         }
@@ -1274,7 +1407,6 @@ export function createHubServer({
           'content-type': 'video/mp2t',
           'cache-control': 'private, max-age=3600',
           'x-accel-buffering': 'no',
-          'access-control-allow-origin': '*',
           ...(out.meta?.variant ? { 'x-dsh-media-variant': String(out.meta.variant) } : {}),
         }
         if (out.stream) {
@@ -1391,6 +1523,7 @@ export function createHubServer({
         const isImagePath = /\.(png|jpe?g|webp|gif|svg|bmp|ico|avif|heic|heif)$/i.test(reqPath)
         const mtParam = String(urlObj.searchParams.get('mt') ?? '').trim()
         const hasMediaTicket = Boolean(mtParam && hub.verifyMediaTicket(mtParam))
+        const allowSandboxCors = hasMediaTicket && !download
         const exposeHeaders =
           'content-range, content-length, accept-ranges, etag, x-dsh-media-variant, x-dsh-thumb, x-dsh-orig-size, x-dsh-hub-cache, x-dsh-remuxed, x-dsh-transcoded, x-dsh-transcode-unavailable'
         const mediaCacheEligible = isImagePath && !rangeHeader && !download && !transcode && !fastPreview
@@ -1405,7 +1538,6 @@ export function createHubServer({
                 status: 304,
                 headers: {
                   etag: cachedMedia.etag,
-                  ...(hasMediaTicket ? { 'access-control-allow-origin': '*' } : {}),
                   'accept-ranges': 'bytes',
                   'cache-control': 'private, max-age=300',
                   'x-dsh-hub-cache': '1',
@@ -1421,8 +1553,10 @@ export function createHubServer({
                 'accept-ranges': 'bytes',
                 'cache-control': 'private, max-age=300',
                 'access-control-expose-headers': exposeHeaders,
+                ...(allowSandboxCors ? { 'access-control-allow-origin': '*' } : {}),
                 'x-dsh-hub-cache': '1',
-                ...(hasMediaTicket ? { 'access-control-allow-origin': '*' } : {}),
+                'x-content-type-options': 'nosniff',
+                'content-security-policy': "default-src 'none'; sandbox",
                 ...(cachedMedia.etag ? { etag: cachedMedia.etag } : {}),
                 ...(cachedMedia.variant ? { 'x-dsh-media-variant': cachedMedia.variant } : {}),
                 ...(cachedMedia.isThumb ? { 'x-dsh-thumb': '1' } : {}),
@@ -1456,7 +1590,6 @@ export function createHubServer({
             status: 304,
             headers: {
               ...(out.meta?.etag ? { etag: out.meta.etag } : {}),
-              ...(hasMediaTicket && !download ? { 'access-control-allow-origin': '*' } : {}),
               'accept-ranges': 'bytes',
               'cache-control': 'private, max-age=300',
             },
@@ -1470,19 +1603,23 @@ export function createHubServer({
             status: out.status || 404,
             headers: {
               ...(out.meta?.contentRange ? { 'content-range': out.meta.contentRange } : {}),
-              ...(hasMediaTicket && !download ? { 'access-control-allow-origin': '*' } : {}),
               'accept-ranges': 'bytes',
             },
             json: out.meta || { ok: false, error: 'File stream failed' },
           }
         }
+        const rawStreamMime = String(out.meta?.mime || 'application/octet-stream')
+        const isActiveHtmlMime = /^(?:text\/html|application\/xhtml\+xml|image\/svg\+xml)\b/i.test(rawStreamMime)
+        const safeStreamMime = !download && isActiveHtmlMime ? 'text/plain; charset=utf-8' : rawStreamMime
         const commonMediaHeaders = {
-          'content-type': out.meta?.mime || 'application/octet-stream',
+          'content-type': safeStreamMime,
           'accept-ranges': 'bytes',
           'cache-control': 'private, max-age=300',
           'x-accel-buffering': 'no',
+          'x-content-type-options': 'nosniff',
+          'content-security-policy': "default-src 'none'; sandbox",
           'access-control-expose-headers': exposeHeaders,
-          ...(hasMediaTicket && !download ? { 'access-control-allow-origin': '*' } : {}),
+          ...(allowSandboxCors ? { 'access-control-allow-origin': '*' } : {}),
           ...(out.meta?.etag ? { etag: out.meta.etag } : {}),
           ...(out.meta?.contentRange ? { 'content-range': out.meta.contentRange } : {}),
           ...(out.meta?.variant ? { 'x-dsh-media-variant': String(out.meta.variant) } : {}),
@@ -1798,25 +1935,37 @@ export function createHubServer({
         }
       }
 
-      // Self-hosted WebRTC Signaling & TURN Credentials (replaces dsh.r2049.cn signaling & /api/v1/turn/credentials)
+      // Self-hosted WebRTC Signaling & TURN Credentials (strictly scoped by authenticated host identity)
       if (method === 'POST' && pathname === '/api/v1/signaling') {
-        const outcome = hub.postSignalingMessage(body)
+        const safePayload = sharedAuth.isAdmin
+          ? body
+          : { ...body, fromId: sharedAuth.authHostId }
+        const outcome = hub.postSignalingMessage(safePayload)
         return { status: outcome.ok ? 200 : 400, json: outcome }
       }
 
       const sigPullMatch = /^\/api\/v1\/signaling\/([^/]+)$/.exec(pathname)
       if (method === 'GET' && sigPullMatch) {
         const targetId = decodeURIComponent(sigPullMatch[1])
+        if (!sharedAuth.isAdmin && targetId !== sharedAuth.authHostId) {
+          return { status: 403, json: { ok: false, error: 'Forbidden: host can only read its own signaling mailbox' } }
+        }
         return { status: 200, json: hub.pullSignalingMessages(targetId) }
       }
 
       if ((method === 'GET' || method === 'POST') && pathname === '/api/v1/turn/credentials') {
-        return { status: 200, json: hub.getTurnCredentials(body) }
+        const ttlOverride = body && typeof body === 'object' && body.ttlSeconds !== undefined
+          ? { ttlSeconds: body.ttlSeconds }
+          : {}
+        return { status: 200, json: hub.getTurnCredentials(ttlOverride) }
       }
 
       // Self-hosted E2EE Conversation Share API (replaces go.dshtui.com/api/shares)
       if (method === 'POST' && pathname === '/api/shares') {
-        const share = hub.createShare(body)
+        const safeShareBody = sharedAuth.isAdmin
+          ? body
+          : { ...body, hostId: sharedAuth.authHostId }
+        const share = hub.createShare(safeShareBody)
         return { status: 200, json: { ok: true, share } }
       }
 
@@ -1842,7 +1991,10 @@ export function createHubServer({
       }
 
       if (method === 'POST' && pathname === '/api/snapshots') {
-        const snapshot = hub.addSnapshot(body)
+        const snapshot = hub.addSnapshot({
+          ...body,
+          authHostId: sharedAuth.isAdmin ? '' : sharedAuth.authHostId,
+        })
         return { status: 200, json: { ok: true, snapshot } }
       }
 
@@ -1851,6 +2003,15 @@ export function createHubServer({
         const snapshotId = decodeURIComponent(snapDownloadMatch[1])
         const snap = hub.getSnapshot(snapshotId)
         if (!snap) return { status: 404, json: { ok: false, error: 'Snapshot not found' } }
+        if (!sharedAuth.isAdmin) {
+          const isOwner = snap.meta?.hostId && snap.meta.hostId === sharedAuth.authHostId
+          const isMigrationTarget = [...(hub.migrations?.values?.() || [])].some(
+            job => job?.snapshotId === snapshotId && job?.targetHostId === sharedAuth.authHostId,
+          )
+          if (!isOwner && !isMigrationTarget) {
+            return { status: 403, json: { ok: false, error: 'Forbidden: snapshot belongs to another host' } }
+          }
+        }
         const buf = Buffer.from(snap.dataBase64, 'base64')
         return {
           status: 200,
@@ -1858,6 +2019,7 @@ export function createHubServer({
             'content-type': 'application/gzip',
             'content-length': String(buf.length),
             'content-disposition': `attachment; filename="${snapshotId}.dshsnap.gz"`,
+            'x-content-type-options': 'nosniff',
           },
           buffer: buf,
         }
@@ -1899,6 +2061,16 @@ export function createHubServer({
             const sseClientIp = resolveClientIp(req.headers, req.socket?.remoteAddress || '', {
               ...(trustProxy !== undefined ? { trustProxy } : {}),
             })
+            if (checkApiAuthRateLimited(sseClientIp)) {
+              await sendJson(
+                res,
+                429,
+                { ok: false, error: '请求失败次数过多，请 1 分钟后再试', rateLimited: true },
+                req.headers,
+              )
+              return
+            }
+            recordApiAuthFailure(sseClientIp)
             const isForgedHost = /^hst_/i.test(candidateToken)
             hub.recordSecurityEvent?.({
               kind: isForgedHost ? 'forged_host_token' : 'unauth_api_scan',
@@ -2209,7 +2381,23 @@ export function createHubServer({
         }
       }
       res.once('close', abortOnClientClose)
-      const body = req.method === 'POST' ? await readJsonBody(req) : {}
+      const routeMaxBodyBytes = getRouteMaxBodyBytes(urlObj.pathname)
+      let body = {}
+      if (req.method === 'POST') {
+        try {
+          body = await readJsonBody(req, routeMaxBodyBytes)
+        } catch (bodyErr) {
+          res.removeListener('close', abortOnClientClose)
+          const isTooLarge = /exceeds limit|too large/i.test(String(bodyErr?.message || ''))
+          await sendJson(
+            res,
+            isTooLarge ? 413 : 400,
+            { ok: false, error: isTooLarge ? 'Request body too large' : 'Invalid JSON request body' },
+            req.headers,
+          )
+          return
+        }
+      }
       const result = await dispatchRequest({
         method: req.method,
         url: req.url,
@@ -2221,6 +2409,7 @@ export function createHubServer({
       }).finally(() => {
         res.removeListener('close', abortOnClientClose)
       })
+      const baseSecHeaders = buildSecurityResponseHeaders(req.headers)
       if (result.json !== undefined) {
         await sendJson(res, result.status, result.json, req.headers)
       } else if (result.stream) {
@@ -2229,7 +2418,7 @@ export function createHubServer({
           result.onStreamDone?.()
           return
         }
-        res.writeHead(result.status, result.headers || {})
+        res.writeHead(result.status, { ...baseSecHeaders, ...(result.headers || {}) })
         try {
           if (typeof result.onCompleteBuffer === 'function') {
             const cacheTee = createImageCacheTransform(
@@ -2255,6 +2444,7 @@ export function createHubServer({
         const pre = result.precompressed
         if (pre.brBuf && /\bbr\b/i.test(acceptEncoding)) {
           res.writeHead(result.status, {
+            ...baseSecHeaders,
             ...(result.headers || {}),
             'content-encoding': 'br',
             'content-length': String(pre.brBuf.length),
@@ -2262,6 +2452,7 @@ export function createHubServer({
           res.end(isHead ? Buffer.alloc(0) : pre.brBuf)
         } else if (pre.gzBuf && /\bgzip\b/i.test(acceptEncoding)) {
           res.writeHead(result.status, {
+            ...baseSecHeaders,
             ...(result.headers || {}),
             'content-encoding': 'gzip',
             'content-length': String(pre.gzBuf.length),
@@ -2269,13 +2460,14 @@ export function createHubServer({
           res.end(isHead ? Buffer.alloc(0) : pre.gzBuf)
         } else {
           res.writeHead(result.status, {
+            ...baseSecHeaders,
             ...(result.headers || {}),
             'content-length': String(pre.rawBuf.length),
           })
           res.end(isHead ? Buffer.alloc(0) : pre.rawBuf)
         }
       } else if (result.buffer !== undefined) {
-        res.writeHead(result.status, result.headers || {})
+        res.writeHead(result.status, { ...baseSecHeaders, ...(result.headers || {}) })
         res.end(result.buffer)
       } else {
         const rawBody = String(result.body ?? '')
@@ -2284,6 +2476,7 @@ export function createHubServer({
           try {
             const gz = await gzipAsync(Buffer.from(rawBody, 'utf8'))
             res.writeHead(result.status, {
+              ...baseSecHeaders,
               ...(result.headers || {}),
               'content-encoding': 'gzip',
               'content-length': String(gz.length),
@@ -2294,13 +2487,20 @@ export function createHubServer({
             // fall back to uncompressed body
           }
         }
-        res.writeHead(result.status, result.headers || {})
+        res.writeHead(result.status, { ...baseSecHeaders, ...(result.headers || {}) })
         res.end(rawBody)
       }
     } catch (error) {
       logger?.warn?.(`dsh-hub error: ${error?.message ?? error}`)
       if (!res.headersSent) {
-        await sendJson(res, 500, { ok: false, error: error?.message ?? 'Internal server error' }, req.headers)
+        const isClientErr = error instanceof URIError || error?.code === 'ERR_INVALID_URL'
+        const status = isClientErr ? 400 : 500
+        const msg = isClientErr
+          ? 'Bad request'
+          : process.env.NODE_ENV === 'production'
+            ? 'Internal server error'
+            : (error?.message ?? 'Internal server error')
+        await sendJson(res, status, { ok: false, error: msg }, req.headers)
       } else {
         try {
           res.end()
@@ -2333,14 +2533,51 @@ export function createHubServer({
         } else {
           rawBuffer = Buffer.alloc(0)
         }
-      } else if (Buffer.isBuffer(init.body) || init.body instanceof Uint8Array) {
-        let rawBuf = Buffer.from(init.body)
-        if (rawBuf.length >= 2 && rawBuf[0] === 0x1f && rawBuf[1] === 0x8b) {
-          rawBuf = gunzipSync(rawBuf)
+      } else if (Buffer.isBuffer(init.body) || init.body instanceof Uint8Array || (typeof init.body === 'string' && init.body.length > 0)) {
+        const parsedUrl = new URL(urlStr, 'http://localhost')
+        const routeLimit = getRouteMaxBodyBytes(parsedUrl.pathname)
+        try {
+          let rawBuf = Buffer.isBuffer(init.body) || init.body instanceof Uint8Array
+            ? Buffer.from(init.body)
+            : Buffer.from(init.body, 'utf8')
+          if (rawBuf.length > routeLimit) {
+            return {
+              status: 413,
+              ok: false,
+              headers: new Headers(buildSecurityResponseHeaders(headers)),
+              async json() { return { ok: false, error: 'Payload too large' } },
+              async text() { return JSON.stringify({ ok: false, error: 'Payload too large' }) },
+              async arrayBuffer() { return new ArrayBuffer(0) },
+            }
+          }
+          if (rawBuf.length >= 2 && rawBuf[0] === 0x1f && rawBuf[1] === 0x8b) {
+            rawBuf = gunzipSync(rawBuf, { maxOutputLength: routeLimit })
+          }
+          const parsed = JSON.parse(rawBuf.toString('utf8'))
+          if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+            return {
+              status: 400,
+              ok: false,
+              headers: new Headers(buildSecurityResponseHeaders(headers)),
+              async json() { return { ok: false, error: 'Invalid JSON body' } },
+              async text() { return JSON.stringify({ ok: false, error: 'Invalid JSON body' }) },
+              async arrayBuffer() { return new ArrayBuffer(0) },
+            }
+          }
+          parsedBody = parsed
+        } catch (err) {
+          const isTooLarge = err?.code === 'ERR_BUFFER_TOO_LARGE' || /output length/i.test(String(err?.message || ''))
+          const status = isTooLarge ? 413 : 400
+          const msg = isTooLarge ? 'Payload too large' : 'Invalid JSON body'
+          return {
+            status,
+            ok: false,
+            headers: new Headers(buildSecurityResponseHeaders(headers)),
+            async json() { return { ok: false, error: msg } },
+            async text() { return JSON.stringify({ ok: false, error: msg }) },
+            async arrayBuffer() { return new ArrayBuffer(0) },
+          }
         }
-        parsedBody = JSON.parse(rawBuf.toString('utf8'))
-      } else if (typeof init.body === 'string' && init.body.length > 0) {
-        parsedBody = JSON.parse(init.body)
       } else if (init.body && typeof init.body === 'object') {
         parsedBody = init.body
       }
@@ -2379,7 +2616,7 @@ export function createHubServer({
       return {
         status: out.status,
         ok: out.status >= 200 && out.status < 300,
-        headers: new Headers(out.headers || {}),
+        headers: new Headers({ ...buildSecurityResponseHeaders(headers), ...(out.headers || {}) }),
         async json() {
           if (out.json !== undefined) return out.json
           return JSON.parse(out.body || '{}')
@@ -2445,9 +2682,14 @@ async function revalidateAppShell() {
     }
 
     if (allAssetsReady && nextAssets.length > 0) {
+      const shellHeaders = { 'content-type': 'text/html; charset=utf-8' };
+      for (const hk of ['x-content-type-options', 'x-frame-options', 'referrer-policy', 'content-security-policy', 'strict-transport-security']) {
+        const hv = freshRes.headers.get(hk);
+        if (hv) shellHeaders[hk] = hv;
+      }
       await cache.put('/', new Response(htmlText, {
         status: 200,
-        headers: { 'content-type': 'text/html; charset=utf-8' },
+        headers: shellHeaders,
       }));
       // Prune superseded hashed bundles (keep previous + current generation for open tabs)
       const keepSet = new Set([...prevAssets, ...nextAssets]);
@@ -2645,7 +2887,13 @@ self.addEventListener('notificationclick', event => {
     );
   }
   const data = event.notification.data || {};
-  const targetUrl = data.url || '/';
+  let targetUrl = '/';
+  try {
+    const parsedTarget = new URL(data.url || '/', self.location.origin);
+    if (parsedTarget.origin === self.location.origin) {
+      targetUrl = parsedTarget.href;
+    }
+  } catch {}
 
   event.waitUntil(
     Promise.all([
@@ -2676,7 +2924,11 @@ function renderShareReplayHtml(share) {
     createdAt: share.createdAt,
     ivBase64: share.ivBase64,
     ciphertextBase64: share.ciphertextBase64,
-  }).replace(/</g, '\\u003c')
+  })
+    .replace(/</g, '\\u003c')
+    .replace(/>/g, '\\u003e')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029')
 
   return `<!DOCTYPE html>
 <html lang="zh-CN">
@@ -2835,7 +3087,12 @@ function renderShareReplayHtml(share) {
     }
 
     function esc(s) {
-      return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      return String(s ?? '')
+        .replace(/&/g,'&amp;')
+        .replace(/</g,'&lt;')
+        .replace(/>/g,'&gt;')
+        .replace(/"/g,'&quot;')
+        .replace(/'/g,'&#39;');
     }
 
     async function decryptShare() {
@@ -2865,10 +3122,11 @@ function renderShareReplayHtml(share) {
     }
 
     function renderStep(m, idx) {
-      const roleLabel = m.role === 'user' ? '🧑 用户指令' : '🤖 DeepSeek Harness';
+      const safeRole = m && m.role === 'user' ? 'user' : 'assistant';
+      const roleLabel = safeRole === 'user' ? '🧑 用户指令' : '🤖 DeepSeek Harness';
       const tools = (m.tools || []).map(t => '<span class="tool-pill">🔧 ' + esc(t.name) + '</span>').join('');
       const thinking = m.thinking ? '<div class="thinking">💭 思考过程：' + esc(m.thinking) + '</div>' : '';
-      return '<div class="msg ' + esc(m.role) + '">' +
+      return '<div class="msg ' + safeRole + '">' +
         '<div class="role"><span>' + roleLabel + '</span><span>#' + (idx + 1) + '</span></div>' +
         '<pre>' + esc(m.text || '') + '</pre>' +
         thinking +
@@ -2903,13 +3161,28 @@ function renderShareReplayHtml(share) {
 </html>`
 }
 
+function buildSecurityResponseHeaders(reqHeaders = {}) {
+  const proto = String(reqHeaders?.['x-forwarded-proto'] ?? reqHeaders?.['X-Forwarded-Proto'] ?? '')
+    .split(',')[0]
+    .trim()
+    .toLowerCase()
+  return {
+    'x-content-type-options': 'nosniff',
+    'x-frame-options': 'DENY',
+    'referrer-policy': 'no-referrer',
+    ...(proto === 'https' ? { 'strict-transport-security': 'max-age=31536000; includeSubDomains' } : {}),
+  }
+}
+
 async function sendJson(res, status, data, reqHeaders = {}) {
   const payload = JSON.stringify(data)
+  const baseHeaders = buildSecurityResponseHeaders(reqHeaders)
   const acceptEncoding = String(reqHeaders?.['accept-encoding'] ?? reqHeaders?.['Accept-Encoding'] ?? '')
   if (payload.length > 1024 && /\bgzip\b/i.test(acceptEncoding)) {
     try {
       const gz = await gzipAsync(Buffer.from(payload, 'utf8'))
       res.writeHead(status, {
+        ...baseHeaders,
         'content-type': 'application/json; charset=utf-8',
         'content-encoding': 'gzip',
         'content-length': String(gz.length),
@@ -2922,6 +3195,7 @@ async function sendJson(res, status, data, reqHeaders = {}) {
     }
   }
   res.writeHead(status, {
+    ...baseHeaders,
     'content-type': 'application/json; charset=utf-8',
     'cache-control': 'no-store',
   })
@@ -2948,13 +3222,13 @@ function readRawBodyBuffer(req, maxBytes = MAX_BODY_BYTES) {
   })
 }
 
-function readJsonBody(req) {
+function readJsonBody(req, maxBytes = MAX_BODY_BYTES) {
   return new Promise((resolve, reject) => {
     const chunks = []
     let bytes = 0
     req.on('data', chunk => {
       bytes += chunk.length
-      if (bytes > MAX_BODY_BYTES) {
+      if (bytes > maxBytes) {
         reject(new Error('Request body exceeds limit'))
         req.destroy()
         return
@@ -2967,11 +3241,18 @@ function readJsonBody(req) {
         let rawBuf = Buffer.concat(chunks)
         const encoding = String(req.headers?.['content-encoding'] ?? req.headers?.['Content-Encoding'] ?? '').toLowerCase()
         if (encoding === 'gzip' || (rawBuf.length >= 2 && rawBuf[0] === 0x1f && rawBuf[1] === 0x8b)) {
-          rawBuf = gunzipSync(rawBuf)
+          rawBuf = gunzipSync(rawBuf, { maxOutputLength: maxBytes })
         }
         const text = rawBuf.toString('utf8')
-        resolve(JSON.parse(text))
-      } catch {
+        const parsed = JSON.parse(text)
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+          return reject(new Error('Invalid JSON body'))
+        }
+        resolve(parsed)
+      } catch (err) {
+        if (err?.code === 'ERR_BUFFER_TOO_LARGE' || /output length/i.test(String(err?.message || ''))) {
+          return reject(new Error('Request body exceeds limit'))
+        }
         reject(new Error('Invalid JSON body'))
       }
     })

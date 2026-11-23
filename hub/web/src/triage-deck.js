@@ -13,6 +13,20 @@ function esc(s) {
     .replace(/'/g, '&#39;');
 }
 
+function escJsStr(s) {
+  return String(s ?? '')
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'")
+    .replace(/"/g, '\\u0022')
+    .replace(/&/g, '\\u0026')
+    .replace(/</g, '\\u003c')
+    .replace(/>/g, '\\u003e')
+    .replace(/\r/g, '\\r')
+    .replace(/\n/g, '\\n')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029');
+}
+
 const REST_X = 5;
 const REST_Y = 2;
 const REST_SCALE = 0.984;
@@ -866,7 +880,7 @@ export function createTriageDeckController(deps) {
           <div class="dsh-triage-hdr-info">
             <div class="dsh-triage-title-row">
               <div class="dsh-triage-title">${esc(vm.title)}</div>
-              <button type="button" class="dsh-triage-open-chat" onclick="event.stopPropagation(); triageOpenFullSession('${esc(vm.sessionId)}')">${en ? 'Chat ›' : '对话 ›'}</button>
+              <button type="button" class="dsh-triage-open-chat" onclick="event.stopPropagation(); triageOpenFullSession('${escJsStr(vm.sessionId)}')">${en ? 'Chat ›' : '对话 ›'}</button>
             </div>
             <div class="dsh-triage-sub">
               <span>${esc(vm.sub)}</span>
@@ -1268,7 +1282,7 @@ export function createTriageDeckController(deps) {
     const imgsHtml = vm.promptInfo.mediaPaths.map(p => {
       const enc = encodeURIComponent(p).replace(/'/g, '%27');
       const fullSrc = buildLocalThumbSrc(vm.hostId, p);
-      return `<div style="margin-top:10px;" onclick="closeTriageDetailModal(); triageInspectSessionFile('${esc(vm.sessionId)}', '${enc}')">
+      return `<div style="margin-top:10px;" onclick="closeTriageDetailModal(); triageInspectSessionFile('${escJsStr(vm.sessionId)}', '${enc}')">
         <img src="${esc(fullSrc)}" alt="${en ? 'Prompt Image' : '提问原图'}" style="max-width:100%;max-height:48vh;border-radius:12px;border:1px solid #cbd5e1;cursor:pointer;" />
         <div style="font-size:11.5px;color:#2563eb;font-weight:700;margin-top:4px;">${en ? '🔍 Tap to open full-res image viewer' : '🔍 点击打开高清原图预览器'}</div>
       </div>`;
@@ -1297,7 +1311,7 @@ export function createTriageDeckController(deps) {
       ? `<div style="margin-top:12px;padding:9px 12px;border-radius:10px;background:#f8fafc;color:#64748b;font-size:12px;text-align:center;">${en ? '⏳ Fetching full untruncated reply…' : '⏳ 正在从云端拉取完整未截断全文…'}</div>`
       : '';
     const jumpChatBtn = `<div style="margin-top:14px;padding-top:12px;border-top:1px solid #f1f5f9;display:flex;justify-content:center;">
-      <button type="button" class="dsh-triage-open-chat" style="padding:7px 14px;font-size:12.5px;" onclick="closeTriageDetailModal(); triageOpenFullSession('${esc(vm.sessionId)}')">${en ? '💬 Open Full Conversation ›' : '💬 进入完整对话上下文 ›'}</button>
+      <button type="button" class="dsh-triage-open-chat" style="padding:7px 14px;font-size:12.5px;" onclick="closeTriageDetailModal(); triageOpenFullSession('${escJsStr(vm.sessionId)}')">${en ? '💬 Open Full Conversation ›' : '💬 进入完整对话上下文 ›'}</button>
     </div>`;
     return `${toolbarHtml}<div class="md-body" style="font-size:14px;line-height:1.68;padding:2px 2px 6px;color:#0f172a;">${renderedMd}</div>${loadingHint}${jumpChatBtn}`;
   }
@@ -1972,7 +1986,7 @@ export function createTriageDeckController(deps) {
         const bodyHtml = `<div style="display:flex;flex-direction:column;gap:7px;">
           ${vm.diffInfo.files.map(f => {
           const enc = encodeURIComponent(f.path || f.name).replace(/'/g, '%27');
-          return `<div class="dsh-triage-file-row" onclick="closeTriageDetailModal(); triageInspectSessionFile('${esc(vm.sessionId)}', '${enc}')">
+          return `<div class="dsh-triage-file-row" onclick="closeTriageDetailModal(); triageInspectSessionFile('${escJsStr(vm.sessionId)}', '${enc}')">
               <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700;">${esc(f.name)}</span>
               <span style="flex-shrink:0;">
                 ${vm.diffInfo.hasLineCounts ? `<b style="color:#16a34a">+${f.added}</b> <b style="color:#dc2626">-${f.removed}</b>` : ''}

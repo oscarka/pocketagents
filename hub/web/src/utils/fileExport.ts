@@ -260,20 +260,64 @@ export function stripMarkdownToPlainText(markdown: string): string {
     .trim();
 }
 
+function isSafeExportUrl(rawUrl: string): boolean {
+  const clean = String(rawUrl || '').replace(/[\u0000-\u0020]+/g, '').trim();
+  if (!clean) return false;
+  if (clean.startsWith('#')) return true;
+  if (/^(?:https?:|mailto:)/i.test(clean)) return true;
+  if (/^data:image\/(?:png|jpeg|jpg|gif|webp|avif);base64,[a-z0-9+/=]+$/i.test(clean)) return true;
+  return false;
+}
+
 /**
- * Strip PocketAgents-specific interactive inline handlers so exported standalone HTML
- * opens cleanly offline in Safari, Chrome, and WeChat without missing global function errors.
+ * Strip PocketAgents-specific interactive inline handlers and active content so exported
+ * standalone HTML opens safely offline in Safari, Chrome, and WeChat with zero script execution.
  */
 export function sanitizeExportedBodyHtml(renderedHtml: string): string {
-  let html = String(renderedHtml || '');
-  // Remove any script tags defensively
-  html = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
-  // Strip inline event handlers (onclick="...", onerror="...", onload="...")
-  html = html.replace(/\s+on[a-z]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '');
-  // Replace javascript: hrefs
-  html = html.replace(/href\s*=\s*(["'])\s*javascript:[^"']*\1/gi, 'href="#"');
-  // Remove PocketAgents inline copy buttons inside code blocks so exported doc stays clean
-  html = html.replace(/<button\b[^>]*class="[^"]*\bmd-code-copy\b[^"]*"[^>]*>[\s\S]*?<\/button>/gi, '');
+  const input = String(renderedHtml || '');
+
+  // Prefer real DOM-based sanitization in browser environments (prevents regex mutation/parser-differential bypasses)
+  if (typeof DOMParser === 'function') {
+    try {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(`<!doctype html><html><body>${input}</body></html>`, 'text/html');
+      const blockedSelector =
+        'script, iframe, object, embed, applet, frame, frameset, form, input, textarea, select, base, meta, link, style, template, button.md-code-copy, button.code-copy-btn, button.html-preview-btn';
+      doc.body.querySelectorAll(blockedSelector).forEach(el => el.remove());
+
+      doc.body.querySelectorAll('*').forEach(el => {
+        for (const attr of Array.from(el.attributes)) {
+          const name = attr.name.toLowerCase();
+          if (name.startsWith('on') || name === 'srcdoc' || name === 'formaction') {
+            el.removeAttribute(attr.name);
+            continue;
+          }
+          if (name === 'href' || name === 'src' || name === 'xlink:href' || name === 'action') {
+            if (!isSafeExportUrl(attr.value)) {
+              if (name === 'href') el.setAttribute('href', '#');
+              else el.removeAttribute(attr.name);
+            }
+          }
+        }
+      });
+      return doc.body.innerHTML;
+    } catch {
+      // fall through to regex defense below
+    }
+  }
+
+  let html = input;
+  // Loop defensively so nested constructs like `<scr<script>ipt>` cannot survive a single pass
+  for (let pass = 0; pass < 3; pass += 1) {
+    const prev = html;
+    html = html.replace(/<(script|iframe|object|embed|applet|base|meta|link|style|form|template)\b[^>]*>[\s\S]*?<\/\1>/gi, '');
+    html = html.replace(/<(script|iframe|object|embed|applet|base|meta|link|input)\b[^>]*\/?>/gi, '');
+    html = html.replace(/<button\b[^>]*class="[^"]*\b(?:md-code-copy|code-copy-btn|html-preview-btn)\b[^"]*"[^>]*>[\s\S]*?<\/button>/gi, '');
+    html = html.replace(/\s+on[a-z0-9_-]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '');
+    html = html.replace(/\s+srcdoc\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '');
+    html = html.replace(/\b(href|src|xlink:href)\s*=\s*(["'])\s*(?:javascript|vbscript|data:text\/html)[^"']*\2/gi, '$1="#"');
+    if (html === prev) break;
+  }
   return html;
 }
 
@@ -310,6 +354,7 @@ export function buildStandaloneMarkdownHtml({
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src https: data:; media-src https: data:; font-src data:;" />
   <title>${safeTitle}</title>
   <style>
     :root {

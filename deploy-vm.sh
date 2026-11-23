@@ -33,6 +33,15 @@ if [[ -z "${VM_INSTANCE}" && -z "${SSH_TARGET}" ]]; then
   exit 1
 fi
 
+if [[ ! "${REMOTE_DIR}" =~ ^/[A-Za-z0-9._/-]+$ ]] || [[ "${REMOTE_DIR}" == *".."* ]]; then
+  echo "❌ 非法的 REMOTE_DIR: ${REMOTE_DIR}"
+  exit 1
+fi
+if [[ ! "${SERVICE_NAME}" =~ ^[A-Za-z0-9._-]+$ ]]; then
+  echo "❌ 非法的 SERVICE_NAME: ${SERVICE_NAME}"
+  exit 1
+fi
+
 echo "=== 1. 构建前端静态包 ==="
 npm run build
 
@@ -42,6 +51,7 @@ if [[ "${SKIP_TESTS}" != "1" ]]; then
 fi
 
 TMP_TAR="$(mktemp /tmp/dsh-hub-deploy-XXXXXX.tar.gz)"
+REMOTE_TAR="/tmp/dsh-hub-deploy-$(openssl rand -hex 8 2>/dev/null || date +%s)-$$.tar.gz"
 trap 'rm -f "${TMP_TAR}"' EXIT
 
 COPYFILE_DISABLE=1 tar --no-xattrs --exclude='.DS_Store' -czf "${TMP_TAR}" \
@@ -49,10 +59,11 @@ COPYFILE_DISABLE=1 tar --no-xattrs --exclude='.DS_Store' -czf "${TMP_TAR}" \
   hub/*.js hub/public
 
 REMOTE_CMD="sudo mkdir -p '${REMOTE_DIR}' && \
-sudo find '${REMOTE_DIR}/hub/public/assets' -type f -mtime +7 -delete 2>/dev/null || true && \
-sudo tar --warning=no-unknown-keyword -xzf /tmp/dsh-hub-deploy.tar.gz -C '${REMOTE_DIR}' && \
-sudo chown -R ${SERVICE_NAME}:${SERVICE_NAME} '${REMOTE_DIR}' 2>/dev/null || true && \
-sudo rm -f /tmp/dsh-hub-deploy.tar.gz && \
+{ sudo find '${REMOTE_DIR}/hub/public/assets' -type f -mtime +7 -delete 2>/dev/null || true; } && \
+sudo tar --no-same-owner --no-same-permissions --warning=no-unknown-keyword -xzf '${REMOTE_TAR}' -C '${REMOTE_DIR}' && \
+sudo chown -R root:root '${REMOTE_DIR}' && \
+sudo chmod -R a+rX,go-w '${REMOTE_DIR}' && \
+sudo rm -f '${REMOTE_TAR}' && \
 sudo systemctl restart '${SERVICE_NAME}' && \
 sleep 3 && \
 curl -fsS http://127.0.0.1:8080/api/health"
@@ -69,11 +80,11 @@ if [[ -n "${VM_INSTANCE}" ]]; then
     GCLOUD_PROJ_ARGS=(--project "${GCP_PROJECT_ID}")
   fi
   echo "=== 3. 上传并热更新 GCE 虚拟机 ${VM_INSTANCE} (${VM_ZONE}) ==="
-  gcloud compute scp "${GCLOUD_PROJ_ARGS[@]}" --zone "${VM_ZONE}" "${TMP_TAR}" "${VM_INSTANCE}:/tmp/dsh-hub-deploy.tar.gz"
+  gcloud compute scp "${GCLOUD_PROJ_ARGS[@]}" --zone "${VM_ZONE}" "${TMP_TAR}" "${VM_INSTANCE}:${REMOTE_TAR}"
   gcloud compute ssh "${GCLOUD_PROJ_ARGS[@]}" --zone "${VM_ZONE}" "${VM_INSTANCE}" --command "${REMOTE_CMD}"
 else
   echo "=== 3. 上传并热更新 VPS ${SSH_TARGET} ==="
-  scp "${TMP_TAR}" "${SSH_TARGET}:/tmp/dsh-hub-deploy.tar.gz"
+  scp "${TMP_TAR}" "${SSH_TARGET}:${REMOTE_TAR}"
   ssh "${SSH_TARGET}" "${REMOTE_CMD}"
 fi
 

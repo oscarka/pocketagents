@@ -6,6 +6,7 @@
 
 import { randomBytes } from 'node:crypto'
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -18,6 +19,44 @@ import {
 import { homedir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { redactText } from './redact.js'
+
+const UNSAFE_BASH_WILDCARD_FIRST_TOKENS = new Set([
+  'sh', 'bash', 'zsh', 'dash', 'fish', 'csh', 'tcsh', 'ksh',
+  'python', 'python3', 'node', 'deno', 'bun', 'ruby', 'perl', 'php', 'lua',
+  'awk', 'sed', 'env', 'sudo', 'su', 'doas', 'cd', 'eval', 'exec',
+  'xargs', 'find', 'curl', 'wget', 'ssh', 'scp', 'rsync',
+  'chmod', 'chown', 'rm', 'dd', 'mkfs', 'nc', 'ncat', 'socat',
+])
+
+const UNSAFE_BASH_WILDCARD_PREFIXES = new Set([
+  'git push', 'git reset', 'git clean', 'npm publish', 'docker run', 'docker exec',
+])
+
+function isSafeBashWildcardCandidate(command = '', ruleHint = '') {
+  const cmd = String(command || '').trim()
+  const hint = String(ruleHint || '').trim()
+  if (!cmd || !hint || hint === 'Bash') return false
+  // Refuse wildcarding compound/chained/redirection/subshell commands
+  if (/[;&|`$<>()\r\n]/.test(cmd) || /[;&|`$<>()\r\n]/.test(hint)) return false
+  const tokens = hint.toLowerCase().split(/\s+/).filter(Boolean)
+  if (tokens.length === 0) return false
+  const firstBin = basename(tokens[0])
+  if (UNSAFE_BASH_WILDCARD_FIRST_TOKENS.has(firstBin)) return false
+  if (tokens.length >= 2 && UNSAFE_BASH_WILDCARD_PREFIXES.has(`${firstBin} ${tokens[1]}`)) {
+    return false
+  }
+  return true
+}
+
+function ensurePrivateDir(dirPath) {
+  mkdirSync(dirPath, { recursive: true, mode: 0o700 })
+  try {
+    chmodSync(dirPath, 0o700)
+  } catch {
+    // ignore on platforms/filesystems without POSIX chmod
+  }
+}
 
 export const CLAUDE_APPROVAL_DIR_NAME = '.dsh-remote-approvals'
 export const CLAUDE_HOOK_MARKER = 'claude-permission-hook.js'
@@ -48,9 +87,9 @@ export function touchClaudeWatcherHeartbeat({
   if (!claudeHome || !existsSync(claudeHome)) return false
   try {
     const dir = getClaudeApprovalDir(claudeHome)
-    mkdirSync(dir, { recursive: true, mode: 0o700 })
+    ensurePrivateDir(dir)
     const targetPath = join(dir, CLAUDE_WATCHER_HEARTBEAT_FILE)
-    const tmpPath = `${targetPath}.tmp-${pid}`
+    const tmpPath = `${targetPath}.tmp-${pid}-${randomBytes(6).toString('hex')}`
     writeFileSync(tmpPath, JSON.stringify({ pid, updatedAt: now }) + '\n', { mode: 0o600 })
     renameSync(tmpPath, targetPath)
     return true
@@ -128,11 +167,15 @@ export function buildClaudeApprovalDescriptor(hookInput = {}, { code = generateC
   let promptTitle = ''
   let ruleHint = toolName
 
+  let safeToolInput = {}
   if (toolName === 'Bash') {
-    commandLine = String(toolInput.command || '').trim()
-    reason = String(toolInput.description || '').trim() || `Claude Code requests Bash: ${commandLine.slice(0, 120)}`
-    const prefix = summarizeBashPrefix(commandLine)
+    commandLine = redactText(String(toolInput.command || '').trim())
+    reason = redactText(
+      String(toolInput.description || '').trim() || `Claude Code requests Bash: ${commandLine.slice(0, 120)}`,
+    )
+    const prefix = summarizeBashPrefix(String(toolInput.command || '').trim())
     if (prefix) ruleHint = prefix
+    safeToolInput = { command: commandLine.slice(0, 500) }
   } else if (toolName === 'AskUserQuestion' && Array.isArray(toolInput.questions) && toolInput.questions.length > 0) {
     kind = 'question'
     promptTitle = 'Claude Code 需要你做出选择'
@@ -147,9 +190,13 @@ export function buildClaudeApprovalDescriptor(hookInput = {}, { code = generateC
       })),
     }))
     reason = questions[0]?.question || promptTitle
+    // Keep questions structure for updatedInput answers pass-through
+    safeToolInput = { questions: toolInput.questions }
   } else if (toolName === 'ExitPlanMode') {
     commandLine = 'ExitPlanMode (Approve implementation plan)'
-    reason = String(toolInput.plan || toolInput.summary || 'Claude Code is ready to start executing the plan').slice(0, 300)
+    reason = redactText(
+      String(toolInput.plan || toolInput.summary || 'Claude Code is ready to start executing the plan').slice(0, 300),
+    )
     ruleHint = 'ExitPlanMode'
   } else if (toolName === 'Edit' || toolName === 'Write' || toolName === 'MultiEdit' || toolName === 'NotebookEdit') {
     const target = String(toolInput.file_path || toolInput.path || toolInput.notebook_path || '').trim()
@@ -157,19 +204,26 @@ export function buildClaudeApprovalDescriptor(hookInput = {}, { code = generateC
     commandLine = `${toolName}: ${shortTarget}`
     reason = `Claude Code wants to modify ${shortTarget}`
     ruleHint = toolName
+    // Never persist full file bodies (`content`, `new_string`, `old_string`) into disk approval descriptors
+    safeToolInput = target ? { file_path: target } : {}
   } else {
-    const compactArgs = JSON.stringify(toolInput).slice(0, 140)
+    const compactArgs = redactText(JSON.stringify(toolInput).slice(0, 140))
     commandLine = `${toolName}${compactArgs && compactArgs !== '{}' ? ` ${compactArgs}` : ''}`
     reason = `Claude Code requests permission for ${toolName}`
   }
 
+  const allowWildcard =
+    toolName !== 'Bash' || isSafeBashWildcardCandidate(String(toolInput.command || ''), ruleHint)
+
   const options =
     kind === 'question'
       ? undefined
-      : [
-          { index: 1, label: '1. 本次允许执行' },
-          { index: 2, label: `2. 本对话内始终允许 '${ruleHint}'` },
-        ]
+      : allowWildcard
+        ? [
+            { index: 1, label: '1. 本次允许执行' },
+            { index: 2, label: `2. 本对话内始终允许 '${ruleHint}'` },
+          ]
+        : [{ index: 1, label: '1. 本次允许执行' }]
 
   return {
     code,
@@ -181,7 +235,7 @@ export function buildClaudeApprovalDescriptor(hookInput = {}, { code = generateC
     title: promptTitle || (toolName === 'Bash' ? `Bash: ${commandLine.slice(0, 48)}` : `${toolName} (${project})`),
     kind,
     toolName,
-    toolInput,
+    toolInput: safeToolInput,
     command: commandLine,
     commandLine,
     reason,
@@ -189,6 +243,7 @@ export function buildClaudeApprovalDescriptor(hookInput = {}, { code = generateC
     ...(questions ? { questions } : {}),
     ...(options ? { options } : {}),
     ruleHint,
+    allowWildcard,
     permissionSuggestions: suggestions,
     createdAt: now,
     pid,
@@ -228,18 +283,30 @@ export function buildClaudeHookDecisionOutput(descriptor = {}, decision = {}) {
     if (Array.isArray(descriptor.permissionSuggestions) && descriptor.permissionSuggestions.length > 0) {
       outDecision.updatedPermissions = descriptor.permissionSuggestions
     } else if (descriptor.toolName) {
-      const rule = { toolName: descriptor.toolName }
-      if (descriptor.toolName === 'Bash' && descriptor.ruleHint && descriptor.ruleHint !== 'Bash') {
-        rule.ruleContent = `${descriptor.ruleHint}:*`
+      if (descriptor.toolName === 'Bash') {
+        const safeWildcard =
+          descriptor.allowWildcard !== false &&
+          isSafeBashWildcardCandidate(descriptor.commandLine || descriptor.command || '', descriptor.ruleHint || '')
+        if (safeWildcard) {
+          outDecision.updatedPermissions = [
+            {
+              type: 'addRules',
+              rules: [{ toolName: 'Bash', ruleContent: `${descriptor.ruleHint}:*` }],
+              behavior: 'allow',
+              destination: 'session',
+            },
+          ]
+        }
+      } else {
+        outDecision.updatedPermissions = [
+          {
+            type: 'addRules',
+            rules: [{ toolName: descriptor.toolName }],
+            behavior: 'allow',
+            destination: 'session',
+          },
+        ]
       }
-      outDecision.updatedPermissions = [
-        {
-          type: 'addRules',
-          rules: [rule],
-          behavior: 'allow',
-          destination: 'session',
-        },
-      ]
     }
   }
 
@@ -252,8 +319,8 @@ export function buildClaudeHookDecisionOutput(descriptor = {}, decision = {}) {
 }
 
 export function buildClaudeHookCommand(hookScriptPath = fileURLToPath(import.meta.url)) {
-  const escapedScript = String(hookScriptPath).replace(/"/g, '\\"')
-  return `node "${escapedScript}"`
+  const escapedScript = String(hookScriptPath).replace(/'/g, "'\\''")
+  return `node '${escapedScript}'`
 }
 
 export function isClaudePermissionHookInstalled({ claudeHome = join(homedir(), '.claude') } = {}) {
@@ -318,10 +385,10 @@ export function installClaudePermissionHook({
   hooks.PermissionRequest = filtered
   settings.hooks = hooks
 
-  const tmpPath = `${settingsPath}.tmp-${process.pid}-${Date.now()}`
+  const tmpPath = `${settingsPath}.tmp-${process.pid}-${randomBytes(6).toString('hex')}`
   writeFileSync(tmpPath, JSON.stringify(settings, null, 2) + '\n', { mode: 0o600 })
   renameSync(tmpPath, settingsPath)
-  mkdirSync(getClaudeApprovalDir(claudeHome), { recursive: true, mode: 0o700 })
+  ensurePrivateDir(getClaudeApprovalDir(claudeHome))
 
   return { ok: true, settingsPath, command }
 }
@@ -357,7 +424,7 @@ export function uninstallClaudePermissionHook({ claudeHome = join(homedir(), '.c
     settings.hooks.PermissionRequest = next
   }
 
-  const tmpPath = `${settingsPath}.tmp-${process.pid}-${Date.now()}`
+  const tmpPath = `${settingsPath}.tmp-${process.pid}-${randomBytes(6).toString('hex')}`
   writeFileSync(tmpPath, JSON.stringify(settings, null, 2) + '\n', { mode: 0o600 })
   renameSync(tmpPath, settingsPath)
   return { ok: true, removed: true, settingsPath }
@@ -403,12 +470,12 @@ export async function runClaudePermissionHookProcess({
   }
 
   const dir = getClaudeApprovalDir(claudeHome)
-  mkdirSync(dir, { recursive: true, mode: 0o700 })
+  ensurePrivateDir(dir)
 
   const descriptor = buildClaudeApprovalDescriptor(hookInput)
   const reqPath = join(dir, `req-${descriptor.code}.json`)
   const resPath = join(dir, `res-${descriptor.code}.json`)
-  const reqTmp = `${reqPath}.tmp-${process.pid}`
+  const reqTmp = `${reqPath}.tmp-${process.pid}-${randomBytes(6).toString('hex')}`
   writeFileSync(reqTmp, JSON.stringify(descriptor, null, 2), { mode: 0o600 })
   renameSync(reqTmp, reqPath)
 
@@ -471,10 +538,16 @@ export async function runClaudePermissionHookProcess({
   })
 }
 
-async function readStdinAll() {
+async function readStdinAll(maxBytes = 1024 * 1024) {
   const chunks = []
+  let total = 0
   for await (const chunk of process.stdin) {
-    chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk)
+    const buf = typeof chunk === 'string' ? Buffer.from(chunk) : chunk
+    total += buf.length
+    if (total > maxBytes) {
+      return ''
+    }
+    chunks.push(buf)
   }
   return Buffer.concat(chunks).toString('utf8')
 }

@@ -2,6 +2,31 @@
 
 本项目的重要变更都记录在这里。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [0.9.11] - 2026-11-23
+
+### Added & Fixed
+
+- **Antigravity IDE 子智能体审批弹窗自动冒泡与手机端直达批准（`dsh-feishu/lib/antigravity-ide.js` / `hub/web/src/controller.js`）**：
+  - 修复父会话处于 `IDLE`、但后台浏览器/研究子智能体（如 `Tripo Studio 3D Generator` 文件上传或权限确认）卡在 `WAITING_FOR_USER` 时，子会话被折叠跳过导致手机端漏推审批弹窗的问题；
+  - 扫描 `GetAllCascadeTrajectories` 时预先按 `parentConversationId` / `rootConversationId` 聚合所有被阻塞的子智能体 `waitingSteps`，精准保留子智能体 `⏳ 等待授权` 状态，并将其 2 选项（如浏览器上传确认）或 4 选项弹窗自动冒泡至父会话的 `pendingApproval` 与锁屏推送；
+  - 手机端点击 `Submit` / `Skip` / 滑卡批阅时，自动根据 `targetConversationId` / `subagentConversationId`（及实时子会话兜底扫描）将 `HandleCascadeUserInteraction` 精准路由到被阻塞的子智能体 `cascadeId`，并支持 2 选项弹窗的动态拒绝索引识别。
+
+### Security (Round-2 Deep Defensive Hardening)
+
+- **Hub 零信任认证、签名绑定与跨主机隔离（`hub/hub-core.js` / `hub/server.js`）**：
+  - `POST /api/heartbeat` 在开启「手机审批接入保护」时彻底封堵裸 `HUB_TOKEN`（返回 `403 DEVICE_APPROVAL_REQUIRED`）并移除不受信任的 `pushSubscriptionsBackup` 心跳注入通道；
+  - 将持久化的 `mediaSeed`（及可选 `HUB_SIGNING_SECRET`）混入 `mediaTicket` 与零信任 `hst_` 主机令牌签名密钥，杜绝仅凭泄露的 `HUB_TOKEN` 离线伪造票据或主机令牌，同时限制 `mediaTicket` 最大有效期 `<= 4h`；
+  - 新增 `revokedHostTokens` 墓碑集防止已删除主机令牌复活，封堵已有活跃主机的配对码越权接管（`409`），强制 `pending_approval` 主机不可激活/拉取指令/文件隧道，严格按认证 `authHostId` 隔离全部跨主机共享接口（快照下载、激活、信令、分享、TURN），并收紧 `/fs/rtc-offer` 仅允许管理员鉴权；
+  - 新增全局 `/api/*` 鉴权失败限流、Web Push 订阅地址 SSRF 校验、全站安全响应头（`X-Content-Type-Options: nosniff` / `X-Frame-Options: DENY` / `Referrer-Policy: no-referrer` / HSTS）、按路由分级 JSON 与解压后体积上限（防预认证 gzip 炸弹）、`/share/:id` 存储型 XSS 转义与 CSP、以及 `/fs/stream` 内联 HTML 降级与 `CSP: sandbox`。
+- **宿主机守护进程、CLI 适配器与凭证脱敏加固（`dsh-feishu/lib/**` / `dsh-turbo/index.js` / `connect-host.sh`）**：
+  - 消除 `antigravity-ide.js` 剪贴板 `sh -c` 命令拼接（改为无 shell `spawn('pbcopy')`），对所有 CLI 适配器统一做参数/模型/会话 ID 校验与敏感环境变量清洗；
+  - 修复 `deleteAgentSession('..')` 目录遍历风险、macOS `/System/Volumes/Data` Firmlink 与 `Range:` 请求头绕过脱敏问题、`.dsh/` 与 AI 凭证目录屏蔽，以及 `redact.js` 环境变量前缀与 AWS/JWT/OAuth 脱敏补盲；
+  - 强化 `migration.js` 便携快照白名单（阻断覆盖 `remotecontrol/` 代码与误带 `.credentials.yaml`）、`webrtc-p2p.js` DTLS 证书 SHA-256 指纹核验与 `cwd` 锁定、`claude-permission-hook.js` 单引号转义与高危解释器禁止 `:*` 通配放行、`local-hub.js` 端口复用身份预检、`dsh-turbo` 移除 SSE URL 明文 Token，以及 `connect-host.sh` 安全 JSON 构造与禁止 `curl | bash` 自动复用 `$PWD`。
+- **语音总管、前端 XSS / 沙箱与部署 CI 加固（`hub/voice-vault.js` / `hub/voice-copilot.js` / `hub/web/src/**` / `deploy-vm.sh` / `Dockerfile` / `.github/workflows/**`）**：
+  - `voice-vault.js` 升级 IPv4/IPv6（含 `::ffff:169.254.169.254`、NAT64、CGNAT、Link-Local、DNS 解析）SSRF 防护；`voice-copilot.js` 修复 `answer_question` 绕过 L2 护栏、补齐 `commandLine` 高危识别、实现 3 次 PIN 失败持久化锁定，并将 Gemini Key 移出 URL 查询串改为请求头；
+  - 前端新增 `escJsStr` / `escUriJsStr` / `safeExternalHref` 全面加固内联事件与外链渲染、修复文件预览「复制」按钮潜在 JS 截断、`#dshPrintExportFrame` 禁用脚本沙箱、HTML 交互预览注入 `connect-src 'none'; form-action 'none'` CSP 且禁止聊天代码片段注入 `mediaTicket`、独立导出 HTML 升级 DOM 白名单清洗；
+  - `deploy-vm.sh` 改为随机远端临时包与只读 `root:root` 代码目录，`Dockerfile` / `docker-compose.yml` 强化只读根文件系统与权限最小化，`publish-npm.yml` / `docker-publish.yml` 拆离构建与 OIDC 发布最小权限。
+
 ## [0.9.10] - 2026-11-23
 
 ### Security & Added

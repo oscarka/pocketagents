@@ -7,6 +7,42 @@ export function esc(str: unknown): string {
     .replace(/'/g, '&#39;');
 }
 
+/**
+ * Safely encode a value for interpolation inside a single-quoted JS string literal
+ * placed inside a double-quoted HTML event attribute (`onclick="fn('${escJsStr(x)}')"`).
+ * Contains no `"`, `'`, or `&`, so neither HTML attribute parsing nor JS string parsing can be broken.
+ */
+export function escJsStr(str: unknown): string {
+  return String(str ?? '')
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'")
+    .replace(/"/g, '\\u0022')
+    .replace(/&/g, '\\u0026')
+    .replace(/</g, '\\u003c')
+    .replace(/>/g, '\\u003e')
+    .replace(/\r/g, '\\r')
+    .replace(/\n/g, '\\n')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029');
+}
+
+/**
+ * Safely encode a value for `encodeURIComponent(...)` placed inside a single-quoted JS string
+ * inside an HTML attribute (escapes `'` as `%27` because RFC 3986 leaves `'` unescaped).
+ */
+export function escUriJsStr(str: unknown): string {
+  return encodeURIComponent(String(str ?? '')).replace(/'/g, '%27');
+}
+
+/**
+ * Validate external link hrefs so only http:// or https:// URLs are rendered in `<a href>`.
+ */
+export function safeExternalHref(url: unknown): string {
+  const trimmed = String(url ?? '').trim();
+  if (!/^https?:\/\//i.test(trimmed)) return '';
+  return trimmed;
+}
+
 // 清洗列表第二行摘要中的原始 Markdown 符号（**、##、`、[链接]），让摘要像原生 App 一样干净
 export function cleanPreviewText(raw: unknown): string {
   return String(raw || '')

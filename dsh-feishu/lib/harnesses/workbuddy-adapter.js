@@ -22,6 +22,42 @@ export function toRawWorkBuddyId(sessionId = '') {
     : value
 }
 
+function isSafeWorkBuddyId(rawId = '') {
+  const s = String(rawId || '').trim()
+  if (!s || s.length > 128) return false
+  if (s.includes('..') || s.includes('/') || s.includes('\\') || s.includes('\0')) return false
+  return /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$/.test(s)
+}
+
+function buildCleanWorkBuddyEnv() {
+  const env = { ...process.env }
+  for (const key of Object.keys(env)) {
+    if (
+      key.startsWith('FEISHU_') ||
+      key === 'HUB_TOKEN' ||
+      key === 'HUB_SIGNING_SECRET' ||
+      key === 'DSH_HUB_TOKEN' ||
+      key === 'VOICE_VAULT_SECRET' ||
+      key.startsWith('VAPID_') ||
+      key === 'TURN_SECRET'
+    ) {
+      delete env[key]
+    }
+  }
+  return env
+}
+
+function isOwnedNonSymlink(targetPath) {
+  try {
+    const st = fs.lstatSync(targetPath)
+    if (st.isSymbolicLink()) return false
+    if (typeof process.getuid === 'function' && st.uid !== process.getuid()) return false
+    return true
+  } catch {
+    return false
+  }
+}
+
 export function isWorkBuddyProcessHeartbeatRecord(rawId = '', parsed = null) {
   const cleanId = String(rawId || '').trim()
   const events = Array.isArray(parsed) ? parsed : (parsed?.events || parsed?.data?.events)
@@ -96,29 +132,38 @@ export function getWorkBuddySidecarSocketPath(workbuddyHome = getWorkBuddyHome()
   const dirHash = crypto.createHash('sha1').update(path.resolve(workbuddyHome)).digest('hex').slice(0, 12)
   const exactPath = path.join(os.tmpdir(), `wb-${userHash}`, dirHash, 'sidecar.sock')
   try {
-    if (fs.existsSync(exactPath)) return exactPath
+    if (fs.existsSync(exactPath) && isOwnedNonSymlink(exactPath)) return exactPath
     for (const rootTmp of new Set([os.tmpdir(), '/tmp'])) {
       if (!fs.existsSync(rootTmp)) continue
-      const wbDirs = fs.readdirSync(rootTmp).filter(name => name.startsWith(`wb-${userHash}`) || name.startsWith('wb-'))
+      // Only scan the current user's wb-<userHash> directory (never other local users' /tmp/wb-* dirs)
+      const wbDirs = fs.readdirSync(rootTmp).filter(name => name === `wb-${userHash}`)
       for (const wbDir of wbDirs) {
         const wbFull = path.join(rootTmp, wbDir)
+        if (!isOwnedNonSymlink(wbFull)) continue
         const subDirs = fs.readdirSync(wbFull)
         for (const sub of subDirs) {
           const subFull = path.join(wbFull, sub)
+          if (!isOwnedNonSymlink(subFull)) continue
           const candidate = path.join(subFull, 'sidecar.sock')
-          if (fs.existsSync(candidate)) return candidate
+          if (fs.existsSync(candidate) && isOwnedNonSymlink(candidate)) return candidate
           try {
             const sidecarSocks = fs
               .readdirSync(subFull)
               .filter(f => /^sidecar(-[a-z0-9]+)?\.sock$/i.test(f))
-            if (sidecarSocks.length > 0) return path.join(subFull, sidecarSocks[0])
+            if (sidecarSocks.length > 0) {
+              const sockPath = path.join(subFull, sidecarSocks[0])
+              if (isOwnedNonSymlink(sockPath)) return sockPath
+            }
           } catch {
             // ignore non-directory entries
           }
           const wbipcDir = path.join(subFull, 'wbipc')
-          if (fs.existsSync(wbipcDir)) {
+          if (fs.existsSync(wbipcDir) && isOwnedNonSymlink(wbipcDir)) {
             const socks = fs.readdirSync(wbipcDir).filter(f => f.endsWith('.sock'))
-            if (socks.length > 0) return path.join(wbipcDir, socks[0])
+            if (socks.length > 0) {
+              const sockPath = path.join(wbipcDir, socks[0])
+              if (isOwnedNonSymlink(sockPath)) return sockPath
+            }
           }
         }
       }
@@ -1343,11 +1388,11 @@ export class WorkBuddyAdapter {
         this.logger?.log?.(`[dsh-feishu] 🐼 Spawning WorkBuddy ACP server on 127.0.0.1:${port} (cwd: ${spawnCwd})...`)
         const proc = this.spawnImpl(
           this.binaryPath,
-          ['--serve', '--port', String(port), '--auth', 'none'],
+          ['--serve', '--host', '127.0.0.1', '--port', String(port), '--auth', 'none'],
           {
             cwd: spawnCwd,
             env: {
-              ...process.env,
+              ...buildCleanWorkBuddyEnv(),
               CODEBUDDY_FORCE_LITE_WB_BUNDLE: '1',
               CODEBUDDY_CONFIG_DIR: this.workbuddyHome,
               WORKBUDDY_CONFIG_DIR: this.workbuddyHome,
@@ -1605,6 +1650,7 @@ export class WorkBuddyAdapter {
   }
 
   _findProjectJsonlPath(rawId, cwd = '') {
+    if (!isSafeWorkBuddyId(rawId)) return ''
     const projectsRoot = path.join(this.workbuddyHome, 'projects')
     try {
       if (!fs.existsSync(projectsRoot)) return ''
@@ -1962,9 +2008,11 @@ export class WorkBuddyAdapter {
   }
 
   async _fetchReplayForSession(rawId, acpEndpoint = '', cwd = '') {
+    if (!isSafeWorkBuddyId(rawId)) return null
     try {
-      const localReplayPath = path.join(this.workbuddyHome, 'sessions', `${rawId}.json`)
-      if (fs.existsSync(localReplayPath)) {
+      const sessionsRoot = path.resolve(this.workbuddyHome, 'sessions')
+      const localReplayPath = path.resolve(sessionsRoot, `${rawId}.json`)
+      if (localReplayPath.startsWith(`${sessionsRoot}${path.sep}`) && fs.existsSync(localReplayPath)) {
         const parsed = safeJsonParse(fs.readFileSync(localReplayPath, 'utf8'))
         const events = Array.isArray(parsed) ? parsed : (parsed?.events || parsed?.data?.events || [])
         if (events.length > 0) return parseWorkBuddyReplayEvents(events)
@@ -2747,8 +2795,8 @@ export class WorkBuddyAdapter {
 
   async renameSession({ sessionId = '', title = '' } = {}) {
     const rawId = toRawWorkBuddyId(sessionId)
-    const cleanTitle = String(title || '').trim()
-    if (!rawId || !cleanTitle) {
+    const cleanTitle = String(title || '').replace(/\0/g, '').trim()
+    if (!isSafeWorkBuddyId(rawId) || !cleanTitle) {
       return { ok: false, error: 'sessionId and title are required.' }
     }
     const entry = this._ensureRuntimeEntry(rawId, { title: cleanTitle })
@@ -2757,7 +2805,7 @@ export class WorkBuddyAdapter {
     if (typeof this.queryDbImpl !== 'function') {
       const dbPath = this._findWorkBuddyDbPath()
       if (dbPath) {
-        const sqlStr = val => `'${String(val ?? '').replace(/'/g, "''")}'`
+        const sqlStr = val => `'${String(val ?? '').replace(/\0/g, '').replace(/'/g, "''")}'`
         await new Promise(resolve => {
           execFile(
             'sqlite3',
@@ -2794,7 +2842,7 @@ export class WorkBuddyAdapter {
 
   async pinSession({ sessionId = '', pinned = true } = {}) {
     const rawId = toRawWorkBuddyId(sessionId)
-    if (!rawId) return { ok: false, error: 'sessionId is required.' }
+    if (!isSafeWorkBuddyId(rawId)) return { ok: false, error: 'sessionId is required.' }
     const wantPin = Boolean(pinned)
     const entry = this._ensureRuntimeEntry(rawId)
     entry.pinned = wantPin
@@ -2810,7 +2858,7 @@ export class WorkBuddyAdapter {
     if (typeof this.queryDbImpl !== 'function') {
       const dbPath = this._findWorkBuddyDbPath()
       if (dbPath) {
-        const sqlStr = val => `'${String(val ?? '').replace(/'/g, "''")}'`
+        const sqlStr = val => `'${String(val ?? '').replace(/\0/g, '').replace(/'/g, "''")}'`
         const nowMs = Date.now()
         for (const colSql of [
           `UPDATE sessions SET pinned = ${wantPin ? 1 : 0} WHERE id = ${sqlStr(rawId)};`,
@@ -2828,13 +2876,13 @@ export class WorkBuddyAdapter {
 
   async deleteSession({ sessionId = '' } = {}) {
     const rawId = toRawWorkBuddyId(sessionId)
-    if (!rawId) return { ok: false, error: 'sessionId is required.' }
+    if (!isSafeWorkBuddyId(rawId)) return { ok: false, error: 'sessionId is required.' }
     this.deletedIds.add(rawId)
     this.runtimeSessions.delete(rawId)
     if (typeof this.queryDbImpl !== 'function') {
       const dbPath = this._findWorkBuddyDbPath()
       if (dbPath) {
-        const sqlStr = val => `'${String(val ?? '').replace(/'/g, "''")}'`
+        const sqlStr = val => `'${String(val ?? '').replace(/\0/g, '').replace(/'/g, "''")}'`
         const nowMs = Date.now()
         await new Promise(resolve => {
           execFile(

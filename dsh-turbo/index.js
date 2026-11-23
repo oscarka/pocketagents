@@ -308,7 +308,6 @@ export class TurboController {
     const abortController = new AbortController()
     this.sseAbort = abortController
     const qp = new URLSearchParams({ mode: 'host', hostId: this.hostId || '' })
-    if (this.hubToken) qp.set('token', this.hubToken)
     const url = `${this.hubUrl}/api/events?${qp.toString()}`
 
     ;(async () => {

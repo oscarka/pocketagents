@@ -2,10 +2,18 @@ import { execFile, execFileSync, spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { basename, dirname, join, resolve } from 'node:path'
+import { basename, dirname, join, resolve, sep } from 'node:path'
 import { promisify } from 'node:util'
 
 const execFileAsync = promisify(execFile)
+
+function isSafeCodexId(rawId = '') {
+  return /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(String(rawId || ''))
+}
+
+function isSafeCodexModel(model = '') {
+  return /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}$/.test(String(model || ''))
+}
 
 export const CODEX_SESSION_PREFIX = 'codex:'
 
@@ -123,8 +131,22 @@ export function buildCodexSpawnEnv(binaryPath = '', codexHome = join(homedir(), 
     '/sbin',
   ].filter(Boolean)
   const mergedPath = [...new Set([...extraDirs, ...currentParts])].join(pathSep)
+  const cleanEnv = { ...process.env }
+  for (const key of Object.keys(cleanEnv)) {
+    if (
+      key.startsWith('FEISHU_') ||
+      key === 'HUB_TOKEN' ||
+      key === 'HUB_SIGNING_SECRET' ||
+      key === 'DSH_HUB_TOKEN' ||
+      key === 'VOICE_VAULT_SECRET' ||
+      key.startsWith('VAPID_') ||
+      key === 'TURN_SECRET'
+    ) {
+      delete cleanEnv[key]
+    }
+  }
   return {
-    ...process.env,
+    ...cleanEnv,
     PATH: mergedPath,
     CODEX_HOME: codexHome,
   }
@@ -1423,8 +1445,10 @@ export class CodexAppServerClient {
   }
 
   tryClearThreadWriterLock(rawId) {
-    if (!rawId || !this.codexHome) return false
-    const lockPath = join(this.codexHome, 'thread-writer-locks', `${rawId}.lock`)
+    if (!rawId || !this.codexHome || !isSafeCodexId(rawId)) return false
+    const locksRoot = resolve(this.codexHome, 'thread-writer-locks')
+    const lockPath = resolve(locksRoot, `${rawId}.lock`)
+    if (!lockPath.startsWith(`${locksRoot}${sep}`)) return false
     try {
       if (existsSync(lockPath)) {
         unlinkSync(lockPath)
@@ -2462,6 +2486,9 @@ export class CodexAdapter {
     }
 
     const { model: cleanModel, effort: cleanEffort } = parseCodexModelAndEffort(model)
+    if (cleanModel && !isSafeCodexModel(cleanModel)) {
+      return { ok: false, error: '无效的 Codex 模型名称' }
+    }
     const modelFlags = [
       ...(cleanModel ? ['-m', cleanModel] : []),
       ...(cleanEffort ? ['-c', `model_reasoning_effort="${cleanEffort}"`] : []),
@@ -2498,6 +2525,9 @@ export class CodexAdapter {
 
   async sendPrompt({ sessionId, text, cwd, model = '', imagePaths = [], mode = 'prompt', execImpl } = {}) {
     const rawId = toRawCodexId(sessionId)
+    if (!isSafeCodexId(rawId)) {
+      return { ok: false, error: '无效的 Codex 会话 ID' }
+    }
     const hasImages = Array.isArray(imagePaths) && imagePaths.some(Boolean)
     const prompt = String(text || '').trim() || (hasImages ? '请查看附图并协助处理' : '')
     if (!prompt) return { ok: false, error: '请输入指令内容' }
@@ -2546,6 +2576,9 @@ export class CodexAdapter {
     }
 
     const { model: cleanModel, effort: cleanEffort } = parseCodexModelAndEffort(model)
+    if (cleanModel && !isSafeCodexModel(cleanModel)) {
+      return { ok: false, error: '无效的 Codex 模型名称' }
+    }
     const modelFlags = [
       ...(cleanModel ? ['-m', cleanModel] : []),
       ...(cleanEffort ? ['-c', `model_reasoning_effort="${cleanEffort}"`] : []),

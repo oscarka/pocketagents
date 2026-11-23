@@ -64,7 +64,7 @@ export async function probeVideoDurationSec(
   try {
     const { stdout } = await execImpl(
       'ffprobe',
-      ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', realFile],
+      ['-protocol_whitelist', 'file', '-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', realFile],
       { timeout: 6_000 },
     )
     const parsed = Number.parseFloat(String(stdout || '').trim())
@@ -75,7 +75,7 @@ export async function probeVideoDurationSec(
 
   if (resolvedSec <= 0.1) {
     try {
-      await execImpl('ffmpeg', ['-hide_banner', '-i', realFile], { timeout: 5_000 })
+      await execImpl('ffmpeg', ['-hide_banner', '-protocol_whitelist', 'file', '-i', realFile], { timeout: 5_000 })
     } catch (err) {
       const stderr = String(err?.stderr || err?.message || '')
       const m = /Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/.exec(stderr)
@@ -291,6 +291,8 @@ function buildFfmpegHlsArgs({ realFile, dirPath, mode, startSeg = 0, encoderKind
       '-loglevel',
       'error',
       '-y',
+      '-protocol_whitelist',
+      'file',
       ...(startSec > 0 ? ['-ss', String(startSec)] : []),
       '-i',
       realFile,
@@ -377,6 +379,8 @@ function buildFfmpegHlsArgs({ realFile, dirPath, mode, startSeg = 0, encoderKind
     '-loglevel',
     'error',
     '-y',
+    '-protocol_whitelist',
+    'file',
     ...(startSec > 0 ? ['-ss', String(startSec)] : []),
     '-i',
     realFile,

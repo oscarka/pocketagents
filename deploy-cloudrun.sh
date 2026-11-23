@@ -37,7 +37,10 @@ elif [[ -n "${EXISTING_HAS_TOKEN}" ]]; then
 else
   echo "提示: 未指定 HUB_TOKEN 环境变量，将自动生成一个随机安全密钥..."
   HUB_TOKEN="$(openssl rand -hex 16)"
-  echo "生成的 HUB_TOKEN: ${HUB_TOKEN}"
+  TOKEN_OUT_FILE="${HOME}/.dsh/cloudrun-hub-token.txt"
+  mkdir -p -m 700 "${HOME}/.dsh"
+  (umask 077 && printf '%s\n' "${HUB_TOKEN}" > "${TOKEN_OUT_FILE}")
+  echo "已将新生成的 HUB_TOKEN 安全写入本机文件 (0600): ${TOKEN_OUT_FILE}"
   ENV_ARGS=(--update-env-vars "HUB_TOKEN=${HUB_TOKEN}")
 fi
 
@@ -56,7 +59,7 @@ gcloud run deploy "${SERVICE_NAME}" \
 
 echo ""
 echo "✅ 部署完成！接下来按 3 步完成首次接入："
-echo "   ① 在电脑浏览器打开上方输出的 Service URL，输入管理密码 (${HUB_TOKEN:-沿用线上已有管理密码}) 登录"
+echo "   ① 在电脑浏览器打开上方输出的 Service URL，使用管理密码登录（若本次自动生成，请查看 ~/.dsh/cloudrun-hub-token.txt）"
 echo "   ② 复制网页上「添加电脑」面板里的一行命令到终端执行（自动用配对码接入，无需手填配置文件）"
 echo "   ③ 点击网页上的「📱 手机扫码登录」，用手机扫码即可开始远控！"
 

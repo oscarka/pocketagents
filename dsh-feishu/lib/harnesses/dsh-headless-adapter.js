@@ -2,9 +2,32 @@ import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { join, resolve, sep } from 'node:path'
 import * as zlib from 'node:zlib'
+import { redactText } from '../redact.js'
 import { syncDshWorkspaceStorage } from '../workspace-ops.js'
+
+function isSafeDshSessionId(id = '') {
+  return /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(String(id || ''))
+}
+
+function buildCleanDshSpawnEnv() {
+  const env = { ...process.env }
+  for (const key of Object.keys(env)) {
+    if (
+      key.startsWith('FEISHU_') ||
+      key === 'HUB_TOKEN' ||
+      key === 'HUB_SIGNING_SECRET' ||
+      key === 'DSH_HUB_TOKEN' ||
+      key === 'VOICE_VAULT_SECRET' ||
+      key.startsWith('VAPID_') ||
+      key === 'TURN_SECRET'
+    ) {
+      delete env[key]
+    }
+  }
+  return env
+}
 
 const ZSTD_MAGIC = Buffer.from([0x28, 0xb5, 0x2f, 0xfd])
 
@@ -450,6 +473,9 @@ export class DshHeadlessRunner {
       }
     }
     const id = String(sessionId || `session-${randomUUID()}`).trim()
+    if (!isSafeDshSessionId(id)) {
+      return { ok: false, error: '无效的 DSH 会话 ID' }
+    }
     if (this.activeProcs.has(id)) {
       return {
         ok: false,
@@ -472,10 +498,13 @@ export class DshHeadlessRunner {
     let verifiedIdleSessionOnDisk = false
     if (!isNew && id) {
       try {
-        const sessRoot = join(resolve(this.dshHome), 'sessions')
+        const sessRoot = resolve(this.dshHome, 'sessions')
         if (existsSync(sessRoot)) {
           for (const proj of readdirSync(sessRoot)) {
-            const sessDir = join(sessRoot, proj, id)
+            const projDir = resolve(sessRoot, proj)
+            if (!projDir.startsWith(`${sessRoot}${sep}`)) continue
+            const sessDir = resolve(projDir, id)
+            if (!sessDir.startsWith(`${projDir}${sep}`)) continue
             if (!existsSync(sessDir)) continue
             if (isDshSessionActivelyWriting(sessDir)) {
               return {
@@ -500,13 +529,16 @@ export class DshHeadlessRunner {
       let settledQuickly = false
       let stdoutBuf = ''
       let stderrBuf = ''
+      // The headless runner reads the actual prompt from DSH_REMOTE_TASK; avoid passing
+      // a leading `-` positional argument that could be interpreted as a CLI flag.
+      const safePositionalArg = cleanText && !cleanText.startsWith('-') ? cleanText : 'noop'
       const proc = spawn(
         bin,
-        ['--profile', 'headless', '--patch', patchFile, cleanText || 'noop'],
+        ['--profile', 'headless', '--patch', patchFile, safePositionalArg],
         {
           cwd: targetCwd,
           env: {
-            ...process.env,
+            ...buildCleanDshSpawnEnv(),
             DSH_HOME: this.dshHome,
             DSH_REMOTE_SESSION_ID: id,
             DSH_REMOTE_IS_NEW: isNew ? '1' : '0',
@@ -563,8 +595,9 @@ export class DshHeadlessRunner {
             () => { },
           )
         }
+        const safeStderr = redactText(stderrBuf)
         try {
-          this.onTurnSettled?.(id, code, stderrBuf)
+          this.onTurnSettled?.(id, code, safeStderr)
         } catch { }
         if (!settledQuickly) {
           settledQuickly = true
@@ -579,12 +612,12 @@ export class DshHeadlessRunner {
                 : `✅ DSH 已完成回复`,
             })
           } else {
-            const isOwned = stderrBuf.includes('SessionAlreadyOwnedError')
+            const isOwned = safeStderr.includes('SessionAlreadyOwnedError')
             resolvePromise({
               ok: false,
               error: isOwned
                 ? '该会话当前已在 DeepSeek Harness 桌面端运行或占用，请等待桌面端完成后再试'
-                : `DSH 执行异常 (exit ${code}): ${stderrBuf.trim().slice(-240) || '请检查模型或 API Key 配置'}`,
+                : `DSH 执行异常 (exit ${code}): ${safeStderr.trim().slice(-240) || '请检查模型或 API Key 配置'}`,
             })
           }
         }

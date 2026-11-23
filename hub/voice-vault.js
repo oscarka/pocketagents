@@ -1,5 +1,7 @@
 import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'node:crypto'
+import { lookup as dnsLookup } from 'node:dns/promises'
 import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises'
+import { isIP } from 'node:net'
 import { dirname, join } from 'node:path'
 
 export const VOICE_PROVIDER_CATALOG = [
@@ -143,10 +145,80 @@ const BLOCKED_METADATA_HOSTS = new Set([
   '100.100.100.200',
   'fd00:ec2::254',
   '0.0.0.0',
-  '[::]',
+  '::',
 ])
 
-export function isBlockedVoiceBaseUrl(rawUrl = '') {
+function shouldAllowLocalVoiceUrls() {
+  if (process.env.VOICE_ALLOW_LOCAL_URLS === '1' || process.env.VOICE_ALLOW_LOCAL_URLS === 'true') {
+    return true
+  }
+  const isCloudProd =
+    process.env.NODE_ENV === 'production'
+    || Boolean(process.env.K_SERVICE)
+    || Boolean(process.env.RAILWAY_ENVIRONMENT)
+  return !isCloudProd
+}
+
+function parseIpv4Octets(ip = '') {
+  const parts = String(ip || '').trim().split('.')
+  if (parts.length !== 4) return null
+  const nums = parts.map(p => (/^\d{1,3}$/.test(p) ? Number(p) : -1))
+  if (nums.some(n => n < 0 || n > 255)) return null
+  return nums
+}
+
+function extractEmbeddedIpv4FromIpv6(rawHost = '') {
+  const h = String(rawHost || '').toLowerCase().replace(/^\[|\]$/g, '')
+  const dotted = /^(?:::ffff:|64:ff9b::)(\d+\.\d+\.\d+\.\d+)$/i.exec(h)
+  if (dotted) return dotted[1]
+  // WHATWG URL normalizes ::ffff:169.254.169.254 -> ::ffff:a9fe:a9fe
+  const hexPair = /^(?:::ffff:|64:ff9b::)([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i.exec(h)
+  if (hexPair) {
+    const hi = parseInt(hexPair[1], 16)
+    const lo = parseInt(hexPair[2], 16)
+    return `${(hi >> 8) & 255}.${hi & 255}.${(lo >> 8) & 255}.${lo & 255}`
+  }
+  return ''
+}
+
+export function isBlockedVoiceIp(rawIp = '', { allowLocal = shouldAllowLocalVoiceUrls() } = {}) {
+  const ip = String(rawIp || '').trim().toLowerCase().replace(/^\[|\]$/g, '')
+  if (!ip) return true
+  const embeddedV4 = extractEmbeddedIpv4FromIpv6(ip)
+  if (embeddedV4) {
+    return isBlockedVoiceIp(embeddedV4, { allowLocal })
+  }
+  const ipVer = isIP(ip)
+  if (ipVer === 4) {
+    const o = parseIpv4Octets(ip)
+    if (!o) return true
+    const [a, b] = o
+    // Always block unspecified (0.0.0.0/8), link-local/cloud metadata (169.254.0.0/16), and CGNAT/Alibaba metadata (100.64.0.0/10)
+    if (a === 0) return true
+    if (a === 169 && b === 254) return true
+    if (a === 100 && b >= 64 && b <= 127) return true
+    if (a >= 224) return true // multicast / reserved
+    if (!allowLocal) {
+      if (a === 127) return true
+      if (a === 10) return true
+      if (a === 172 && b >= 16 && b <= 31) return true
+      if (a === 192 && b === 168) return true
+    }
+    return false
+  }
+  if (ipVer === 6) {
+    if (ip === '::' || /^0{0,4}(?::0{0,4})*$/.test(ip)) return true
+    // Always block link-local fe80::/10 (fe80..febf) and ULA fc00::/7 (fc00..fdff)
+    if (/^fe[89ab][0-9a-f]:/i.test(ip)) return true
+    if (/^f[cd][0-9a-f]{2}:/i.test(ip)) return true
+    if (ip.startsWith('ff')) return true // multicast
+    if (!allowLocal && (ip === '::1' || /^0{0,4}(?::0{0,4})*:0*1$/.test(ip))) return true
+    return false
+  }
+  return false
+}
+
+export function isBlockedVoiceBaseUrl(rawUrl = '', { allowLocal = shouldAllowLocalVoiceUrls() } = {}) {
   const s = String(rawUrl ?? '').trim()
   if (!s) return false
   let parsed
@@ -156,12 +228,46 @@ export function isBlockedVoiceBaseUrl(rawUrl = '') {
     return true
   }
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return true
-  const host = String(parsed.hostname || '').toLowerCase().replace(/^\[|\]$/g, '')
+  if (parsed.username || parsed.password) return true
+  const rawHost = String(parsed.hostname || '').toLowerCase().replace(/^\[|\]$/g, '')
+  const host = rawHost.replace(/\.+$/, '')
   if (!host) return true
   if (BLOCKED_METADATA_HOSTS.has(host)) return true
-  if (host.startsWith('169.254.') || host.endsWith('.internal')) return true
-  if (host.startsWith('fe80:') || host === '::' || host === '::ffff:169.254.169.254') return true
+  if (host.endsWith('.internal') || host.endsWith('.metadata.goog')) return true
+  if (!allowLocal && (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local'))) return true
+  if (isIP(host) !== 0) {
+    return isBlockedVoiceIp(host, { allowLocal })
+  }
   return false
+}
+
+export async function assertSafeVoiceTargetUrl(
+  rawUrl = '',
+  { allowLocal = shouldAllowLocalVoiceUrls(), resolveDns = true } = {},
+) {
+  if (isBlockedVoiceBaseUrl(rawUrl, { allowLocal })) {
+    throw new Error('Blocked unsafe Voice API URL (SSRF policy)')
+  }
+  if (!resolveDns) return
+  let parsed
+  try {
+    parsed = new URL(rawUrl)
+  } catch {
+    throw new Error('Invalid Voice API URL')
+  }
+  const host = String(parsed.hostname || '').toLowerCase().replace(/^\[|\]$/g, '').replace(/\.+$/, '')
+  if (!host || isIP(host) !== 0) return
+  try {
+    const records = await dnsLookup(host, { all: true })
+    for (const rec of records || []) {
+      if (rec?.address && isBlockedVoiceIp(rec.address, { allowLocal })) {
+        throw new Error(`Blocked Voice API URL resolving to disallowed IP (${rec.address})`)
+      }
+    }
+  } catch (err) {
+    if (/Blocked Voice API URL/i.test(String(err?.message || ''))) throw err
+    // Let fetch handle normal transient DNS errors
+  }
 }
 
 function sanitizeUrl(url = '') {
@@ -264,6 +370,7 @@ export class VoiceVault {
     this._keyBytes = null
     this._persistChain = Promise.resolve()
     this._initialized = false
+    this._initPromise = null
   }
 
   getKeyFilePath() {
@@ -289,7 +396,7 @@ export class VoiceVault {
       } catch {
         // key file does not exist yet
       }
-      await mkdir(dirname(keyPath), { recursive: true })
+      await mkdir(dirname(keyPath), { recursive: true, mode: 0o700 })
       const generated = randomBytes(32)
       const tmpKeyPath = `${keyPath}.tmp.${process.pid}.${randomBytes(4).toString('hex')}`
       await writeFile(tmpKeyPath, `${generated.toString('hex')}\n`, { encoding: 'utf8', mode: 0o600 })
@@ -305,28 +412,37 @@ export class VoiceVault {
 
   async init() {
     if (this._initialized) return
-    this._initialized = true
-    if (!this.vaultFile) return
-    try {
-      const text = await readFile(this.vaultFile, 'utf8')
-      const envelope = JSON.parse(text)
-      if (!envelope || envelope.alg !== 'aes-256-gcm' || !envelope.iv || !envelope.tag || !envelope.ciphertext) {
+    if (this._initPromise) return this._initPromise
+    this._initPromise = (async () => {
+      if (!this.vaultFile) {
+        this._initialized = true
         return
       }
-      const salt = envelope.salt ? Buffer.from(envelope.salt, 'base64') : Buffer.from('pocketagents-voice-v1')
-      const key = await this.resolveMasterKey(salt)
-      const iv = Buffer.from(envelope.iv, 'base64')
-      const tag = Buffer.from(envelope.tag, 'base64')
-      const ciphertext = Buffer.from(envelope.ciphertext, 'base64')
-      const decipher = createDecipheriv('aes-256-gcm', key, iv)
-      decipher.setAuthTag(tag)
-      const plainBuf = Buffer.concat([decipher.update(ciphertext), decipher.final()])
-      const parsed = JSON.parse(plainBuf.toString('utf8'))
-      this._hydrateParsedState(parsed)
-    } catch {
-      // missing file or unreadable vault starts cleanly with default native profile
-      this.state = cloneDefaultState()
-    }
+      try {
+        const text = await readFile(this.vaultFile, 'utf8')
+        const envelope = JSON.parse(text)
+        if (!envelope || envelope.alg !== 'aes-256-gcm' || !envelope.iv || !envelope.tag || !envelope.ciphertext) {
+          this._initialized = true
+          return
+        }
+        const salt = envelope.salt ? Buffer.from(envelope.salt, 'base64') : Buffer.from('pocketagents-voice-v1')
+        const key = await this.resolveMasterKey(salt)
+        const iv = Buffer.from(envelope.iv, 'base64')
+        const tag = Buffer.from(envelope.tag, 'base64')
+        const ciphertext = Buffer.from(envelope.ciphertext, 'base64')
+        const decipher = createDecipheriv('aes-256-gcm', key, iv)
+        decipher.setAuthTag(tag)
+        const plainBuf = Buffer.concat([decipher.update(ciphertext), decipher.final()])
+        const parsed = JSON.parse(plainBuf.toString('utf8'))
+        this._hydrateParsedState(parsed)
+      } catch {
+        // missing file or unreadable vault starts cleanly with default native profile
+        this.state = cloneDefaultState()
+      } finally {
+        this._initialized = true
+      }
+    })()
+    return this._initPromise
   }
 
   _hydrateParsedState(parsed) {
@@ -376,7 +492,7 @@ export class VoiceVault {
   async persist() {
     if (!this.vaultFile) return { ok: true, inMemory: true }
     const writeTask = this._persistChain.then(async () => {
-      await mkdir(dirname(this.vaultFile), { recursive: true })
+      await mkdir(dirname(this.vaultFile), { recursive: true, mode: 0o700 })
       const salt = randomBytes(16)
       const key = await this.resolveMasterKey(salt)
       const iv = randomBytes(12)

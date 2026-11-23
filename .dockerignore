@@ -3,9 +3,19 @@ node_modules
 .pnpm-store
 **/.pnpm-store
 .git
+.github
+.creator-launch
+.local-notes
 .DS_Store
 **/.DS_Store
 *.log
 *.env
+.env*
+.deploy.env
+dsh-hub-state*.json
+voice-vault.enc.json
+.voice-vault.key
 dsh-feishu/test
+docs
+promo-video
 

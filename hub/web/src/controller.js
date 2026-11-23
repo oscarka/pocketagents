@@ -1,5 +1,8 @@
 import {
   esc,
+  escJsStr,
+  escUriJsStr,
+  safeExternalHref,
   cleanPreviewText,
   formatTime,
   formatBytes,
@@ -643,7 +646,7 @@ export function initHubController() {
       .map(opt => {
         const isSel = opt.value === currentSelected;
         return `
-            <div class="host-option ${isSel ? 'selected' : ''}" onclick="selectModelFromPicker('${esc(target)}', '${esc(opt.value)}')">
+            <div class="host-option ${isSel ? 'selected' : ''}" onclick="selectModelFromPicker('${escJsStr(target)}', '${escJsStr(opt.value)}')">
               <div style="min-width:0;flex:1;">
                 <div style="font-size:14px;font-weight:700;color:var(--text);">${esc(opt.label)}</div>
                 <div style="font-size:11.5px;color:var(--muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(opt.sub)}</div>
@@ -1585,7 +1588,7 @@ export function initHubController() {
       triageGridBtnHtml,
       `<button class="filter-pill ${currentProject === 'ALL' ? 'active' : ''}" onclick="selectProject('ALL')">全部 <span class="count">${sessions.length}</span></button>`,
       ...smartPills,
-      ...projects.map(p => `<button class="filter-pill ${currentProject === p ? 'active' : ''}" title="${esc(p)}" onclick="selectProject('${esc(p)}')">${esc(formatCompactProjectLabel(p, nowDate))} <span class="count">${counts[p]}</span></button>`)
+      ...projects.map(p => `<button class="filter-pill ${currentProject === p ? 'active' : ''}" title="${esc(p)}" onclick="selectProject('${escJsStr(p)}')">${esc(formatCompactProjectLabel(p, nowDate))} <span class="count">${counts[p]}</span></button>`)
     ].join('');
     strip.scrollLeft = prevScrollLeft;
   }
@@ -1688,7 +1691,7 @@ export function initHubController() {
 
     const liveBannerHtml = pendingAppInfo ? `
         <div class="live-activity-bar">
-          <div class="live-activity-left" onclick="openChat('${esc(pendingAppInfo.app.agentId)}')">
+          <div class="live-activity-left" onclick="openChat('${escJsStr(pendingAppInfo.app.agentId)}')">
             <div class="live-activity-title">${isPendingQuestion ? '💬' : '⏳'} [${esc(pendingAppInfo.host.hostName)}] ${esc(pendingAppInfo.app.project ? `${formatCompactProjectLabel(pendingAppInfo.app.project, nowDate)} / ` : '')}${esc(pendingAppInfo.app.settling ? (isPendingQuestion ? '正在同步你的选择到电脑端...' : '正在同步审批到电脑端...') : (pendingAppInfo.app.title || (isPendingQuestion ? '等待你做出选择' : '等待你批准工具执行')))}</div>
             <div class="live-activity-desc" ${pendingAppInfo.app.lastError ? 'style="color:#ef4444;font-weight:600;"' : ''}>${esc(pendingAppInfo.app.lastError ? `⚠️ ${pendingAppInfo.app.lastError}` : (pendingAppInfo.app.promptTitle || pendingAppInfo.app.reason || ''))}</div>
           </div>
@@ -1696,11 +1699,11 @@ export function initHubController() {
             ${pendingAppInfo.app.settling ? `
               <button class="mini-approve-btn" disabled style="opacity:0.65;cursor:not-allowed;">⏳ 处理中...</button>
             ` : isPendingQuestion ? `
-              <button class="mini-approve-btn" onclick="openChat('${esc(pendingAppInfo.app.agentId)}')">去选择 ›</button>
-              <button class="mini-approve-btn ghost" onclick="sendApprovalDecision('${esc(pendingAppInfo.host.hostId)}', '${esc(pendingAppInfo.app.code)}', false, 4, '${esc(pendingAppInfo.app.agentId || '')}')">跳过</button>
+              <button class="mini-approve-btn" onclick="openChat('${escJsStr(pendingAppInfo.app.agentId)}')">去选择 ›</button>
+              <button class="mini-approve-btn ghost" onclick="sendApprovalDecision('${escJsStr(pendingAppInfo.host.hostId)}', '${escJsStr(pendingAppInfo.app.code)}', false, 4, '${escJsStr(pendingAppInfo.app.agentId || '')}')">跳过</button>
             ` : `
-              <button class="mini-approve-btn" onclick="sendApprovalDecision('${esc(pendingAppInfo.host.hostId)}', '${esc(pendingAppInfo.app.code)}', true, 1, '${esc(pendingAppInfo.app.agentId || '')}')">✓ 允许</button>
-              <button class="mini-approve-btn ghost" onclick="sendApprovalDecision('${esc(pendingAppInfo.host.hostId)}', '${esc(pendingAppInfo.app.code)}', false, 4, '${esc(pendingAppInfo.app.agentId || '')}')">拒绝</button>
+              <button class="mini-approve-btn" onclick="sendApprovalDecision('${escJsStr(pendingAppInfo.host.hostId)}', '${escJsStr(pendingAppInfo.app.code)}', true, 1, '${escJsStr(pendingAppInfo.app.agentId || '')}')">✓ 允许</button>
+              <button class="mini-approve-btn ghost" onclick="sendApprovalDecision('${escJsStr(pendingAppInfo.host.hostId)}', '${escJsStr(pendingAppInfo.app.code)}', false, 4, '${escJsStr(pendingAppInfo.app.agentId || '')}')">拒绝</button>
             `}
           </div>
         </div>
@@ -1780,7 +1783,7 @@ export function initHubController() {
       const displayTitle = stripRedundantProjectPrefix(s.title, s.project);
 
       return `${groupHeaderHtml}
-          <div class="session-row ${rowStateClass} ${s.pinned ? 'pinned-row' : ''} ${s.id === activeSessionId ? 'selected-desktop' : ''}" onclick="openChat('${esc(s.id)}')">
+          <div class="session-row ${rowStateClass} ${s.pinned ? 'pinned-row' : ''} ${s.id === activeSessionId ? 'selected-desktop' : ''}" onclick="openChat('${escJsStr(s.id)}')">
             <div class="session-main">
               <div class="session-top-line">
                 <div class="session-title-wrap">
@@ -1796,7 +1799,7 @@ export function initHubController() {
                 <span class="session-preview-text">${rolePrefix}${esc(s.lastPreview)}</span>
               </div>
             </div>
-            <button class="row-more-btn" title="更多操作" onclick="event.stopPropagation(); openSessionActions('${esc(s.id)}')">⋯</button>
+            <button class="row-more-btn" title="更多操作" onclick="event.stopPropagation(); openSessionActions('${escJsStr(s.id)}')">⋯</button>
           </div>
         `;
     }).join('');
@@ -2587,8 +2590,9 @@ export function initHubController() {
 
   function submitAgyApproval(hostId, code) {
     const idx = selectedAgyOptionIndex || 1;
-    const allow = idx !== 4;
-    sendApprovalDecision(hostId, code, allow, idx);
+    const selEl = document.querySelector(`.agy-approval-opt[data-opt-idx="${idx}"]`);
+    const isDeny = selEl ? selEl.dataset.isDeny === '1' : idx === 4;
+    sendApprovalDecision(hostId, code, !isDeny, idx);
   }
 
   function renderActiveChatStage(foundArg) {
@@ -2667,7 +2671,7 @@ export function initHubController() {
       const otherProj = otherApproval.app.project ? `${formatCompactProjectLabel(otherApproval.app.project)} / ` : '';
       const nextAlertHtml = `
           <span>${isOtherQuestion ? '💬' : '⏳'} [${esc(otherApproval.host.hostName)}]「${esc(otherProj)}${esc(otherApproval.app.title || otherApproval.app.toolName)}」${isOtherQuestion ? '待你选择' : '待你审批'}</span>
-          <button style="border:none;background:#d97706;color:#fff;border-radius:999px;padding:3px 10px;font-size:11.5px;font-weight:600;cursor:pointer;white-space:nowrap;flex-shrink:0;" onclick="openChat('${esc(otherApproval.app.agentId)}')">立即切换 ›</button>
+          <button style="border:none;background:#d97706;color:#fff;border-radius:999px;padding:3px 10px;font-size:11.5px;font-weight:600;cursor:pointer;white-space:nowrap;flex-shrink:0;" onclick="openChat('${escJsStr(otherApproval.app.agentId)}')">立即切换 ›</button>
         `;
       alertBar.style.display = 'flex';
       const nextAlertSig = `${langPref}:${nextAlertHtml}`;
@@ -2888,7 +2892,7 @@ export function initHubController() {
     const bubblesHtml = msgs.map((m, msgIdx) => {
       if (m.role === 'user') {
         const queuedBadge = m.queuedCmdId
-          ? `<div class="queued-cmd-pill"><span>⏳ 排队中（电脑上线后执行）</span><button class="cancel-queued-btn" onclick="event.stopPropagation(); cancelQueuedCommand('${esc(m.queuedCmdId)}')">✕ 取消</button></div>`
+          ? `<div class="queued-cmd-pill"><span>⏳ 排队中（电脑上线后执行）</span><button class="cancel-queued-btn" onclick="event.stopPropagation(); cancelQueuedCommand('${escJsStr(m.queuedCmdId)}')">✕ 取消</button></div>`
           : m.expiredCmdId
             ? `<div class="queued-cmd-pill" style="background:rgba(239,68,68,0.18);color:#fecaca;"><span>⚠️ 电脑超过 10 分钟未上线，该指令已超时未执行</span></div>`
             : '';
@@ -2897,7 +2901,7 @@ export function initHubController() {
         let mediaGridHtml = '';
         if (parsedUser.optImgs && parsedUser.optImgs.length > 0) {
           mediaGridHtml = `<div class="user-msg-media-grid">${parsedUser.optImgs.map((it, idx) => `
-            <div class="user-msg-img-card" onclick="openOptimisticImagePreview('${esc(m.optId)}', ${idx})">
+            <div class="user-msg-img-card" onclick="openOptimisticImagePreview('${escJsStr(m.optId)}', ${idx})">
               <img class="user-msg-thumb saveable-preview-img" src="${it.dataUrl}" alt="${esc(it.name)}" />
               <span class="user-msg-img-badge">🔍 ${esc(it.name)}</span>
             </div>
@@ -3033,7 +3037,7 @@ export function initHubController() {
     const sessionArtifacts = Array.isArray(s.artifacts) ? s.artifacts.filter(a => a && a.path) : [];
     const sessionArtifactsHtml = sessionArtifacts.length > 0 ? `
         <div class="agy-files-changed-card agy-session-artifacts-card${artCollapsed ? ' is-collapsed' : ''}" data-artifacts-session="${esc(s.id)}">
-          <button type="button" class="agy-session-artifacts-header" aria-expanded="${!artCollapsed}" onclick="toggleSessionArtifactsCard('${esc(s.id)}')">
+          <button type="button" class="agy-session-artifacts-header" aria-expanded="${!artCollapsed}" onclick="toggleSessionArtifactsCard('${escJsStr(s.id)}')">
             <span class="agy-session-artifacts-title">📋 AI 交付文档 / Walkthrough (${sessionArtifacts.length})</span>
             <span class="agy-artifacts-toggle-pill">${artCollapsed ? '展开 ⌄' : '收起 ⌃'}</span>
           </button>
@@ -3079,13 +3083,13 @@ export function initHubController() {
     }).join('')}
           </div>
           <div class="agy-files-footer">
-            <button type="button" class="agy-files-toggle" aria-expanded="${!fcCollapsed}" onclick="toggleFilesChangedCard('${esc(s.id)}')">
+            <button type="button" class="agy-files-toggle" aria-expanded="${!fcCollapsed}" onclick="toggleFilesChangedCard('${escJsStr(s.id)}')">
               <span>📄 ${s.changedFiles.length} Files With Changes</span>
               <span class="agy-files-chevron">${fcCollapsed ? '⌄' : '⌃'}</span>
             </button>
             <div class="agy-files-footer-btns">
-              <button type="button" class="agy-files-reject" onclick="openChangedFilesDrawer('${esc(s.id)}')">查看改动</button>
-              ${fcReviewed ? '' : `<button type="button" class="agy-files-accept" onclick="reviewFilesChangedCard('${esc(s.id)}', '${esc(fcMeta.sig)}')">确认已阅</button>`}
+              <button type="button" class="agy-files-reject" onclick="openChangedFilesDrawer('${escJsStr(s.id)}')">查看改动</button>
+              ${fcReviewed ? '' : `<button type="button" class="agy-files-accept" onclick="reviewFilesChangedCard('${escJsStr(s.id)}', '${escJsStr(fcMeta.sig)}')">确认已阅</button>`}
             </div>
           </div>
         </div>
@@ -3143,7 +3147,7 @@ export function initHubController() {
                           class="dsh-question-opt ${isSel ? 'selected' : ''}"
                           data-q-id="${esc(qId)}"
                           data-opt-label="${esc(label)}"
-                          ${s.approvalObj.settling ? 'disabled style="opacity:0.6;cursor:not-allowed;"' : `onclick="toggleDshQuestionOption('${esc(s.approvalObj.code)}', '${esc(qId)}', '${esc(label)}', ${Boolean(q.multiSelect)})"`}
+                          ${s.approvalObj.settling ? 'disabled style="opacity:0.6;cursor:not-allowed;"' : `onclick="toggleDshQuestionOption('${escJsStr(s.approvalObj.code)}', '${escJsStr(qId)}', '${escJsStr(label)}', ${Boolean(q.multiSelect)})"`}
                         >
                           <div class="dsh-question-opt-top">
                             <span class="dsh-question-opt-check">${q.multiSelect ? (isSel ? '☑' : '☐') : (isSel ? '◉' : '○')}</span>
@@ -3172,16 +3176,33 @@ export function initHubController() {
             <button
               type="button"
               class="dsh-question-btn-skip"
-              ${s.approvalObj.settling ? 'disabled style="opacity:0.6;cursor:not-allowed;"' : `onclick="sendApprovalDecision('${esc(s.hostId)}', '${esc(s.approvalObj.code)}', false, 4, '${esc(s.id)}')"`}
+              ${s.approvalObj.settling ? 'disabled style="opacity:0.6;cursor:not-allowed;"' : `onclick="sendApprovalDecision('${escJsStr(s.hostId)}', '${escJsStr(s.approvalObj.code)}', false, 4, '${escJsStr(s.id)}')"`}
             >跳过 / 取消</button>
             <button
               type="button"
               class="dsh-question-btn-submit"
-              ${s.approvalObj.settling ? 'disabled style="opacity:0.6;cursor:not-allowed;"' : `onclick="submitDshQuestionAnswers('${esc(s.hostId)}', '${esc(s.approvalObj.code)}', '${esc(s.id)}')"`}
+              ${s.approvalObj.settling ? 'disabled style="opacity:0.6;cursor:not-allowed;"' : `onclick="submitDshQuestionAnswers('${escJsStr(s.hostId)}', '${escJsStr(s.approvalObj.code)}', '${escJsStr(s.id)}')"`}
             >${s.approvalObj.settling ? '⏳ 正在提交...' : '提交选择 ↵'}</button>
           </div>
         </div>
-      ` : isAgyApproval ? `
+      ` : isAgyApproval ? (() => {
+        const agyOpts = s.approvalObj.options && s.approvalObj.options.length > 0
+          ? s.approvalObj.options
+          : [
+              { index: 1, label: 'Yes, allow this time' },
+              { index: 2, label: 'Yes, and always allow in this conversation' },
+              { index: 3, label: 'Yes, and always allow' },
+              { index: 4, label: 'No (tell the agent what to do instead)' },
+            ];
+        const isDenyOption = (opt, pos) => {
+          const lbl = String(opt?.label || '').trim().toLowerCase();
+          if (/^(no\b|deny\b|reject\b|skip\b|拒绝|取消)/.test(lbl)) return true;
+          const idx = Number(opt?.index) || (pos + 1);
+          return agyOpts.length >= 4 && idx === 4;
+        };
+        const denyOpt = agyOpts.find((o, i) => isDenyOption(o, i));
+        const denyIdx = Number(denyOpt?.index) || (agyOpts.length === 2 ? 2 : 4);
+        return `
         <div class="agy-approval-card">
           <div class="agy-approval-header">
             <span class="agy-approval-term-icon">&gt;_</span>
@@ -3191,31 +3212,31 @@ export function initHubController() {
           ${s.approvalObj.commandLine ? `<div class="agy-approval-cmd">${esc(s.approvalObj.commandLine)}</div>` : `<div class="agy-approval-cmd">${esc(s.approvalObj.reason || '')}</div>`}
           ${approvalStatusNoticeHtml}
           <div class="agy-approval-options">
-            ${(s.approvalObj.options && s.approvalObj.options.length > 0 ? s.approvalObj.options : [
-        { index: 1, label: 'Yes, allow this time' },
-        { index: 2, label: 'Yes, and always allow in this conversation' },
-        { index: 3, label: 'Yes, and always allow' },
-        { index: 4, label: 'No (tell the agent what to do instead)' }
-      ]).map(opt => `
-              <button type="button" class="agy-approval-opt ${opt.index === 1 ? 'selected' : ''}" data-opt-idx="${opt.index}" ${s.approvalObj.settling ? 'disabled style="opacity:0.6;cursor:not-allowed;"' : `onclick="selectAgyApprovalOption(${opt.index})" ondblclick="sendApprovalDecision('${esc(s.hostId)}', '${esc(s.approvalObj.code)}', ${opt.index !== 4}, ${opt.index})"`}>
-                <span class="agy-opt-num">${opt.index}</span>
+            ${agyOpts.map((opt, pos) => {
+              const optIdx = Number(opt.index) || (pos + 1);
+              const optIsDeny = isDenyOption(opt, pos);
+              return `
+              <button type="button" class="agy-approval-opt ${optIdx === 1 ? 'selected' : ''}" data-opt-idx="${optIdx}" data-is-deny="${optIsDeny ? '1' : '0'}" ${s.approvalObj.settling ? 'disabled style="opacity:0.6;cursor:not-allowed;"' : `onclick="selectAgyApprovalOption(${optIdx})" ondblclick="sendApprovalDecision('${escJsStr(s.hostId)}', '${escJsStr(s.approvalObj.code)}', ${!optIsDeny}, ${optIdx})"`}>
+                <span class="agy-opt-num">${optIdx}</span>
                 <span>${esc(opt.label)}</span>
               </button>
-            `).join('')}
+            `;
+            }).join('')}
           </div>
           <div class="agy-approval-footer">
-            <button type="button" class="agy-btn-skip" ${s.approvalObj.settling ? 'disabled style="opacity:0.6;cursor:not-allowed;"' : `onclick="sendApprovalDecision('${esc(s.hostId)}', '${esc(s.approvalObj.code)}', false, 4)"`}>Skip</button>
-            <button type="button" class="agy-btn-submit" ${s.approvalObj.settling ? 'disabled style="opacity:0.6;cursor:not-allowed;"' : `onclick="submitAgyApproval('${esc(s.hostId)}', '${esc(s.approvalObj.code)}')"`}>${s.approvalObj.settling ? '⏳ 处理中...' : 'Submit <span>↵</span>'}</button>
+            <button type="button" class="agy-btn-skip" ${s.approvalObj.settling ? 'disabled style="opacity:0.6;cursor:not-allowed;"' : `onclick="sendApprovalDecision('${escJsStr(s.hostId)}', '${escJsStr(s.approvalObj.code)}', false, ${denyIdx})"`}>Skip</button>
+            <button type="button" class="agy-btn-submit" ${s.approvalObj.settling ? 'disabled style="opacity:0.6;cursor:not-allowed;"' : `onclick="submitAgyApproval('${escJsStr(s.hostId)}', '${escJsStr(s.approvalObj.code)}')"`}>${s.approvalObj.settling ? '⏳ 处理中...' : 'Submit <span>↵</span>'}</button>
           </div>
         </div>
-      ` : `
+      `;
+      })() : `
         <div class="inline-approval-card">
           <div class="inline-approval-title">⏳ 等待你确认工具调用：${esc(s.approvalObj.toolName)}</div>
           <div class="inline-approval-cmd">${esc(s.approvalObj.reason || '请求执行权限')}</div>
           ${approvalStatusNoticeHtml}
           <div class="inline-approval-btns">
-            <button style="background:#10b981;color:#fff;${s.approvalObj.settling ? 'opacity:0.6;cursor:not-allowed;' : ''}" ${s.approvalObj.settling ? 'disabled' : `onclick="sendApprovalDecision('${esc(s.hostId)}', '${esc(s.approvalObj.code)}', true, 1)"`}>${s.approvalObj.settling ? '⏳ 正在同步...' : '✅ 允许执行'}</button>
-            <button style="background:#fee2e2;color:#dc2626;${s.approvalObj.settling ? 'opacity:0.6;cursor:not-allowed;' : ''}" ${s.approvalObj.settling ? 'disabled' : `onclick="sendApprovalDecision('${esc(s.hostId)}', '${esc(s.approvalObj.code)}', false, 4)"`}>✕ 拒绝</button>
+            <button style="background:#10b981;color:#fff;${s.approvalObj.settling ? 'opacity:0.6;cursor:not-allowed;' : ''}" ${s.approvalObj.settling ? 'disabled' : `onclick="sendApprovalDecision('${escJsStr(s.hostId)}', '${escJsStr(s.approvalObj.code)}', true, 1)"`}>${s.approvalObj.settling ? '⏳ 正在同步...' : '✅ 允许执行'}</button>
+            <button style="background:#fee2e2;color:#dc2626;${s.approvalObj.settling ? 'opacity:0.6;cursor:not-allowed;' : ''}" ${s.approvalObj.settling ? 'disabled' : `onclick="sendApprovalDecision('${escJsStr(s.hostId)}', '${escJsStr(s.approvalObj.code)}', false, 4)"`}>✕ 拒绝</button>
           </div>
         </div>
       `) : '';
@@ -3225,7 +3246,7 @@ export function initHubController() {
     const followupsHtml = `
         <div class="quick-followups">
           ${hasAnyAssistantReply ? `<button class="followup-pill" onclick="copyLatestAssistantReply(this)">📋 复制最新回复全文</button>` : ''}
-          ${followups.map(f => `<button class="followup-pill" onclick="sendQuickFollowup('${esc(f)}')">${esc(f)}</button>`).join('')}
+          ${followups.map(f => `<button class="followup-pill" onclick="sendQuickFollowup('${escJsStr(f)}')">${esc(f)}</button>`).join('')}
         </div>
       `;
 
@@ -3239,7 +3260,7 @@ export function initHubController() {
               type="button"
               class="followup-pill"
               style="font-size:12px;padding:6px 14px;"
-              onclick="loadEarlierTranscript('${esc(s.hostId)}', '${esc(s.id)}', this)"
+              onclick="loadEarlierTranscript('${escJsStr(s.hostId)}', '${escJsStr(s.id)}', this)"
             >⬆️ 为保证秒开已省略前 ${s.omittedTranscriptCount} 条早先记录 · 点击加载完整历史</button>
           </div>
         `
@@ -4865,16 +4886,18 @@ export function initHubController() {
       const sidecarNoteHtml = sidecarPath
         ? `<div class="plugin-detail-notice">🪟 <strong>桌面端侧边栏面板</strong>（<code>sidecar://${esc(sidecarPath)}</code>）：Sidecar 面板运行在电脑端 Antigravity IDE 侧栏中，请回到电脑 IDE 点击对应胶囊打开交互面板。</div>`
         : '';
+      const safeHomepage = safeExternalHref(matched.homepage);
+      const safeRepository = safeExternalHref(matched.repository);
       const toggleBtnHtml = matched.isBuiltin
         ? `<div class="plugin-detail-notice">🔒 这是 Antigravity 内置插件，启停请在电脑端 Antigravity IDE 插件管理页操作。</div>`
         : !hostOnline
           ? `<div class="plugin-detail-notice">⚪ 电脑 <strong>${esc(hostName)}</strong> 当前离线，恢复在线后可在此远程启停该插件。</div>`
           : `<div class="plugin-detail-actions">
-               <button type="button" class="pill-action-btn ${matched.enabled ? '' : 'primary'}" ${isToggling ? 'disabled style="opacity:0.6;"' : ''} onclick="toggleRemoteAntigravityPlugin('${esc(hostId)}', '${esc(matched.dir || matched.name)}', ${matched.enabled ? 'false' : 'true'})">
+               <button type="button" class="pill-action-btn ${matched.enabled ? '' : 'primary'}" ${isToggling ? 'disabled style="opacity:0.6;"' : ''} onclick="toggleRemoteAntigravityPlugin('${escJsStr(hostId)}', '${escJsStr(matched.dir || matched.name)}', ${matched.enabled ? 'false' : 'true'})">
                  ${isToggling ? '⏳ 正在同步到电脑端…' : (matched.enabled ? '⏸ 停用此插件' : '▶️ 启用此插件')}
                </button>
-               ${matched.homepage ? `<a class="pill-action-btn" href="${esc(matched.homepage)}" target="_blank" rel="noopener noreferrer" style="text-decoration:none;">🌐 文档主页</a>` : ''}
-               ${matched.repository ? `<a class="pill-action-btn" href="${esc(matched.repository)}" target="_blank" rel="noopener noreferrer" style="text-decoration:none;">📦 源码仓库</a>` : ''}
+               ${safeHomepage ? `<a class="pill-action-btn" href="${esc(safeHomepage)}" target="_blank" rel="noopener noreferrer" style="text-decoration:none;">🌐 文档主页</a>` : ''}
+               ${safeRepository ? `<a class="pill-action-btn" href="${esc(safeRepository)}" target="_blank" rel="noopener noreferrer" style="text-decoration:none;">📦 源码仓库</a>` : ''}
              </div>`;
       bodyEl.innerHTML = `
         <div class="plugin-detail-card">
@@ -5219,15 +5242,15 @@ export function initHubController() {
             <div style="font-size:28px;">🖼️</div>
             <div class="img-preview-error-text" style="font-size:13px;line-height:1.5;">图片加载超时或连接中断</div>
             <div class="img-preview-error-actions">
-              <button type="button" class="media-toolbar-pill" onclick="retryFilePreview('${esc(hostId)}', ${inDrawer ? 'true' : 'false'})">🔄 重新加载</button>
-              ${canToggleOrigImg && !preview._origImage ? `<button type="button" class="media-toolbar-pill" onclick="toggleOriginalPreviewImage('${esc(hostId)}', ${inDrawer ? 'true' : 'false'})">🔍 尝试加载原图</button>` : ''}
+              <button type="button" class="media-toolbar-pill" onclick="retryFilePreview('${escJsStr(hostId)}', ${inDrawer ? 'true' : 'false'})">🔄 重新加载</button>
+              ${canToggleOrigImg && !preview._origImage ? `<button type="button" class="media-toolbar-pill" onclick="toggleOriginalPreviewImage('${escJsStr(hostId)}', ${inDrawer ? 'true' : 'false'})">🔍 尝试加载原图</button>` : ''}
             </div>
           </div>
         </div>
         <div class="file-preview-meta-bar" style="display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:8px;font-size:12px;color:#94a3b8;">
           <span class="img-preview-size-label">${esc(sizeText)} · 长按或点按钮保存图片</span>
-          <button type="button" class="media-toolbar-pill" onclick="downloadPreviewMedia('${esc(dlUrl || imgSrc)}', '${esc(preview.name || 'image.png')}', this)">⬇️ 保存图片</button>
-          ${canToggleOrigImg ? `<button type="button" class="media-toolbar-pill" onclick="toggleOriginalPreviewImage('${esc(hostId)}', ${inDrawer ? 'true' : 'false'})">${preview._origImage ? '⚡ 切回智能省流图' : '🔍 查看无损原图'}</button>` : ''}
+          <button type="button" class="media-toolbar-pill" onclick="downloadPreviewMedia('${escJsStr(dlUrl || imgSrc)}', '${escJsStr(preview.name || 'image.png')}', this)">⬇️ 保存图片</button>
+          ${canToggleOrigImg ? `<button type="button" class="media-toolbar-pill" onclick="toggleOriginalPreviewImage('${escJsStr(hostId)}', ${inDrawer ? 'true' : 'false'})">${preview._origImage ? '⚡ 切回智能省流图' : '🔍 查看无损原图'}</button>` : ''}
         </div>
       </div>`;
   }
@@ -5239,7 +5262,7 @@ export function initHubController() {
         <div style="font-size:32px;">⚠️</div>
         <div style="font-size:14px;font-weight:600;color:#f1f5f9;">${esc(preview.name || '文件加载失败')}</div>
         <div style="font-size:12.5px;color:#94a3b8;max-width:320px;line-height:1.5;">${esc(reason)}</div>
-        <button type="button" class="media-toolbar-pill" onclick="retryFilePreview('${esc(hostId)}', ${inDrawer ? 'true' : 'false'})">🔄 重新加载</button>
+        <button type="button" class="media-toolbar-pill" onclick="retryFilePreview('${escJsStr(hostId)}', ${inDrawer ? 'true' : 'false'})">🔄 重新加载</button>
       </div>`;
   }
 
@@ -5416,8 +5439,8 @@ export function initHubController() {
                <video class="file-preview-video" data-hls-src="${esc(videoHlsSrc(preview, mt))}" data-fallback-src="${esc(videoPreviewSrc(preview, mt))}" data-video-bytes="${Number(preview.size || 0)}" data-dsh-universal-direct="${preview.videoProbe?.universalDirectPlay ? '1' : '0'}" controls playsinline webkit-playsinline preload="metadata" onloadedmetadata="onSmartVideoLoadedMeta(this)" onerror="onSmartVideoError(this)"></video>
                <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:8px;">
                  <span data-dsh-video-status="1" style="font-size:12px;color:#94a3b8;">🎬 ${esc(formatBytes(preview.size))} · ${esc(videoMetaUi.badge)}</span>
-                 <button type="button" class="media-toolbar-pill" onclick="switchVideoTranscodeMode('${esc(host.hostId)}', true)">${esc(videoMetaUi.toggleLabel)}</button>
-                 ${dlUrl ? `<button type="button" class="media-toolbar-pill" onclick="downloadPreviewMedia('${esc(dlUrl)}', '${esc(preview.name || 'video.mp4')}', this)">⬇️ 保存/分享视频</button>` : ''}
+                 <button type="button" class="media-toolbar-pill" onclick="switchVideoTranscodeMode('${escJsStr(host.hostId)}', true)">${esc(videoMetaUi.toggleLabel)}</button>
+                 ${dlUrl ? `<button type="button" class="media-toolbar-pill" onclick="downloadPreviewMedia('${escJsStr(dlUrl)}', '${escJsStr(preview.name || 'video.mp4')}', this)">⬇️ 保存/分享视频</button>` : ''}
                </div>
              </div>`
         : kind === 'image'
@@ -5427,7 +5450,7 @@ export function initHubController() {
                    <div style="font-size:32px;">📦</div>
                    <div style="font-size:14px;font-weight:600;color:#e2e8f0;">${esc(preview.name)}</div>
                    <div style="font-size:12.5px;">二进制文件（${esc(formatBytes(preview.size))}），不支持直接文本预览</div>
-                   ${dlUrl ? `<button type="button" class="media-toolbar-pill" onclick="downloadPreviewMedia('${esc(dlUrl)}', '${esc(preview.name || 'file')}', this)">⬇️ 保存/分享文件</button>` : ''}
+                   ${dlUrl ? `<button type="button" class="media-toolbar-pill" onclick="downloadPreviewMedia('${escJsStr(dlUrl)}', '${escJsStr(preview.name || 'file')}', this)">⬇️ 保存/分享文件</button>` : ''}
                  </div>`
             : (isHtml && !rawHtmlMode)
               ? `<div class="file-preview-body html-sandbox-preview" style="padding:0;background:#ffffff;min-height:420px;">
@@ -5445,10 +5468,10 @@ export function initHubController() {
             <button class="back-btn" style="padding:0;font-size:13px;flex-shrink:0;" onclick="backFromDrawerPreview()">‹ 返回目录</button>
             <span class="file-preview-header-name" title="${esc(preview.name)}">${esc(preview.name)}</span>
             <div style="display:flex;align-items:center;gap:5px;flex-shrink:0;">
-              ${isHtml ? `<button class="icon-pill-btn" style="color:var(--primary);border-color:#bfdbfe;background:var(--primary-soft);" onclick="openFullscreenHtmlFromPreview('${esc(host.hostId)}', true)">⛶ 全屏体验</button><button class="icon-pill-btn" onclick="toggleHtmlPreviewMode()">${rawHtmlMode ? '🌐 预览' : '</> 源码'}</button>` : ''}
+              ${isHtml ? `<button class="icon-pill-btn" style="color:var(--primary);border-color:#bfdbfe;background:var(--primary-soft);" onclick="openFullscreenHtmlFromPreview('${escJsStr(host.hostId)}', true)">⛶ 全屏体验</button><button class="icon-pill-btn" onclick="toggleHtmlPreviewMode()">${rawHtmlMode ? '🌐 预览' : '</> 源码'}</button>` : ''}
               ${isMarkdown ? `<button class="icon-pill-btn" onclick="toggleMdPreviewMode()">${rawMdMode ? '📖 渲染' : '</> 源码'}</button>` : ''}
               ${headerExportBtnHtml}
-              <button class="icon-pill-btn" style="color:var(--primary);border-color:#bfdbfe;background:var(--primary-soft);" onclick="quoteFileIntoChat('${esc(preview.relPath || preview.name)}')">📎 引用</button>
+              <button class="icon-pill-btn" style="color:var(--primary);border-color:#bfdbfe;background:var(--primary-soft);" onclick="quoteFileIntoChat('${escJsStr(preview.relPath || preview.name)}')">📎 引用</button>
             </div>
           </div>
           ${previewBodyHtml}
@@ -5507,24 +5530,24 @@ export function initHubController() {
     body.dataset.dshDrawerListKey = drawerListKey;
     const prevScrollTop = body.scrollTop;
     const crumbs = buildBreadcrumbSegments(activeSubDir);
-    const hostId = esc(host.hostId);
-    const sessionId = esc(found.session.id);
+    const hostId = escJsStr(host.hostId);
+    const sessionId = escJsStr(found.session.id);
 
     body.innerHTML = `
         <div class="breadcrumbs-bar">
-          <span class="crumb-link" onclick="requestDirList('${hostId}', '${sessionId}', '${esc(rootCwd)}', '', true)">🏠 ${esc(found.session.project)}</span>
+          <span class="crumb-link" onclick="requestDirList('${hostId}', '${sessionId}', '${escJsStr(rootCwd)}', '', true)">🏠 ${esc(found.session.project)}</span>
           ${crumbs.map((c, index) => {
       const isLast = index === crumbs.length - 1;
       const sep = '<span style="color:#94a3b8;">/</span>';
       return sep + (isLast
         ? `<span style="font-weight:600;color:var(--text);">${esc(c.name)}</span>`
-        : `<span class="crumb-link" onclick="requestDirList('${hostId}', '${sessionId}', '${esc(rootCwd)}', '${esc(c.path)}', true)">${esc(c.name)}</span>`);
+        : `<span class="crumb-link" onclick="requestDirList('${hostId}', '${sessionId}', '${escJsStr(rootCwd)}', '${escJsStr(c.path)}', true)">${esc(c.name)}</span>`);
     }).join('')}
           ${crumbs.length === 0 ? `<span style="color:#94a3b8;margin-left:auto;font-family:monospace;">${esc(rootCwd)}</span>` : ''}
         </div>
         <div>
           ${loadingDir ? fileLoadingSpinnerHtml(activeSubDir ? `正在读取 ${activeSubDir} …` : '正在读取目录…') : (entries.map(e => `
-            <div class="file-row" onclick="clickRealFileEntry('${hostId}', '${sessionId}', '${esc(rootCwd)}', '${esc(e.relPath)}', ${Boolean(e.isDirectory)}, true)">
+            <div class="file-row" onclick="clickRealFileEntry('${hostId}', '${sessionId}', '${escJsStr(rootCwd)}', '${escJsStr(e.relPath)}', ${Boolean(e.isDirectory)}, true)">
               <div class="file-row-left">
                 <span style="font-size:18px;">${fileEntryIcon(e)}</span>
                 <span style="font-weight:500;">${esc(e.name)}</span>
@@ -6256,11 +6279,11 @@ export function initHubController() {
     } else {
       const srcdocAttr = escapeSrcdocAttr(
         buildSandboxedHtmlSrcdoc(activeHtmlOverlay.rawHtml || '', {
-          hostId: activeHtmlOverlay.hostId || '',
+          hostId: activeHtmlOverlay.isInlineSnippet ? '' : (activeHtmlOverlay.hostId || ''),
           relPath: activeHtmlOverlay.relPath || '',
           cwd: activeHtmlOverlay.cwd || '',
           agentId: activeHtmlOverlay.agentId || '',
-          mediaTicket: hubState.mediaTicket || '',
+          mediaTicket: activeHtmlOverlay.isInlineSnippet ? '' : (hubState.mediaTicket || ''),
           origin: typeof location !== 'undefined' ? location.origin : '',
         })
       );
@@ -6279,6 +6302,7 @@ export function initHubController() {
       relPath: opts?.relPath || '',
       cwd: opts?.cwd || '',
       agentId: opts?.agentId || '',
+      isInlineSnippet: Boolean(opts?.isInlineSnippet),
       showSource: false,
     };
     renderFullscreenHtmlOverlay();
@@ -6296,10 +6320,11 @@ export function initHubController() {
     openFullscreenHtmlOverlay({
       title: '对话内 HTML 交互预览',
       rawHtml,
-      hostId: found?.host?.hostId || '',
+      hostId: '',
       relPath: 'inline.html',
       cwd: found?.session?.cwd || fileProjectCwd || '',
       agentId: found?.session?.id || '',
+      isInlineSnippet: true,
     });
   }
 
@@ -6362,12 +6387,12 @@ export function initHubController() {
       const titleText = isMarkdownFileName(preview.name || preview.relPath || '')
         ? '导出、分享或复制 Markdown 文档'
         : '保存、分享或复制文件';
-      return `<button type="button" class="icon-pill-btn file-export-trigger-btn${inDrawer ? ' is-compact-icon' : ''}" title="${esc(titleText)}" aria-label="${esc(titleText)}" onclick="openFileExportSheet('${esc(hostId)}', ${inDrawer ? 'true' : 'false'})">${EXPORT_TRAY_ICON_SVG}${label}</button>`;
+      return `<button type="button" class="icon-pill-btn file-export-trigger-btn${inDrawer ? ' is-compact-icon' : ''}" title="${esc(titleText)}" aria-label="${esc(titleText)}" onclick="openFileExportSheet('${escJsStr(hostId)}', ${inDrawer ? 'true' : 'false'})">${EXPORT_TRAY_ICON_SVG}${label}</button>`;
     }
     const effectiveDl = dlUrl || (kind === 'image' ? imagePreviewSrc(preview, mt) : '');
     if (!effectiveDl) return '';
     const label = inDrawer ? '' : '<span>保存</span>';
-    return `<button type="button" class="icon-pill-btn file-export-trigger-btn${inDrawer ? ' is-compact-icon' : ''}" title="保存或分享原文件" aria-label="保存或分享原文件" onclick="downloadPreviewMedia('${esc(effectiveDl)}', '${esc(preview.name || 'download')}', this)">${EXPORT_TRAY_ICON_SVG}${label}</button>`;
+    return `<button type="button" class="icon-pill-btn file-export-trigger-btn${inDrawer ? ' is-compact-icon' : ''}" title="保存或分享原文件" aria-label="保存或分享原文件" onclick="downloadPreviewMedia('${escJsStr(effectiveDl)}', '${escJsStr(preview.name || 'download')}', this)">${EXPORT_TRAY_ICON_SVG}${label}</button>`;
   }
 
   function setExportBtnBusy(btnEl, busyText) {
@@ -7012,6 +7037,7 @@ export function initHubController() {
       if (existing) existing.remove();
       const frame = document.createElement('iframe');
       frame.id = 'dshPrintExportFrame';
+      frame.setAttribute('sandbox', 'allow-same-origin allow-modals');
       frame.setAttribute('aria-hidden', 'true');
       frame.style.cssText = 'position:fixed;right:0;bottom:0;width:1px;height:1px;border:0;opacity:0;pointer-events:none;';
       const cleanup = () => {
@@ -7147,8 +7173,8 @@ export function initHubController() {
                <video class="file-preview-video" data-hls-src="${esc(videoHlsSrc(preview, mt))}" data-fallback-src="${esc(videoPreviewSrc(preview, mt))}" data-video-bytes="${Number(preview.size || 0)}" data-dsh-universal-direct="${preview.videoProbe?.universalDirectPlay ? '1' : '0'}" controls playsinline webkit-playsinline preload="metadata" onloadedmetadata="onSmartVideoLoadedMeta(this)" onerror="onSmartVideoError(this)"></video>
                <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:8px;">
                  <span data-dsh-video-status="1" style="font-size:12px;color:#94a3b8;">🎬 ${esc(formatBytes(preview.size))} · ${esc(videoMetaUi.badge)}</span>
-                 <button type="button" class="media-toolbar-pill" onclick="switchVideoTranscodeMode('${esc(host.hostId)}', false)">${esc(videoMetaUi.toggleLabel)}</button>
-                 ${dlUrl ? `<button type="button" class="media-toolbar-pill" onclick="downloadPreviewMedia('${esc(dlUrl)}', '${esc(preview.name || 'video.mp4')}', this)">⬇️ 保存/分享视频</button>` : ''}
+                 <button type="button" class="media-toolbar-pill" onclick="switchVideoTranscodeMode('${escJsStr(host.hostId)}', false)">${esc(videoMetaUi.toggleLabel)}</button>
+                 ${dlUrl ? `<button type="button" class="media-toolbar-pill" onclick="downloadPreviewMedia('${escJsStr(dlUrl)}', '${escJsStr(preview.name || 'video.mp4')}', this)">⬇️ 保存/分享视频</button>` : ''}
                </div>
              </div>`
         : kind === 'image'
@@ -7158,7 +7184,7 @@ export function initHubController() {
                    <div style="font-size:36px;">📦</div>
                    <div style="font-size:14.5px;font-weight:600;color:#e2e8f0;">${esc(preview.name)}</div>
                    <div style="font-size:13px;">二进制文件（${esc(formatBytes(preview.size))}），不支持直接文本预览</div>
-                   ${dlUrl ? `<button type="button" class="media-toolbar-pill" onclick="downloadPreviewMedia('${esc(dlUrl)}', '${esc(preview.name || 'file')}', this)">⬇️ 保存/分享文件</button>` : ''}
+                   ${dlUrl ? `<button type="button" class="media-toolbar-pill" onclick="downloadPreviewMedia('${escJsStr(dlUrl)}', '${escJsStr(preview.name || 'file')}', this)">⬇️ 保存/分享文件</button>` : ''}
                  </div>`
             : (isHtml && !rawHtmlMode)
               ? `<div class="file-preview-body html-sandbox-preview" style="padding:0;background:#ffffff;min-height:calc(100% - 44px);">
@@ -7173,14 +7199,14 @@ export function initHubController() {
                    </div>`;
       container.innerHTML = `
           <div class="breadcrumbs-bar file-preview-header-bar">
-            <button class="back-btn" style="padding:0;font-size:13.5px;display:inline-flex !important;flex-shrink:0;" onclick="closeMainFilePreview('${esc(host.hostId)}')">‹ 返回文件列表</button>
+            <button class="back-btn" style="padding:0;font-size:13.5px;display:inline-flex !important;flex-shrink:0;" onclick="closeMainFilePreview('${escJsStr(host.hostId)}')">‹ 返回文件列表</button>
             <span class="file-preview-header-name" title="${esc(preview.name)}">${esc(preview.name)}</span>
             <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
-              ${isHtml ? `<button class="icon-pill-btn" style="color:var(--primary);border-color:#bfdbfe;background:var(--primary-soft);" onclick="openFullscreenHtmlFromPreview('${esc(host.hostId)}', false)">⛶ 全屏体验</button><button class="icon-pill-btn" onclick="toggleHtmlPreviewMode()">${rawHtmlMode ? '🌐 预览' : '</> 源码'}</button>` : ''}
+              ${isHtml ? `<button class="icon-pill-btn" style="color:var(--primary);border-color:#bfdbfe;background:var(--primary-soft);" onclick="openFullscreenHtmlFromPreview('${escJsStr(host.hostId)}', false)">⛶ 全屏体验</button><button class="icon-pill-btn" onclick="toggleHtmlPreviewMode()">${rawHtmlMode ? '🌐 预览' : '</> 源码'}</button>` : ''}
               ${isMarkdown ? `<button class="icon-pill-btn" onclick="toggleMdPreviewMode()">${rawMdMode ? '📖 渲染' : '</> 源码'}</button>` : ''}
               ${headerExportBtnHtml}
-              ${kind !== 'text' ? '' : `<button class="icon-pill-btn" onclick="copyCodeText('${encodeURIComponent(preview.content || '')}')">📋 复制</button>`}
-              <button class="icon-pill-btn" style="color:var(--primary);border-color:#bfdbfe;background:var(--primary-soft);" onclick="askAiAboutFile('${esc(host.hostId)}', '${esc(fileProjectCwd)}', '${esc(preview.relPath || preview.name)}')">💬 让 AI 分析</button>
+              ${kind !== 'text' ? '' : `<button class="icon-pill-btn" onclick="copyMainFilePreviewContent('${escJsStr(host.hostId)}')">📋 复制</button>`}
+              <button class="icon-pill-btn" style="color:var(--primary);border-color:#bfdbfe;background:var(--primary-soft);" onclick="askAiAboutFile('${escJsStr(host.hostId)}', '${escJsStr(fileProjectCwd)}', '${escJsStr(preview.relPath || preview.name)}')">💬 让 AI 分析</button>
             </div>
           </div>
           ${previewBodyHtml}
@@ -7214,7 +7240,7 @@ export function initHubController() {
     const projectPillsHtml = `
         <div class="filter-strip" style="border-bottom:1px solid var(--hairline);">
           ${projects.map(p => `
-            <button class="filter-pill ${p.cwd === fileProjectCwd ? 'active' : ''}" onclick="requestDirList('${esc(host.hostId)}', '${esc(agentId)}', '${esc(p.cwd)}', '')">📁 ${esc(p.name)}</button>
+            <button class="filter-pill ${p.cwd === fileProjectCwd ? 'active' : ''}" onclick="requestDirList('${escJsStr(host.hostId)}', '${escJsStr(agentId)}', '${escJsStr(p.cwd)}', '')">📁 ${esc(p.name)}</button>
           `).join('')}
         </div>
       `;
@@ -7222,13 +7248,13 @@ export function initHubController() {
     // 逐级面包屑：src / lib / utils 都能点，不用先退回根目录
     const breadcrumbHtml = `
         <div class="breadcrumbs-bar">
-          <span class="crumb-link" onclick="requestDirList('${esc(host.hostId)}', '${esc(agentId)}', '${esc(rootCwd)}', '')">🏠 根目录</span>
+          <span class="crumb-link" onclick="requestDirList('${escJsStr(host.hostId)}', '${escJsStr(agentId)}', '${escJsStr(rootCwd)}', '')">🏠 根目录</span>
           ${crumbs.map((c, index) => {
       const isLast = index === crumbs.length - 1;
       const sep = '<span style="color:#94a3b8;">/</span>';
       return sep + (isLast
         ? `<span style="font-weight:600;color:var(--text);">${esc(c.name)}</span>`
-        : `<span class="crumb-link" onclick="requestDirList('${esc(host.hostId)}', '${esc(agentId)}', '${esc(rootCwd)}', '${esc(c.path)}')">${esc(c.name)}</span>`);
+        : `<span class="crumb-link" onclick="requestDirList('${escJsStr(host.hostId)}', '${escJsStr(agentId)}', '${escJsStr(rootCwd)}', '${escJsStr(c.path)}')">${esc(c.name)}</span>`);
     }).join('')}
           ${crumbs.length === 0 ? `<span style="color:#94a3b8;margin-left:auto;font-family:monospace;">${esc(rootCwd)}</span>` : ''}
         </div>
@@ -7237,7 +7263,7 @@ export function initHubController() {
     const listHtml = loadingDir
       ? fileLoadingSpinnerHtml(activeSubDir ? `正在读取 ${activeSubDir} …` : '正在读取目录…')
       : (entries.map(e => `
-        <div class="file-row" onclick="clickRealFileEntry('${esc(host.hostId)}', '${esc(agentId)}', '${esc(listing?.rootCwd || fileProjectCwd)}', '${esc(e.relPath)}', ${Boolean(e.isDirectory)}, false)">
+        <div class="file-row" onclick="clickRealFileEntry('${escJsStr(host.hostId)}', '${escJsStr(agentId)}', '${escJsStr(listing?.rootCwd || fileProjectCwd)}', '${escJsStr(e.relPath)}', ${Boolean(e.isDirectory)}, false)">
           <div class="file-row-left">
             <span style="font-size:18px;">${fileEntryIcon(e)}</span>
             <span style="font-weight:500;">${esc(e.name)}</span>
@@ -7328,7 +7354,7 @@ export function initHubController() {
         const shortName = shortHostMap[h.hostId] || h.hostName;
         const isSel = h.hostId === newTaskHostId;
         return `
-            <button type="button" class="context-chip ${isSel ? 'selected' : ''}" title="${esc(h.hostName)}" onclick="selectNewTaskHost('${esc(h.hostId)}')">
+            <button type="button" class="context-chip ${isSel ? 'selected' : ''}" title="${esc(h.hostName)}" onclick="selectNewTaskHost('${escJsStr(h.hostId)}')">
               🟢 ${esc(shortName)}
             </button>
           `;
@@ -7371,7 +7397,7 @@ export function initHubController() {
           ? (() => {
             const folderLabel = newTaskCwd.replace(/[/\\]+$/, '').split(/[/\\]/).pop() || newTaskCwd;
             const prefix = newTaskCustomIsNew ? `✨ 新建：${folderLabel}` : `📂 ${folderLabel}`;
-            return `<button type="button" class="new-task-proj-pill selected" title="${esc(newTaskCwd)}" onclick="selectNewTaskProject('${esc(newTaskCwd)}', ${newTaskCustomIsNew ? 'true' : 'false'})">${esc(prefix)}</button>`;
+            return `<button type="button" class="new-task-proj-pill selected" title="${esc(newTaskCwd)}" onclick="selectNewTaskProject('${escJsStr(newTaskCwd)}', ${newTaskCustomIsNew ? 'true' : 'false'})">${esc(prefix)}</button>`;
           })()
           : '';
       projChips.innerHTML =
@@ -7379,7 +7405,7 @@ export function initHubController() {
         projects
           .map(
             p => `
-          <button type="button" class="new-task-proj-pill ${p.cwd === newTaskCwd ? 'selected' : ''}" title="${esc(p.name)} (${esc(p.cwd)})" onclick="selectNewTaskProject('${esc(p.cwd)}', false)">
+          <button type="button" class="new-task-proj-pill ${p.cwd === newTaskCwd ? 'selected' : ''}" title="${esc(p.name)} (${esc(p.cwd)})" onclick="selectNewTaskProject('${escJsStr(p.cwd)}', false)">
             📁 ${esc(formatCompactProjectLabel(p.name))}
           </button>
         `
@@ -7604,12 +7630,12 @@ export function initHubController() {
         <div style="padding:10px 12px;background:var(--subtle);border:1px solid var(--border);border-radius:12px;margin-bottom:10px;">
           <div style="font-size:11.5px;color:var(--muted);word-break:break-all;margin-bottom:8px;">📂 ${esc(curDir)}</div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;">
-            <button type="button" class="pill-action-btn primary" style="flex:1;justify-content:center;padding:7px 12px;font-size:12.5px;" onclick="selectBrowsedNewTaskDir('${esc(curDir)}')">✓ 选定此目录作为工作区</button>
+            <button type="button" class="pill-action-btn primary" style="flex:1;justify-content:center;padding:7px 12px;font-size:12.5px;" onclick="selectBrowsedNewTaskDir('${escJsStr(curDir)}')">✓ 选定此目录作为工作区</button>
             <button type="button" class="pill-action-btn" style="padding:7px 10px;font-size:12.5px;" onclick="openCreateUnderCurrentBrowseDir()">＋ 新工作区</button>
           </div>
         </div>
         ${parentDir ? `
-          <div class="host-option" onclick="browseNewTaskDir('${esc(parentDir)}')">
+          <div class="host-option" onclick="browseNewTaskDir('${escJsStr(parentDir)}')">
             <div style="font-size:13px;font-weight:600;color:var(--primary);">⬆️ 返回上一级目录</div>
             <span style="font-size:11px;color:var(--muted);margin-left:auto;max-width:52%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(parentDir)}</span>
           </div>
@@ -7621,7 +7647,7 @@ export function initHubController() {
         ` : newTaskBrowseEntries.map(dir => {
         const childFull = joinRemotePath(curDir, dir.name, homeGuess);
         return `
-            <div class="host-option" onclick="browseNewTaskDir('${esc(childFull)}')">
+            <div class="host-option" onclick="browseNewTaskDir('${escJsStr(childFull)}')">
               <div style="min-width:0;flex:1;display:flex;align-items:center;gap:8px;">
                 <span>📁</span>
                 <span style="font-size:13.5px;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(dir.name)}</span>
@@ -7690,7 +7716,7 @@ export function initHubController() {
     body.innerHTML = filtered.map(p => {
       const isSel = p.cwd === newTaskCwd;
       return `
-        <div class="host-option ${isSel ? 'selected' : ''}" onclick="selectNewTaskProject('${esc(p.cwd)}', false); closeSheet('newTaskProjectPickerSheet');">
+        <div class="host-option ${isSel ? 'selected' : ''}" onclick="selectNewTaskProject('${escJsStr(p.cwd)}', false); closeSheet('newTaskProjectPickerSheet');">
           <div style="min-width:0;flex:1;">
             <div style="font-size:13.5px;font-weight:700;color:var(--text);">📁 ${esc(p.name)}</div>
             <div style="font-size:11px;color:var(--muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(p.cwd)}</div>
@@ -7830,7 +7856,7 @@ export function initHubController() {
           ${s.pinned ? '📌 取消置顶此对话' : '📌 置顶此对话（固定在列表最顶部）'}
         </button>
         <button class="action-item" onclick="shareTargetSession()">🔗 生成 AES-256 端到端加密回放链接</button>
-        <button class="action-item" onclick="jumpToSessionFiles('${esc(s.hostId)}', '${esc(s.id)}', '${esc(s.cwd)}')">📂 查看【${esc(s.project)}】项目文件夹</button>
+        <button class="action-item" onclick="jumpToSessionFiles('${escJsStr(s.hostId)}', '${escJsStr(s.id)}', '${escJsStr(s.cwd)}')">📂 查看【${esc(s.project)}】项目文件夹</button>
         <button class="action-item danger" onclick="deleteTargetSession()">
           ${confirmSheetDelete ? '⚠️ 再次点击确认彻底删除' : '🗑️ 删除此条会话记录'}
         </button>
@@ -7928,7 +7954,7 @@ export function initHubController() {
           <button
             class="primary-block-btn"
             style="margin-top:0;flex:1;"
-            onclick="copyCodeText('${encodeURIComponent(url)}', '🔗 加密分享链接已复制到剪贴板！')"
+            onclick="copyCodeText('${escUriJsStr(url)}', '🔗 加密分享链接已复制到剪贴板！')"
           >
             📋 复制加密链接
           </button>
@@ -8173,7 +8199,7 @@ export function initHubController() {
                 </div>
               </div>
               <div style="display:flex;align-items:center;gap:5px;flex-shrink:0;">
-                <button class="pill-action-btn primary" style="padding:5px 9px;font-size:11.5px;" onclick="event.stopPropagation(); copyCodeText('${encodeURIComponent(oneLineCmd)}', '📋 一行接入命令已复制！到电脑终端粘贴回车即可')">
+                <button class="pill-action-btn primary" style="padding:5px 9px;font-size:11.5px;" onclick="event.stopPropagation(); copyCodeText('${escUriJsStr(oneLineCmd)}', '📋 一行接入命令已复制！到电脑终端粘贴回车即可')">
                   📋 复制命令
                 </button>
                 <button class="pill-action-btn" style="padding:5px 8px;font-size:11.5px;" onclick="event.stopPropagation(); openPairingCodeSheet()">
@@ -8248,10 +8274,10 @@ export function initHubController() {
           >${esc(oneLineCmd)}</div>
 
           <div style="display:flex;gap:8px;flex-wrap:wrap;">
-            <button class="pill-action-btn primary" onclick="copyCodeText('${encodeURIComponent(oneLineCmd)}', '📋 一行接入命令已复制！到电脑终端粘贴回车即可')">
+            <button class="pill-action-btn primary" onclick="copyCodeText('${escUriJsStr(oneLineCmd)}', '📋 一行接入命令已复制！到电脑终端粘贴回车即可')">
               📋 复制一行安装命令
             </button>
-            <button class="pill-action-btn" onclick="copyCodeText('${encodeURIComponent(localRepoCmd)}', '📋 本地仓库接入命令已复制')">
+            <button class="pill-action-btn" onclick="copyCodeText('${escUriJsStr(localRepoCmd)}', '📋 本地仓库接入命令已复制')">
               📋 已克隆仓库用此条
             </button>
             <button class="pill-action-btn" onclick="openPairingCodeSheet()">
@@ -8422,7 +8448,7 @@ export function initHubController() {
                 <div class="host-visual-card ${h.isFeishuActive ? 'active-feishu' : ''}" style="padding:12px 14px;${isHostLive ? '' : 'opacity:0.78;'}">
                   <div
                     style="display:flex;align-items:center;justify-content:space-between;gap:8px;cursor:pointer;user-select:none;"
-                    onclick="toggleHostSettingsCard('${esc(h.hostId)}')"
+                    onclick="toggleHostSettingsCard('${escJsStr(h.hostId)}')"
                   >
                     <div style="min-width:0;flex:1;">
                       <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
@@ -8447,7 +8473,7 @@ export function initHubController() {
                         <button
                           class="pill-action-btn primary"
                           style="padding:4px 9px;font-size:11.5px;"
-                          onclick="event.stopPropagation(); upgradeHostTurbo('${esc(h.hostId)}', '${esc(h.hostName)}')"
+                          onclick="event.stopPropagation(); upgradeHostTurbo('${escJsStr(h.hostId)}', '${escJsStr(h.hostName)}')"
                         >🔄 一键升级</button>
                       ` : ''}
                       <span style="font-size:11.5px;font-weight:600;color:var(--text-secondary);padding:4px 8px;border-radius:999px;background:var(--subtle);">
@@ -8505,24 +8531,24 @@ export function initHubController() {
 
                       <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;flex-wrap:wrap;padding-top:4px;">
                         <div style="display:flex;gap:6px;flex-wrap:wrap;">
-                          <button class="pill-action-btn ${h.isFeishuActive ? 'primary' : ''}" style="padding:5px 10px;font-size:11.5px;" onclick="activateFeishuHost('${esc(h.hostId)}')">
+                          <button class="pill-action-btn ${h.isFeishuActive ? 'primary' : ''}" style="padding:5px 10px;font-size:11.5px;" onclick="activateFeishuHost('${escJsStr(h.hostId)}')">
                             ${h.isFeishuActive ? '🎯 飞书当前主控' : '切飞书到这台'}
                           </button>
-                          <button class="pill-action-btn ${h.remoteActive ? 'primary' : ''}" style="padding:5px 10px;font-size:11.5px;" onclick="toggleHostRemoteMode('${esc(h.hostId)}', ${!h.remoteActive})">
+                          <button class="pill-action-btn ${h.remoteActive ? 'primary' : ''}" style="padding:5px 10px;font-size:11.5px;" onclick="toggleHostRemoteMode('${escJsStr(h.hostId)}', ${!h.remoteActive})">
                             ${h.remoteActive ? '🔔 飞书通知: 开' : '🔕 飞书通知: 关'}
                           </button>
                           <button class="pill-action-btn" style="padding:5px 10px;font-size:11.5px;" onclick="openTurboGuideSheet()">
                             ${h.bridgeState?.turbo?.enabled ? '⚡ 极速详情' : '🚀 一键提速'}
                           </button>
-                          <button class="pill-action-btn ${isHostOutdated ? 'primary' : ''}" style="padding:5px 10px;font-size:11.5px;" onclick="upgradeHostTurbo('${esc(h.hostId)}', '${esc(h.hostName)}')" ${isUpgradingHost ? 'disabled' : ''}>
+                          <button class="pill-action-btn ${isHostOutdated ? 'primary' : ''}" style="padding:5px 10px;font-size:11.5px;" onclick="upgradeHostTurbo('${escJsStr(h.hostId)}', '${escJsStr(h.hostName)}')" ${isUpgradingHost ? 'disabled' : ''}>
                             ${isUpgradingHost ? '⏳ 正在升级重启...' : (isHostOutdated ? `🔄 一键升级 (v${esc(hubVer)})` : '🔄 检查/重装更新')}
                           </button>
                         </div>
                         <div>
                           ${isRevoked ? `
-                            <button class="pill-action-btn" style="padding:5px 10px;font-size:11.5px;" onclick="unrevokeHostCredential('${esc(h.hostId)}', '${esc(h.hostName)}')">恢复接入</button>
+                            <button class="pill-action-btn" style="padding:5px 10px;font-size:11.5px;" onclick="unrevokeHostCredential('${escJsStr(h.hostId)}', '${escJsStr(h.hostName)}')">恢复接入</button>
                           ` : `
-                            <button class="pill-action-btn" style="padding:5px 10px;font-size:11.5px;color:var(--red);" onclick="revokeHostCredential('${esc(h.hostId)}', '${esc(h.hostName)}')">🚫 吊销凭证</button>
+                            <button class="pill-action-btn" style="padding:5px 10px;font-size:11.5px;color:var(--red);" onclick="revokeHostCredential('${escJsStr(h.hostId)}', '${escJsStr(h.hostName)}')">🚫 吊销凭证</button>
                           `}
                         </div>
                       </div>
@@ -8625,7 +8651,7 @@ export function initHubController() {
                     ${esc(item.fullUrl)}
                   </div>
                   <div style="display:flex;gap:8px;">
-                    <button class="pill-action-btn primary" onclick="copyCodeText('${encodeURIComponent(item.fullUrl)}', '🔗 加密分享链接已复制')">📋 复制完整解密链接</button>
+                    <button class="pill-action-btn primary" onclick="copyCodeText('${escUriJsStr(item.fullUrl)}', '🔗 加密分享链接已复制')">📋 复制完整解密链接</button>
                     <a href="${esc(item.fullUrl)}" target="_blank" rel="noopener" class="pill-action-btn" style="text-decoration:none;display:inline-flex;align-items:center;">🌐 打开</a>
                   </div>
                 </div>
@@ -8636,7 +8662,7 @@ export function initHubController() {
                     <div class="settings-item-title">${esc(s.title || '加密会话回放')}</div>
                     <div class="settings-item-desc">来自 ${esc(s.hostName || s.hostId || '远端电脑')} · ${formatTime(s.createdAt)} · ${formatBytes(s.sizeBytes || 0)}</div>
                   </div>
-                  <button class="pill-action-btn" style="color:var(--red);" onclick="deleteShareRecord('${esc(s.id || s.shareId)}')">🗑️ 销毁</button>
+                  <button class="pill-action-btn" style="color:var(--red);" onclick="deleteShareRecord('${escJsStr(s.id || s.shareId)}')">🗑️ 销毁</button>
                 </div>
               `).join('') : `
                 <div class="settings-item">
@@ -8686,7 +8712,7 @@ export function initHubController() {
                             IP: <code>${esc(dev.ip || '-')}</code> · 最近活跃 ${formatTime(dev.lastSeen || dev.approvedAt)}
                           </div>
                         </div>
-                        <button class="pill-action-btn" style="color:var(--red);padding:4px 8px;font-size:11px;" onclick="revokeTrustedDeviceById('${esc(dev.id)}')">🚫 踢出</button>
+                        <button class="pill-action-btn" style="color:var(--red);padding:4px 8px;font-size:11px;" onclick="revokeTrustedDeviceById('${escJsStr(dev.id)}')">🚫 踢出</button>
                       </div>
                     `).join('')}
                   </div>
@@ -8804,7 +8830,7 @@ export function initHubController() {
             </div>
             <div
               style="font-size:11.5px;color:var(--muted);cursor:pointer;user-select:none;"
-              onclick="copyCodeText('${encodeURIComponent(`DSH Hub v${buildInfo.version || '0.2.0'} (${buildInfo.uiBuild || 'dev'}) · started ${buildInfo.startedAt ? new Date(buildInfo.startedAt).toISOString() : ''}`)}', '📋 版本信息已复制')"
+              onclick="copyCodeText('${escUriJsStr(`DSH Hub v${buildInfo.version || '0.2.0'} (${buildInfo.uiBuild || 'dev'}) · started ${buildInfo.startedAt ? new Date(buildInfo.startedAt).toISOString() : ''}`)}', '📋 版本信息已复制')"
             >
               DSH 远控总控台 v${esc(buildInfo.version || '0.2.0')} · 构建 <code>${esc(buildInfo.uiBuild || 'dev')}</code>${buildInfo.startedAt ? ' · 云端启动于 ' + formatTime(buildInfo.startedAt) : ''}
             </div>
@@ -9222,7 +9248,7 @@ export function initHubController() {
           : `已离线 (${formatTime(h.lastSeen)})`;
         const feishuTag = h.isFeishuActive ? ' · 🎯 飞书主控' : '';
         return `
-          <div class="host-option ${h.hostId === currentHostId ? 'selected' : ''}" style="${live ? '' : 'opacity:0.78;'}" onclick="selectHost('${esc(h.hostId)}')">
+          <div class="host-option ${h.hostId === currentHostId ? 'selected' : ''}" style="${live ? '' : 'opacity:0.78;'}" onclick="selectHost('${escJsStr(h.hostId)}')">
             <div>
               <div style="font-weight:700;font-size:15px;color:var(--text);">${live ? '🟢' : '⚪'} ${esc(h.hostName)}</div>
               <div style="font-size:12.5px;color:var(--muted);margin-top:2px;">${(h.bridgeState?.tasks || []).length} 条会话 · ${esc(statusDesc)}${feishuTag}</div>
@@ -9370,6 +9396,12 @@ export function initHubController() {
     void copyText(text, { successMessage });
   }
 
+  function copyMainFilePreviewContent(hostId) {
+    const host = (hubState.hosts || []).find(h => h.hostId === hostId);
+    const preview = pinnedMainPreviewByHost[hostId] || host?.lastFilePreview;
+    void copyText(String(preview?.content || ''), { successMessage: '📋 已复制到剪贴板' });
+  }
+
   function openTurboGuideSheet() {
     const hosts = hubState.hosts || [];
     const enrollCode = hubState.enrollment?.code || '配对码';
@@ -9400,10 +9432,10 @@ export function initHubController() {
                   辅助功能遥控权限：${axOk ? '<span style="color:var(--green);font-weight:600;">✅ 已授权 (支持 1ms 审批点击)</span>' : '<span style="color:var(--amber);font-weight:600;">⚠️ 待开启或待升级</span>'}
                 </div>
                 <div style="display:flex;gap:8px;flex-wrap:wrap;">
-                  <button class="pill-action-btn primary" style="font-size:12px;padding:5px 11px;" onclick="upgradeHostTurbo('${esc(h.hostId)}')">
+                  <button class="pill-action-btn primary" style="font-size:12px;padding:5px 11px;" onclick="upgradeHostTurbo('${escJsStr(h.hostId)}')">
                     🚀 远程一键升级/刷新极速引擎
                   </button>
-                  <button class="pill-action-btn" style="font-size:12px;padding:5px 11px;" onclick="requestHostAxPermission('${esc(h.hostId)}')">
+                  <button class="pill-action-btn" style="font-size:12px;padding:5px 11px;" onclick="requestHostAxPermission('${escJsStr(h.hostId)}')">
                     🔓 在电脑弹出辅助功能授权框
                   </button>
                 </div>
@@ -9417,7 +9449,7 @@ export function initHubController() {
           <div style="padding:10px 12px;border-radius:10px;background:var(--subtle);border:1px solid var(--border);color:var(--text);">
             <strong>① 一步命令接入（自动启用 Rust 加速 + 免二次安装）</strong><br/>
             新电脑只需运行一次 <code>./connect-host.sh</code>，脚本会自动寻找系统或 IDE 内置运行时、挂载 <code>dsh-turbo</code> 预编译 Rust 加速模块，并自动弹出 macOS 辅助功能授权框。<br/>
-            <button class="pill-action-btn" style="margin-top:6px;font-size:11.5px;padding:4px 10px;" onclick="copyCodeText('${encodeURIComponent(oneStepCmd)}')">📋 复制一键满血接入命令</button>
+            <button class="pill-action-btn" style="margin-top:6px;font-size:11.5px;padding:4px 10px;" onclick="copyCodeText('${escUriJsStr(oneStepCmd)}')">📋 复制一键满血接入命令</button>
           </div>
           <div style="padding:10px 12px;border-radius:10px;background:var(--subtle);border:1px solid var(--border);color:var(--text);">
             <strong>② 勾选 macOS「辅助功能」权限</strong><br/>
@@ -11160,8 +11192,8 @@ export function initHubController() {
               设备：<strong>${esc(req.name)}</strong> · 来源 IP：<code>${esc(req.ip || 'unknown')}</code>
             </div>
             <div style="display:flex;gap:8px;">
-              <button type="button" class="pill-action-btn primary" style="flex:1;justify-content:center;" onclick="decideDeviceLoginRequest('${esc(req.id)}', true)">✓ 允许此设备登录</button>
-              <button type="button" class="pill-action-btn" style="flex:1;justify-content:center;color:var(--red);" onclick="decideDeviceLoginRequest('${esc(req.id)}', false)">🚫 拒绝</button>
+              <button type="button" class="pill-action-btn primary" style="flex:1;justify-content:center;" onclick="decideDeviceLoginRequest('${escJsStr(req.id)}', true)">✓ 允许此设备登录</button>
+              <button type="button" class="pill-action-btn" style="flex:1;justify-content:center;color:var(--red);" onclick="decideDeviceLoginRequest('${escJsStr(req.id)}', false)">🚫 拒绝</button>
             </div>
           </div>
         `).join('')}
@@ -11172,8 +11204,8 @@ export function initHubController() {
               电脑：<strong>${esc(h.hostName || h.hostId)}</strong> (${esc(h.platform || 'host')}) · IP：<code>${esc(h.ip || 'unknown')}</code>
             </div>
             <div style="display:flex;gap:8px;">
-              <button type="button" class="pill-action-btn primary" style="flex:1;justify-content:center;" onclick="decideHostJoinRequest('${esc(h.hostId)}', true)">✓ 允许此电脑接入</button>
-              <button type="button" class="pill-action-btn" style="flex:1;justify-content:center;color:var(--red);" onclick="decideHostJoinRequest('${esc(h.hostId)}', false)">🚫 拒绝并拉黑</button>
+              <button type="button" class="pill-action-btn primary" style="flex:1;justify-content:center;" onclick="decideHostJoinRequest('${escJsStr(h.hostId)}', true)">✓ 允许此电脑接入</button>
+              <button type="button" class="pill-action-btn" style="flex:1;justify-content:center;color:var(--red);" onclick="decideHostJoinRequest('${escJsStr(h.hostId)}', false)">🚫 拒绝并拉黑</button>
             </div>
           </div>
         `).join('')}
@@ -11508,6 +11540,7 @@ export function initHubController() {
     openCopyFallbackSheet,
     retryCopyFromFallbackSheet,
     copyCodeText,
+    copyMainFilePreviewContent,
     openTurboGuideSheet,
     requestHostAxPermission,
     compareSemver,

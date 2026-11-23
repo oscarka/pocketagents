@@ -3176,6 +3176,29 @@ function App() {
 function esc$1(str) {
 	return String(str ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
+/**
+* Safely encode a value for interpolation inside a single-quoted JS string literal
+* placed inside a double-quoted HTML event attribute (`onclick="fn('${escJsStr(x)}')"`).
+* Contains no `"`, `'`, or `&`, so neither HTML attribute parsing nor JS string parsing can be broken.
+*/
+function escJsStr$1(str) {
+	return String(str ?? "").replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/"/g, "\\u0022").replace(/&/g, "\\u0026").replace(/</g, "\\u003c").replace(/>/g, "\\u003e").replace(/\r/g, "\\r").replace(/\n/g, "\\n").replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
+}
+/**
+* Safely encode a value for `encodeURIComponent(...)` placed inside a single-quoted JS string
+* inside an HTML attribute (escapes `'` as `%27` because RFC 3986 leaves `'` unescaped).
+*/
+function escUriJsStr(str) {
+	return encodeURIComponent(String(str ?? "")).replace(/'/g, "%27");
+}
+/**
+* Validate external link hrefs so only http:// or https:// URLs are rendered in `<a href>`.
+*/
+function safeExternalHref(url) {
+	const trimmed = String(url ?? "").trim();
+	if (!/^https?:\/\//i.test(trimmed)) return "";
+	return trimmed;
+}
 function cleanPreviewText(raw) {
 	return String(raw || "").replace(/```[\s\S]*?```/g, "[代码片段] ").replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/\[([^\]]+)\]\([^)]*\)/g, "$1").replace(/#{1,6}\s+/g, "").replace(/\*\*([^*]+)\*\*/g, "$1").replace(/\*([^*]+)\*/g, "$1").replace(/`([^`]+)`/g, "$1").replace(/\s+/g, " ").trim();
 }
@@ -3550,12 +3573,11 @@ function resolveRelativeAssetPath(baseFilePath, assetRef) {
 function buildSandboxedHtmlSrcdoc(rawHtml, opts = {}) {
 	let html = String(rawHtml || "");
 	if (!html.trim()) return "<!doctype html><html><body></body></html>";
-	const viewportMeta = "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\">";
-	if (!/<meta[^>]+name=["']viewport["']/i.test(html)) {
-		if (/<head[^>]*>/i.test(html)) html = html.replace(/<head([^>]*)>/i, `<head$1>${viewportMeta}`);
-		else if (/<html[^>]*>/i.test(html)) html = html.replace(/<html([^>]*)>/i, `<html$1><head>${viewportMeta}</head>`);
-		else html = `<!doctype html><html><head><meta charset="utf-8">${viewportMeta}</head><body>${html}</body></html>`;
-	}
+	const originPrefixForCsp = opts.hostId && opts.mediaTicket ? String(opts.origin || "").replace(/\/+$/, "").replace(/[^a-zA-Z0-9:/.%-]/g, "") : "";
+	const injectedHead = `${`<meta http-equiv="Content-Security-Policy" content="default-src 'self'${originPrefixForCsp ? ` ${originPrefixForCsp}` : ""} 'unsafe-inline' 'unsafe-eval' data: blob:; img-src * data: blob:; font-src * data: blob:; connect-src 'none'; form-action 'none';">`}${/<meta[^>]+name=["']viewport["']/i.test(html) ? "" : "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\">"}`;
+	if (/<head[^>]*>/i.test(html)) html = html.replace(/<head([^>]*)>/i, `<head$1>${injectedHead}`);
+	else if (/<html[^>]*>/i.test(html)) html = html.replace(/<html([^>]*)>/i, `<html$1><head>${injectedHead}</head>`);
+	else html = `<!doctype html><html><head><meta charset="utf-8">${injectedHead}</head><body>${html}</body></html>`;
 	if (opts.hostId && opts.mediaTicket) {
 		const originPrefix = String(opts.origin || "").replace(/\/+$/, "");
 		html = html.replace(/\b(src|href)\s*=\s*(["'])([^"']+)\2/gi, (fullMatch, attrName, quote, rawVal) => {
@@ -3856,16 +3878,51 @@ function stripMarkdownToPlainText(markdown) {
 	}
 	return out.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
+function isSafeExportUrl(rawUrl) {
+	const clean = String(rawUrl || "").replace(/[\u0000-\u0020]+/g, "").trim();
+	if (!clean) return false;
+	if (clean.startsWith("#")) return true;
+	if (/^(?:https?:|mailto:)/i.test(clean)) return true;
+	if (/^data:image\/(?:png|jpeg|jpg|gif|webp|avif);base64,[a-z0-9+/=]+$/i.test(clean)) return true;
+	return false;
+}
 /**
-* Strip PocketAgents-specific interactive inline handlers so exported standalone HTML
-* opens cleanly offline in Safari, Chrome, and WeChat without missing global function errors.
+* Strip PocketAgents-specific interactive inline handlers and active content so exported
+* standalone HTML opens safely offline in Safari, Chrome, and WeChat with zero script execution.
 */
 function sanitizeExportedBodyHtml(renderedHtml) {
-	let html = String(renderedHtml || "");
-	html = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "");
-	html = html.replace(/\s+on[a-z]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, "");
-	html = html.replace(/href\s*=\s*(["'])\s*javascript:[^"']*\1/gi, "href=\"#\"");
-	html = html.replace(/<button\b[^>]*class="[^"]*\bmd-code-copy\b[^"]*"[^>]*>[\s\S]*?<\/button>/gi, "");
+	const input = String(renderedHtml || "");
+	if (typeof DOMParser === "function") try {
+		const doc = new DOMParser().parseFromString(`<!doctype html><html><body>${input}</body></html>`, "text/html");
+		doc.body.querySelectorAll("script, iframe, object, embed, applet, frame, frameset, form, input, textarea, select, base, meta, link, style, template, button.md-code-copy, button.code-copy-btn, button.html-preview-btn").forEach((el) => el.remove());
+		doc.body.querySelectorAll("*").forEach((el) => {
+			for (const attr of Array.from(el.attributes)) {
+				const name = attr.name.toLowerCase();
+				if (name.startsWith("on") || name === "srcdoc" || name === "formaction") {
+					el.removeAttribute(attr.name);
+					continue;
+				}
+				if (name === "href" || name === "src" || name === "xlink:href" || name === "action") {
+					if (!isSafeExportUrl(attr.value)) {
+						if (name === "href") el.setAttribute("href", "#");
+						else el.removeAttribute(attr.name);
+					}
+				}
+			}
+		});
+		return doc.body.innerHTML;
+	} catch {}
+	let html = input;
+	for (let pass = 0; pass < 3; pass += 1) {
+		const prev = html;
+		html = html.replace(/<(script|iframe|object|embed|applet|base|meta|link|style|form|template)\b[^>]*>[\s\S]*?<\/\1>/gi, "");
+		html = html.replace(/<(script|iframe|object|embed|applet|base|meta|link|input)\b[^>]*\/?>/gi, "");
+		html = html.replace(/<button\b[^>]*class="[^"]*\b(?:md-code-copy|code-copy-btn|html-preview-btn)\b[^"]*"[^>]*>[\s\S]*?<\/button>/gi, "");
+		html = html.replace(/\s+on[a-z0-9_-]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, "");
+		html = html.replace(/\s+srcdoc\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, "");
+		html = html.replace(/\b(href|src|xlink:href)\s*=\s*(["'])\s*(?:javascript|vbscript|data:text\/html)[^"']*\2/gi, "$1=\"#\"");
+		if (html === prev) break;
+	}
 	return html;
 }
 function buildStandaloneMarkdownHtml({ title = "Document", renderedBodyHtml = "", sourcePath = "", exportedAt = "" }) {
@@ -3885,6 +3942,7 @@ function buildStandaloneMarkdownHtml({ title = "Document", renderedBodyHtml = ""
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src https: data:; media-src https: data:; font-src data:;" />
   <title>${safeTitle}</title>
   <style>
     :root {
@@ -8130,6 +8188,9 @@ function isHostLiveOnline(host) {
 function esc(s) {
 	return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
+function escJsStr(s) {
+	return String(s ?? "").replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/"/g, "\\u0022").replace(/&/g, "\\u0026").replace(/</g, "\\u003c").replace(/>/g, "\\u003e").replace(/\r/g, "\\r").replace(/\n/g, "\\n").replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
+}
 var REST_X = 5;
 var REST_Y = 2;
 var REST_SCALE = .984;
@@ -8823,7 +8884,7 @@ function createTriageDeckController(deps) {
           <div class="dsh-triage-hdr-info">
             <div class="dsh-triage-title-row">
               <div class="dsh-triage-title">${esc(vm.title)}</div>
-              <button type="button" class="dsh-triage-open-chat" onclick="event.stopPropagation(); triageOpenFullSession('${esc(vm.sessionId)}')">${en ? "Chat ›" : "对话 ›"}</button>
+              <button type="button" class="dsh-triage-open-chat" onclick="event.stopPropagation(); triageOpenFullSession('${escJsStr(vm.sessionId)}')">${en ? "Chat ›" : "对话 ›"}</button>
             </div>
             <div class="dsh-triage-sub">
               <span>${esc(vm.sub)}</span>
@@ -9158,7 +9219,7 @@ function createTriageDeckController(deps) {
 		const imgsHtml = vm.promptInfo.mediaPaths.map((p) => {
 			const enc = encodeURIComponent(p).replace(/'/g, "%27");
 			const fullSrc = buildLocalThumbSrc(vm.hostId, p);
-			return `<div style="margin-top:10px;" onclick="closeTriageDetailModal(); triageInspectSessionFile('${esc(vm.sessionId)}', '${enc}')">
+			return `<div style="margin-top:10px;" onclick="closeTriageDetailModal(); triageInspectSessionFile('${escJsStr(vm.sessionId)}', '${enc}')">
         <img src="${esc(fullSrc)}" alt="${en ? "Prompt Image" : "提问原图"}" style="max-width:100%;max-height:48vh;border-radius:12px;border:1px solid #cbd5e1;cursor:pointer;" />
         <div style="font-size:11.5px;color:#2563eb;font-weight:700;margin-top:4px;">${en ? "🔍 Tap to open full-res image viewer" : "🔍 点击打开高清原图预览器"}</div>
       </div>`;
@@ -9179,7 +9240,7 @@ function createTriageDeckController(deps) {
 		})}
       <span class="dsh-triage-modal-char-meta">${charMeta}</span>
     </div>`}<div class="md-body" style="font-size:14px;line-height:1.68;padding:2px 2px 6px;color:#0f172a;">${renderedMd}</div>${session._wireTruncated ? `<div style="margin-top:12px;padding:9px 12px;border-radius:10px;background:#f8fafc;color:#64748b;font-size:12px;text-align:center;">${en ? "⏳ Fetching full untruncated reply…" : "⏳ 正在从云端拉取完整未截断全文…"}</div>` : ""}${`<div style="margin-top:14px;padding-top:12px;border-top:1px solid #f1f5f9;display:flex;justify-content:center;">
-      <button type="button" class="dsh-triage-open-chat" style="padding:7px 14px;font-size:12.5px;" onclick="closeTriageDetailModal(); triageOpenFullSession('${esc(vm.sessionId)}')">${en ? "💬 Open Full Conversation ›" : "💬 进入完整对话上下文 ›"}</button>
+      <button type="button" class="dsh-triage-open-chat" style="padding:7px 14px;font-size:12.5px;" onclick="closeTriageDetailModal(); triageOpenFullSession('${escJsStr(vm.sessionId)}')">${en ? "💬 Open Full Conversation ›" : "💬 进入完整对话上下文 ›"}</button>
     </div>`}`;
 	}
 	function refreshOpenModalIfNeeded(cards) {
@@ -9738,7 +9799,7 @@ function createTriageDeckController(deps) {
 			const bodyHtml = `<div style="display:flex;flex-direction:column;gap:7px;">
           ${vm.diffInfo.files.map((f) => {
 				const enc = encodeURIComponent(f.path || f.name).replace(/'/g, "%27");
-				return `<div class="dsh-triage-file-row" onclick="closeTriageDetailModal(); triageInspectSessionFile('${esc(vm.sessionId)}', '${enc}')">
+				return `<div class="dsh-triage-file-row" onclick="closeTriageDetailModal(); triageInspectSessionFile('${escJsStr(vm.sessionId)}', '${enc}')">
               <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700;">${esc(f.name)}</span>
               <span style="flex-shrink:0;">
                 ${vm.diffInfo.hasLineCounts ? `<b style="color:#16a34a">+${f.added}</b> <b style="color:#dc2626">-${f.removed}</b>` : ""}
@@ -11345,7 +11406,7 @@ function initHubController() {
 		}))].map((opt) => {
 			const isSel = opt.value === currentSelected;
 			return `
-            <div class="host-option ${isSel ? "selected" : ""}" onclick="selectModelFromPicker('${esc$1(target)}', '${esc$1(opt.value)}')">
+            <div class="host-option ${isSel ? "selected" : ""}" onclick="selectModelFromPicker('${escJsStr$1(target)}', '${escJsStr$1(opt.value)}')">
               <div style="min-width:0;flex:1;">
                 <div style="font-size:14px;font-weight:700;color:var(--text);">${esc$1(opt.label)}</div>
                 <div style="font-size:11.5px;color:var(--muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc$1(opt.sub)}</div>
@@ -12037,7 +12098,7 @@ function initHubController() {
 			`<button type="button" class="triage-grid-entry-btn" id="triageGridEntryBtn" title="滑卡批阅模式" aria-label="滑卡批阅模式" onclick="openTriageDeckMode()"><svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><rect x="1.5" y="1.5" width="5.2" height="5.2" rx="1.4"/><rect x="9.3" y="1.5" width="5.2" height="5.2" rx="1.4"/><rect x="1.5" y="9.3" width="5.2" height="5.2" rx="1.4"/><rect x="9.3" y="9.3" width="5.2" height="5.2" rx="1.4"/></svg>${triageCount > 0 ? "<span class=\"triage-grid-dot\"></span>" : ""}</button>`,
 			`<button class="filter-pill ${currentProject === "ALL" ? "active" : ""}" onclick="selectProject('ALL')">全部 <span class="count">${sessions.length}</span></button>`,
 			...smartPills,
-			...projects.map((p) => `<button class="filter-pill ${currentProject === p ? "active" : ""}" title="${esc$1(p)}" onclick="selectProject('${esc$1(p)}')">${esc$1(formatCompactProjectLabel(p, nowDate))} <span class="count">${counts[p]}</span></button>`)
+			...projects.map((p) => `<button class="filter-pill ${currentProject === p ? "active" : ""}" title="${esc$1(p)}" onclick="selectProject('${escJsStr$1(p)}')">${esc$1(formatCompactProjectLabel(p, nowDate))} <span class="count">${counts[p]}</span></button>`)
 		].join("");
 		strip.scrollLeft = prevScrollLeft;
 	}
@@ -12133,7 +12194,7 @@ function initHubController() {
       ` : "";
 		const liveBannerHtml = pendingAppInfo ? `
         <div class="live-activity-bar">
-          <div class="live-activity-left" onclick="openChat('${esc$1(pendingAppInfo.app.agentId)}')">
+          <div class="live-activity-left" onclick="openChat('${escJsStr$1(pendingAppInfo.app.agentId)}')">
             <div class="live-activity-title">${isPendingQuestion ? "💬" : "⏳"} [${esc$1(pendingAppInfo.host.hostName)}] ${esc$1(pendingAppInfo.app.project ? `${formatCompactProjectLabel(pendingAppInfo.app.project, nowDate)} / ` : "")}${esc$1(pendingAppInfo.app.settling ? isPendingQuestion ? "正在同步你的选择到电脑端..." : "正在同步审批到电脑端..." : pendingAppInfo.app.title || (isPendingQuestion ? "等待你做出选择" : "等待你批准工具执行"))}</div>
             <div class="live-activity-desc" ${pendingAppInfo.app.lastError ? "style=\"color:#ef4444;font-weight:600;\"" : ""}>${esc$1(pendingAppInfo.app.lastError ? `⚠️ ${pendingAppInfo.app.lastError}` : pendingAppInfo.app.promptTitle || pendingAppInfo.app.reason || "")}</div>
           </div>
@@ -12141,11 +12202,11 @@ function initHubController() {
             ${pendingAppInfo.app.settling ? `
               <button class="mini-approve-btn" disabled style="opacity:0.65;cursor:not-allowed;">⏳ 处理中...</button>
             ` : isPendingQuestion ? `
-              <button class="mini-approve-btn" onclick="openChat('${esc$1(pendingAppInfo.app.agentId)}')">去选择 ›</button>
-              <button class="mini-approve-btn ghost" onclick="sendApprovalDecision('${esc$1(pendingAppInfo.host.hostId)}', '${esc$1(pendingAppInfo.app.code)}', false, 4, '${esc$1(pendingAppInfo.app.agentId || "")}')">跳过</button>
+              <button class="mini-approve-btn" onclick="openChat('${escJsStr$1(pendingAppInfo.app.agentId)}')">去选择 ›</button>
+              <button class="mini-approve-btn ghost" onclick="sendApprovalDecision('${escJsStr$1(pendingAppInfo.host.hostId)}', '${escJsStr$1(pendingAppInfo.app.code)}', false, 4, '${escJsStr$1(pendingAppInfo.app.agentId || "")}')">跳过</button>
             ` : `
-              <button class="mini-approve-btn" onclick="sendApprovalDecision('${esc$1(pendingAppInfo.host.hostId)}', '${esc$1(pendingAppInfo.app.code)}', true, 1, '${esc$1(pendingAppInfo.app.agentId || "")}')">✓ 允许</button>
-              <button class="mini-approve-btn ghost" onclick="sendApprovalDecision('${esc$1(pendingAppInfo.host.hostId)}', '${esc$1(pendingAppInfo.app.code)}', false, 4, '${esc$1(pendingAppInfo.app.agentId || "")}')">拒绝</button>
+              <button class="mini-approve-btn" onclick="sendApprovalDecision('${escJsStr$1(pendingAppInfo.host.hostId)}', '${escJsStr$1(pendingAppInfo.app.code)}', true, 1, '${escJsStr$1(pendingAppInfo.app.agentId || "")}')">✓ 允许</button>
+              <button class="mini-approve-btn ghost" onclick="sendApprovalDecision('${escJsStr$1(pendingAppInfo.host.hostId)}', '${escJsStr$1(pendingAppInfo.app.code)}', false, 4, '${escJsStr$1(pendingAppInfo.app.agentId || "")}')">拒绝</button>
             `}
           </div>
         </div>
@@ -12198,7 +12259,7 @@ function initHubController() {
 			const rolePrefix = s.status === "running" ? "" : s.isStalledMidTurn ? "🔧 停在步骤: " : s.lastIsToolStepOnly ? "🔧 " : s.lastRole === "user" ? "🧑 我: " : "🤖 ";
 			const displayTitle = stripRedundantProjectPrefix(s.title, s.project);
 			return `${groupHeaderHtml}
-          <div class="session-row ${rowStateClass} ${s.pinned ? "pinned-row" : ""} ${s.id === activeSessionId ? "selected-desktop" : ""}" onclick="openChat('${esc$1(s.id)}')">
+          <div class="session-row ${rowStateClass} ${s.pinned ? "pinned-row" : ""} ${s.id === activeSessionId ? "selected-desktop" : ""}" onclick="openChat('${escJsStr$1(s.id)}')">
             <div class="session-main">
               <div class="session-top-line">
                 <div class="session-title-wrap">
@@ -12214,7 +12275,7 @@ function initHubController() {
                 <span class="session-preview-text">${rolePrefix}${esc$1(s.lastPreview)}</span>
               </div>
             </div>
-            <button class="row-more-btn" title="更多操作" onclick="event.stopPropagation(); openSessionActions('${esc$1(s.id)}')">⋯</button>
+            <button class="row-more-btn" title="更多操作" onclick="event.stopPropagation(); openSessionActions('${escJsStr$1(s.id)}')">⋯</button>
           </div>
         `;
 		}).join("");
@@ -12835,7 +12896,8 @@ function initHubController() {
 	}
 	function submitAgyApproval(hostId, code) {
 		const idx = selectedAgyOptionIndex || 1;
-		sendApprovalDecision(hostId, code, idx !== 4, idx);
+		const selEl = document.querySelector(`.agy-approval-opt[data-opt-idx="${idx}"]`);
+		sendApprovalDecision(hostId, code, !(selEl ? selEl.dataset.isDeny === "1" : idx === 4), idx);
 	}
 	function renderActiveChatStage(foundArg) {
 		const found = foundArg && foundArg.session ? foundArg : findSessionGlobal(activeSessionId);
@@ -12896,7 +12958,7 @@ function initHubController() {
 			const otherProj = otherApproval.app.project ? `${formatCompactProjectLabel(otherApproval.app.project)} / ` : "";
 			const nextAlertHtml = `
           <span>${isOtherQuestion ? "💬" : "⏳"} [${esc$1(otherApproval.host.hostName)}]「${esc$1(otherProj)}${esc$1(otherApproval.app.title || otherApproval.app.toolName)}」${isOtherQuestion ? "待你选择" : "待你审批"}</span>
-          <button style="border:none;background:#d97706;color:#fff;border-radius:999px;padding:3px 10px;font-size:11.5px;font-weight:600;cursor:pointer;white-space:nowrap;flex-shrink:0;" onclick="openChat('${esc$1(otherApproval.app.agentId)}')">立即切换 ›</button>
+          <button style="border:none;background:#d97706;color:#fff;border-radius:999px;padding:3px 10px;font-size:11.5px;font-weight:600;cursor:pointer;white-space:nowrap;flex-shrink:0;" onclick="openChat('${escJsStr$1(otherApproval.app.agentId)}')">立即切换 ›</button>
         `;
 			alertBar.style.display = "flex";
 			const nextAlertSig = `${langPref}:${nextAlertHtml}`;
@@ -13052,12 +13114,12 @@ function initHubController() {
 		lastRenderedAssistantTexts = {};
 		const bubblesHtml = msgs.map((m, msgIdx) => {
 			if (m.role === "user") {
-				const queuedBadge = m.queuedCmdId ? `<div class="queued-cmd-pill"><span>⏳ 排队中（电脑上线后执行）</span><button class="cancel-queued-btn" onclick="event.stopPropagation(); cancelQueuedCommand('${esc$1(m.queuedCmdId)}')">✕ 取消</button></div>` : m.expiredCmdId ? `<div class="queued-cmd-pill" style="background:rgba(239,68,68,0.18);color:#fecaca;"><span>⚠️ 电脑超过 10 分钟未上线，该指令已超时未执行</span></div>` : "";
+				const queuedBadge = m.queuedCmdId ? `<div class="queued-cmd-pill"><span>⏳ 排队中（电脑上线后执行）</span><button class="cancel-queued-btn" onclick="event.stopPropagation(); cancelQueuedCommand('${escJsStr$1(m.queuedCmdId)}')">✕ 取消</button></div>` : m.expiredCmdId ? `<div class="queued-cmd-pill" style="background:rgba(239,68,68,0.18);color:#fecaca;"><span>⚠️ 电脑超过 10 分钟未上线，该指令已超时未执行</span></div>` : "";
 				const parsedUser = parseUserMessageAndMedia(m);
 				const textHtml = parsedUser.text ? `<div class="user-bubble-text">${esc$1(parsedUser.text)}</div>` : "";
 				let mediaGridHtml = "";
 				if (parsedUser.optImgs && parsedUser.optImgs.length > 0) mediaGridHtml = `<div class="user-msg-media-grid">${parsedUser.optImgs.map((it, idx) => `
-            <div class="user-msg-img-card" onclick="openOptimisticImagePreview('${esc$1(m.optId)}', ${idx})">
+            <div class="user-msg-img-card" onclick="openOptimisticImagePreview('${escJsStr$1(m.optId)}', ${idx})">
               <img class="user-msg-thumb saveable-preview-img" src="${it.dataUrl}" alt="${esc$1(it.name)}" />
               <span class="user-msg-img-badge">🔍 ${esc$1(it.name)}</span>
             </div>
@@ -13156,7 +13218,7 @@ function initHubController() {
 		const sessionArtifacts = Array.isArray(s.artifacts) ? s.artifacts.filter((a) => a && a.path) : [];
 		const sessionArtifactsHtml = sessionArtifacts.length > 0 ? `
         <div class="agy-files-changed-card agy-session-artifacts-card${artCollapsed ? " is-collapsed" : ""}" data-artifacts-session="${esc$1(s.id)}">
-          <button type="button" class="agy-session-artifacts-header" aria-expanded="${!artCollapsed}" onclick="toggleSessionArtifactsCard('${esc$1(s.id)}')">
+          <button type="button" class="agy-session-artifacts-header" aria-expanded="${!artCollapsed}" onclick="toggleSessionArtifactsCard('${escJsStr$1(s.id)}')">
             <span class="agy-session-artifacts-title">📋 AI 交付文档 / Walkthrough (${sessionArtifacts.length})</span>
             <span class="agy-artifacts-toggle-pill">${artCollapsed ? "展开 ⌄" : "收起 ⌃"}</span>
           </button>
@@ -13198,13 +13260,13 @@ function initHubController() {
 		}).join("")}
           </div>
           <div class="agy-files-footer">
-            <button type="button" class="agy-files-toggle" aria-expanded="${!fcCollapsed}" onclick="toggleFilesChangedCard('${esc$1(s.id)}')">
+            <button type="button" class="agy-files-toggle" aria-expanded="${!fcCollapsed}" onclick="toggleFilesChangedCard('${escJsStr$1(s.id)}')">
               <span>📄 ${s.changedFiles.length} Files With Changes</span>
               <span class="agy-files-chevron">${fcCollapsed ? "⌄" : "⌃"}</span>
             </button>
             <div class="agy-files-footer-btns">
-              <button type="button" class="agy-files-reject" onclick="openChangedFilesDrawer('${esc$1(s.id)}')">查看改动</button>
-              ${fcReviewed ? "" : `<button type="button" class="agy-files-accept" onclick="reviewFilesChangedCard('${esc$1(s.id)}', '${esc$1(fcMeta.sig)}')">确认已阅</button>`}
+              <button type="button" class="agy-files-reject" onclick="openChangedFilesDrawer('${escJsStr$1(s.id)}')">查看改动</button>
+              ${fcReviewed ? "" : `<button type="button" class="agy-files-accept" onclick="reviewFilesChangedCard('${escJsStr$1(s.id)}', '${escJsStr$1(fcMeta.sig)}')">确认已阅</button>`}
             </div>
           </div>
         </div>
@@ -13253,7 +13315,7 @@ function initHubController() {
                           class="dsh-question-opt ${isSel ? "selected" : ""}"
                           data-q-id="${esc$1(qId)}"
                           data-opt-label="${esc$1(label)}"
-                          ${s.approvalObj.settling ? "disabled style=\"opacity:0.6;cursor:not-allowed;\"" : `onclick="toggleDshQuestionOption('${esc$1(s.approvalObj.code)}', '${esc$1(qId)}', '${esc$1(label)}', ${Boolean(q.multiSelect)})"`}
+                          ${s.approvalObj.settling ? "disabled style=\"opacity:0.6;cursor:not-allowed;\"" : `onclick="toggleDshQuestionOption('${escJsStr$1(s.approvalObj.code)}', '${escJsStr$1(qId)}', '${escJsStr$1(label)}', ${Boolean(q.multiSelect)})"`}
                         >
                           <div class="dsh-question-opt-top">
                             <span class="dsh-question-opt-check">${q.multiSelect ? isSel ? "☑" : "☐" : isSel ? "◉" : "○"}</span>
@@ -13282,16 +13344,43 @@ function initHubController() {
             <button
               type="button"
               class="dsh-question-btn-skip"
-              ${s.approvalObj.settling ? "disabled style=\"opacity:0.6;cursor:not-allowed;\"" : `onclick="sendApprovalDecision('${esc$1(s.hostId)}', '${esc$1(s.approvalObj.code)}', false, 4, '${esc$1(s.id)}')"`}
+              ${s.approvalObj.settling ? "disabled style=\"opacity:0.6;cursor:not-allowed;\"" : `onclick="sendApprovalDecision('${escJsStr$1(s.hostId)}', '${escJsStr$1(s.approvalObj.code)}', false, 4, '${escJsStr$1(s.id)}')"`}
             >跳过 / 取消</button>
             <button
               type="button"
               class="dsh-question-btn-submit"
-              ${s.approvalObj.settling ? "disabled style=\"opacity:0.6;cursor:not-allowed;\"" : `onclick="submitDshQuestionAnswers('${esc$1(s.hostId)}', '${esc$1(s.approvalObj.code)}', '${esc$1(s.id)}')"`}
+              ${s.approvalObj.settling ? "disabled style=\"opacity:0.6;cursor:not-allowed;\"" : `onclick="submitDshQuestionAnswers('${escJsStr$1(s.hostId)}', '${escJsStr$1(s.approvalObj.code)}', '${escJsStr$1(s.id)}')"`}
             >${s.approvalObj.settling ? "⏳ 正在提交..." : "提交选择 ↵"}</button>
           </div>
         </div>
-      ` : isAgyApproval ? `
+      ` : isAgyApproval ? (() => {
+			const agyOpts = s.approvalObj.options && s.approvalObj.options.length > 0 ? s.approvalObj.options : [
+				{
+					index: 1,
+					label: "Yes, allow this time"
+				},
+				{
+					index: 2,
+					label: "Yes, and always allow in this conversation"
+				},
+				{
+					index: 3,
+					label: "Yes, and always allow"
+				},
+				{
+					index: 4,
+					label: "No (tell the agent what to do instead)"
+				}
+			];
+			const isDenyOption = (opt, pos) => {
+				const lbl = String(opt?.label || "").trim().toLowerCase();
+				if (/^(no\b|deny\b|reject\b|skip\b|拒绝|取消)/.test(lbl)) return true;
+				const idx = Number(opt?.index) || pos + 1;
+				return agyOpts.length >= 4 && idx === 4;
+			};
+			const denyOpt = agyOpts.find((o, i) => isDenyOption(o, i));
+			const denyIdx = Number(denyOpt?.index) || (agyOpts.length === 2 ? 2 : 4);
+			return `
         <div class="agy-approval-card">
           <div class="agy-approval-header">
             <span class="agy-approval-term-icon">&gt;_</span>
@@ -13301,43 +13390,31 @@ function initHubController() {
           ${s.approvalObj.commandLine ? `<div class="agy-approval-cmd">${esc$1(s.approvalObj.commandLine)}</div>` : `<div class="agy-approval-cmd">${esc$1(s.approvalObj.reason || "")}</div>`}
           ${approvalStatusNoticeHtml}
           <div class="agy-approval-options">
-            ${(s.approvalObj.options && s.approvalObj.options.length > 0 ? s.approvalObj.options : [
-			{
-				index: 1,
-				label: "Yes, allow this time"
-			},
-			{
-				index: 2,
-				label: "Yes, and always allow in this conversation"
-			},
-			{
-				index: 3,
-				label: "Yes, and always allow"
-			},
-			{
-				index: 4,
-				label: "No (tell the agent what to do instead)"
-			}
-		]).map((opt) => `
-              <button type="button" class="agy-approval-opt ${opt.index === 1 ? "selected" : ""}" data-opt-idx="${opt.index}" ${s.approvalObj.settling ? "disabled style=\"opacity:0.6;cursor:not-allowed;\"" : `onclick="selectAgyApprovalOption(${opt.index})" ondblclick="sendApprovalDecision('${esc$1(s.hostId)}', '${esc$1(s.approvalObj.code)}', ${opt.index !== 4}, ${opt.index})"`}>
-                <span class="agy-opt-num">${opt.index}</span>
+            ${agyOpts.map((opt, pos) => {
+				const optIdx = Number(opt.index) || pos + 1;
+				const optIsDeny = isDenyOption(opt, pos);
+				return `
+              <button type="button" class="agy-approval-opt ${optIdx === 1 ? "selected" : ""}" data-opt-idx="${optIdx}" data-is-deny="${optIsDeny ? "1" : "0"}" ${s.approvalObj.settling ? "disabled style=\"opacity:0.6;cursor:not-allowed;\"" : `onclick="selectAgyApprovalOption(${optIdx})" ondblclick="sendApprovalDecision('${escJsStr$1(s.hostId)}', '${escJsStr$1(s.approvalObj.code)}', ${!optIsDeny}, ${optIdx})"`}>
+                <span class="agy-opt-num">${optIdx}</span>
                 <span>${esc$1(opt.label)}</span>
               </button>
-            `).join("")}
+            `;
+			}).join("")}
           </div>
           <div class="agy-approval-footer">
-            <button type="button" class="agy-btn-skip" ${s.approvalObj.settling ? "disabled style=\"opacity:0.6;cursor:not-allowed;\"" : `onclick="sendApprovalDecision('${esc$1(s.hostId)}', '${esc$1(s.approvalObj.code)}', false, 4)"`}>Skip</button>
-            <button type="button" class="agy-btn-submit" ${s.approvalObj.settling ? "disabled style=\"opacity:0.6;cursor:not-allowed;\"" : `onclick="submitAgyApproval('${esc$1(s.hostId)}', '${esc$1(s.approvalObj.code)}')"`}>${s.approvalObj.settling ? "⏳ 处理中..." : "Submit <span>↵</span>"}</button>
+            <button type="button" class="agy-btn-skip" ${s.approvalObj.settling ? "disabled style=\"opacity:0.6;cursor:not-allowed;\"" : `onclick="sendApprovalDecision('${escJsStr$1(s.hostId)}', '${escJsStr$1(s.approvalObj.code)}', false, ${denyIdx})"`}>Skip</button>
+            <button type="button" class="agy-btn-submit" ${s.approvalObj.settling ? "disabled style=\"opacity:0.6;cursor:not-allowed;\"" : `onclick="submitAgyApproval('${escJsStr$1(s.hostId)}', '${escJsStr$1(s.approvalObj.code)}')"`}>${s.approvalObj.settling ? "⏳ 处理中..." : "Submit <span>↵</span>"}</button>
           </div>
         </div>
-      ` : `
+      `;
+		})() : `
         <div class="inline-approval-card">
           <div class="inline-approval-title">⏳ 等待你确认工具调用：${esc$1(s.approvalObj.toolName)}</div>
           <div class="inline-approval-cmd">${esc$1(s.approvalObj.reason || "请求执行权限")}</div>
           ${approvalStatusNoticeHtml}
           <div class="inline-approval-btns">
-            <button style="background:#10b981;color:#fff;${s.approvalObj.settling ? "opacity:0.6;cursor:not-allowed;" : ""}" ${s.approvalObj.settling ? "disabled" : `onclick="sendApprovalDecision('${esc$1(s.hostId)}', '${esc$1(s.approvalObj.code)}', true, 1)"`}>${s.approvalObj.settling ? "⏳ 正在同步..." : "✅ 允许执行"}</button>
-            <button style="background:#fee2e2;color:#dc2626;${s.approvalObj.settling ? "opacity:0.6;cursor:not-allowed;" : ""}" ${s.approvalObj.settling ? "disabled" : `onclick="sendApprovalDecision('${esc$1(s.hostId)}', '${esc$1(s.approvalObj.code)}', false, 4)"`}>✕ 拒绝</button>
+            <button style="background:#10b981;color:#fff;${s.approvalObj.settling ? "opacity:0.6;cursor:not-allowed;" : ""}" ${s.approvalObj.settling ? "disabled" : `onclick="sendApprovalDecision('${escJsStr$1(s.hostId)}', '${escJsStr$1(s.approvalObj.code)}', true, 1)"`}>${s.approvalObj.settling ? "⏳ 正在同步..." : "✅ 允许执行"}</button>
+            <button style="background:#fee2e2;color:#dc2626;${s.approvalObj.settling ? "opacity:0.6;cursor:not-allowed;" : ""}" ${s.approvalObj.settling ? "disabled" : `onclick="sendApprovalDecision('${escJsStr$1(s.hostId)}', '${escJsStr$1(s.approvalObj.code)}', false, 4)"`}>✕ 拒绝</button>
           </div>
         </div>
       ` : "";
@@ -13348,7 +13425,7 @@ function initHubController() {
 			"▶ 继续执行下一步",
 			"🔍 查看 git status 与改动",
 			"🧪 运行测试验证"
-		].map((f) => `<button class="followup-pill" onclick="sendQuickFollowup('${esc$1(f)}')">${esc$1(f)}</button>`).join("")}
+		].map((f) => `<button class="followup-pill" onclick="sendQuickFollowup('${escJsStr$1(f)}')">${esc$1(f)}</button>`).join("")}
         </div>
       `;
 		const loadEarlierHtml = Boolean(s._wireTruncated && hydratingWireSessionIds.has(s.id)) ? `<div style="text-align:center;font-size:12px;color:var(--muted);margin:4px 0 10px;">⏳ 正在同步完整对话内容…</div>` : s.omittedTranscriptCount > 0 ? `
@@ -13357,7 +13434,7 @@ function initHubController() {
               type="button"
               class="followup-pill"
               style="font-size:12px;padding:6px 14px;"
-              onclick="loadEarlierTranscript('${esc$1(s.hostId)}', '${esc$1(s.id)}', this)"
+              onclick="loadEarlierTranscript('${escJsStr$1(s.hostId)}', '${escJsStr$1(s.id)}', this)"
             >⬆️ 为保证秒开已省略前 ${s.omittedTranscriptCount} 条早先记录 · 点击加载完整历史</button>
           </div>
         ` : expandedTranscriptBySession.has(s.id) ? `<div style="text-align:center;font-size:11.5px;color:var(--muted);margin:4px 0 10px;">✅ 已加载全部历史对话（共 ${s.transcript.length} 条）</div>` : "";
@@ -14596,12 +14673,14 @@ function initHubController() {
 			if (Array.isArray(matched.sidecars) && matched.sidecars.length > 0) extraBadges.push(`🪟 Sidecar UI (${matched.sidecars.map((sc) => sc.name || sc.id).join(", ")})`);
 			const extraHtml = extraBadges.length > 0 ? `<div class="plugin-detail-pills">${extraBadges.map((b) => `<span class="plugin-detail-pill">${esc$1(b)}</span>`).join("")}</div>` : "";
 			const sidecarNoteHtml = sidecarPath ? `<div class="plugin-detail-notice">🪟 <strong>桌面端侧边栏面板</strong>（<code>sidecar://${esc$1(sidecarPath)}</code>）：Sidecar 面板运行在电脑端 Antigravity IDE 侧栏中，请回到电脑 IDE 点击对应胶囊打开交互面板。</div>` : "";
+			const safeHomepage = safeExternalHref(matched.homepage);
+			const safeRepository = safeExternalHref(matched.repository);
 			const toggleBtnHtml = matched.isBuiltin ? `<div class="plugin-detail-notice">🔒 这是 Antigravity 内置插件，启停请在电脑端 Antigravity IDE 插件管理页操作。</div>` : !hostOnline ? `<div class="plugin-detail-notice">⚪ 电脑 <strong>${esc$1(hostName)}</strong> 当前离线，恢复在线后可在此远程启停该插件。</div>` : `<div class="plugin-detail-actions">
-               <button type="button" class="pill-action-btn ${matched.enabled ? "" : "primary"}" ${isToggling ? "disabled style=\"opacity:0.6;\"" : ""} onclick="toggleRemoteAntigravityPlugin('${esc$1(hostId)}', '${esc$1(matched.dir || matched.name)}', ${matched.enabled ? "false" : "true"})">
+               <button type="button" class="pill-action-btn ${matched.enabled ? "" : "primary"}" ${isToggling ? "disabled style=\"opacity:0.6;\"" : ""} onclick="toggleRemoteAntigravityPlugin('${escJsStr$1(hostId)}', '${escJsStr$1(matched.dir || matched.name)}', ${matched.enabled ? "false" : "true"})">
                  ${isToggling ? "⏳ 正在同步到电脑端…" : matched.enabled ? "⏸ 停用此插件" : "▶️ 启用此插件"}
                </button>
-               ${matched.homepage ? `<a class="pill-action-btn" href="${esc$1(matched.homepage)}" target="_blank" rel="noopener noreferrer" style="text-decoration:none;">🌐 文档主页</a>` : ""}
-               ${matched.repository ? `<a class="pill-action-btn" href="${esc$1(matched.repository)}" target="_blank" rel="noopener noreferrer" style="text-decoration:none;">📦 源码仓库</a>` : ""}
+               ${safeHomepage ? `<a class="pill-action-btn" href="${esc$1(safeHomepage)}" target="_blank" rel="noopener noreferrer" style="text-decoration:none;">🌐 文档主页</a>` : ""}
+               ${safeRepository ? `<a class="pill-action-btn" href="${esc$1(safeRepository)}" target="_blank" rel="noopener noreferrer" style="text-decoration:none;">📦 源码仓库</a>` : ""}
              </div>`;
 			bodyEl.innerHTML = `
         <div class="plugin-detail-card">
@@ -14902,15 +14981,15 @@ function initHubController() {
             <div style="font-size:28px;">🖼️</div>
             <div class="img-preview-error-text" style="font-size:13px;line-height:1.5;">图片加载超时或连接中断</div>
             <div class="img-preview-error-actions">
-              <button type="button" class="media-toolbar-pill" onclick="retryFilePreview('${esc$1(hostId)}', ${inDrawer ? "true" : "false"})">🔄 重新加载</button>
-              ${canToggleOrigImg && !preview._origImage ? `<button type="button" class="media-toolbar-pill" onclick="toggleOriginalPreviewImage('${esc$1(hostId)}', ${inDrawer ? "true" : "false"})">🔍 尝试加载原图</button>` : ""}
+              <button type="button" class="media-toolbar-pill" onclick="retryFilePreview('${escJsStr$1(hostId)}', ${inDrawer ? "true" : "false"})">🔄 重新加载</button>
+              ${canToggleOrigImg && !preview._origImage ? `<button type="button" class="media-toolbar-pill" onclick="toggleOriginalPreviewImage('${escJsStr$1(hostId)}', ${inDrawer ? "true" : "false"})">🔍 尝试加载原图</button>` : ""}
             </div>
           </div>
         </div>
         <div class="file-preview-meta-bar" style="display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:8px;font-size:12px;color:#94a3b8;">
           <span class="img-preview-size-label">${esc$1(sizeText)} · 长按或点按钮保存图片</span>
-          <button type="button" class="media-toolbar-pill" onclick="downloadPreviewMedia('${esc$1(dlUrl || imgSrc)}', '${esc$1(preview.name || "image.png")}', this)">⬇️ 保存图片</button>
-          ${canToggleOrigImg ? `<button type="button" class="media-toolbar-pill" onclick="toggleOriginalPreviewImage('${esc$1(hostId)}', ${inDrawer ? "true" : "false"})">${preview._origImage ? "⚡ 切回智能省流图" : "🔍 查看无损原图"}</button>` : ""}
+          <button type="button" class="media-toolbar-pill" onclick="downloadPreviewMedia('${escJsStr$1(dlUrl || imgSrc)}', '${escJsStr$1(preview.name || "image.png")}', this)">⬇️ 保存图片</button>
+          ${canToggleOrigImg ? `<button type="button" class="media-toolbar-pill" onclick="toggleOriginalPreviewImage('${escJsStr$1(hostId)}', ${inDrawer ? "true" : "false"})">${preview._origImage ? "⚡ 切回智能省流图" : "🔍 查看无损原图"}</button>` : ""}
         </div>
       </div>`;
 	}
@@ -14921,7 +15000,7 @@ function initHubController() {
         <div style="font-size:32px;">⚠️</div>
         <div style="font-size:14px;font-weight:600;color:#f1f5f9;">${esc$1(preview.name || "文件加载失败")}</div>
         <div style="font-size:12.5px;color:#94a3b8;max-width:320px;line-height:1.5;">${esc$1(reason)}</div>
-        <button type="button" class="media-toolbar-pill" onclick="retryFilePreview('${esc$1(hostId)}', ${inDrawer ? "true" : "false"})">🔄 重新加载</button>
+        <button type="button" class="media-toolbar-pill" onclick="retryFilePreview('${escJsStr$1(hostId)}', ${inDrawer ? "true" : "false"})">🔄 重新加载</button>
       </div>`;
 	}
 	function syncMountedPreviewImage(containerEl) {
@@ -15058,14 +15137,14 @@ function initHubController() {
                <video class="file-preview-video" data-hls-src="${esc$1(videoHlsSrc(preview, mt))}" data-fallback-src="${esc$1(videoPreviewSrc(preview, mt))}" data-video-bytes="${Number(preview.size || 0)}" data-dsh-universal-direct="${preview.videoProbe?.universalDirectPlay ? "1" : "0"}" controls playsinline webkit-playsinline preload="metadata" onloadedmetadata="onSmartVideoLoadedMeta(this)" onerror="onSmartVideoError(this)"></video>
                <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:8px;">
                  <span data-dsh-video-status="1" style="font-size:12px;color:#94a3b8;">🎬 ${esc$1(formatBytes(preview.size))} · ${esc$1(videoMetaUi.badge)}</span>
-                 <button type="button" class="media-toolbar-pill" onclick="switchVideoTranscodeMode('${esc$1(host.hostId)}', true)">${esc$1(videoMetaUi.toggleLabel)}</button>
-                 ${dlUrl ? `<button type="button" class="media-toolbar-pill" onclick="downloadPreviewMedia('${esc$1(dlUrl)}', '${esc$1(preview.name || "video.mp4")}', this)">⬇️ 保存/分享视频</button>` : ""}
+                 <button type="button" class="media-toolbar-pill" onclick="switchVideoTranscodeMode('${escJsStr$1(host.hostId)}', true)">${esc$1(videoMetaUi.toggleLabel)}</button>
+                 ${dlUrl ? `<button type="button" class="media-toolbar-pill" onclick="downloadPreviewMedia('${escJsStr$1(dlUrl)}', '${escJsStr$1(preview.name || "video.mp4")}', this)">⬇️ 保存/分享视频</button>` : ""}
                </div>
              </div>` : kind === "image" ? buildPreviewImageBodyHtml(preview, host.hostId, true, mt, dlUrl, canToggleOrigImg) : kind === "binary" ? `<div class="file-preview-body" style="padding:32px 16px;background:#0f172a;color:#94a3b8;min-height:300px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;">
                    <div style="font-size:32px;">📦</div>
                    <div style="font-size:14px;font-weight:600;color:#e2e8f0;">${esc$1(preview.name)}</div>
                    <div style="font-size:12.5px;">二进制文件（${esc$1(formatBytes(preview.size))}），不支持直接文本预览</div>
-                   ${dlUrl ? `<button type="button" class="media-toolbar-pill" onclick="downloadPreviewMedia('${esc$1(dlUrl)}', '${esc$1(preview.name || "file")}', this)">⬇️ 保存/分享文件</button>` : ""}
+                   ${dlUrl ? `<button type="button" class="media-toolbar-pill" onclick="downloadPreviewMedia('${escJsStr$1(dlUrl)}', '${escJsStr$1(preview.name || "file")}', this)">⬇️ 保存/分享文件</button>` : ""}
                  </div>` : isHtml && !rawHtmlMode ? `<div class="file-preview-body html-sandbox-preview" style="padding:0;background:#ffffff;min-height:420px;">
                    <iframe class="drawer-preview-iframe" title="${esc$1(preview.name || "HTML Preview")}" sandbox="allow-scripts allow-forms allow-modals allow-popups" referrerpolicy="no-referrer" srcdoc="${htmlSrcdocAttr}"></iframe>
                  </div>` : isMarkdown && !rawMdMode ? `<div class="file-preview-body walkthrough-md-preview md-body" style="padding:16px 14px;background:var(--card-bg, #ffffff);color:var(--text, #0f172a);min-height:340px;overflow-x:auto;">
@@ -15078,10 +15157,10 @@ function initHubController() {
             <button class="back-btn" style="padding:0;font-size:13px;flex-shrink:0;" onclick="backFromDrawerPreview()">‹ 返回目录</button>
             <span class="file-preview-header-name" title="${esc$1(preview.name)}">${esc$1(preview.name)}</span>
             <div style="display:flex;align-items:center;gap:5px;flex-shrink:0;">
-              ${isHtml ? `<button class="icon-pill-btn" style="color:var(--primary);border-color:#bfdbfe;background:var(--primary-soft);" onclick="openFullscreenHtmlFromPreview('${esc$1(host.hostId)}', true)">⛶ 全屏体验</button><button class="icon-pill-btn" onclick="toggleHtmlPreviewMode()">${rawHtmlMode ? "🌐 预览" : "</> 源码"}</button>` : ""}
+              ${isHtml ? `<button class="icon-pill-btn" style="color:var(--primary);border-color:#bfdbfe;background:var(--primary-soft);" onclick="openFullscreenHtmlFromPreview('${escJsStr$1(host.hostId)}', true)">⛶ 全屏体验</button><button class="icon-pill-btn" onclick="toggleHtmlPreviewMode()">${rawHtmlMode ? "🌐 预览" : "</> 源码"}</button>` : ""}
               ${isMarkdown ? `<button class="icon-pill-btn" onclick="toggleMdPreviewMode()">${rawMdMode ? "📖 渲染" : "</> 源码"}</button>` : ""}
               ${headerExportBtnHtml}
-              <button class="icon-pill-btn" style="color:var(--primary);border-color:#bfdbfe;background:var(--primary-soft);" onclick="quoteFileIntoChat('${esc$1(preview.relPath || preview.name)}')">📎 引用</button>
+              <button class="icon-pill-btn" style="color:var(--primary);border-color:#bfdbfe;background:var(--primary-soft);" onclick="quoteFileIntoChat('${escJsStr$1(preview.relPath || preview.name)}')">📎 引用</button>
             </div>
           </div>
           ${previewBodyHtml}
@@ -15134,19 +15213,19 @@ function initHubController() {
 		body.dataset.dshDrawerListKey = drawerListKey;
 		const prevScrollTop = body.scrollTop;
 		const crumbs = buildBreadcrumbSegments(activeSubDir);
-		const hostId = esc$1(host.hostId);
-		const sessionId = esc$1(found.session.id);
+		const hostId = escJsStr$1(host.hostId);
+		const sessionId = escJsStr$1(found.session.id);
 		body.innerHTML = `
         <div class="breadcrumbs-bar">
-          <span class="crumb-link" onclick="requestDirList('${hostId}', '${sessionId}', '${esc$1(rootCwd)}', '', true)">🏠 ${esc$1(found.session.project)}</span>
+          <span class="crumb-link" onclick="requestDirList('${hostId}', '${sessionId}', '${escJsStr$1(rootCwd)}', '', true)">🏠 ${esc$1(found.session.project)}</span>
           ${crumbs.map((c, index) => {
-			return "<span style=\"color:#94a3b8;\">/</span>" + (index === crumbs.length - 1 ? `<span style="font-weight:600;color:var(--text);">${esc$1(c.name)}</span>` : `<span class="crumb-link" onclick="requestDirList('${hostId}', '${sessionId}', '${esc$1(rootCwd)}', '${esc$1(c.path)}', true)">${esc$1(c.name)}</span>`);
+			return "<span style=\"color:#94a3b8;\">/</span>" + (index === crumbs.length - 1 ? `<span style="font-weight:600;color:var(--text);">${esc$1(c.name)}</span>` : `<span class="crumb-link" onclick="requestDirList('${hostId}', '${sessionId}', '${escJsStr$1(rootCwd)}', '${escJsStr$1(c.path)}', true)">${esc$1(c.name)}</span>`);
 		}).join("")}
           ${crumbs.length === 0 ? `<span style="color:#94a3b8;margin-left:auto;font-family:monospace;">${esc$1(rootCwd)}</span>` : ""}
         </div>
         <div>
           ${loadingDir ? fileLoadingSpinnerHtml(activeSubDir ? `正在读取 ${activeSubDir} …` : "正在读取目录…") : entries.map((e) => `
-            <div class="file-row" onclick="clickRealFileEntry('${hostId}', '${sessionId}', '${esc$1(rootCwd)}', '${esc$1(e.relPath)}', ${Boolean(e.isDirectory)}, true)">
+            <div class="file-row" onclick="clickRealFileEntry('${hostId}', '${sessionId}', '${escJsStr$1(rootCwd)}', '${escJsStr$1(e.relPath)}', ${Boolean(e.isDirectory)}, true)">
               <div class="file-row-left">
                 <span style="font-size:18px;">${fileEntryIcon(e)}</span>
                 <span style="font-weight:500;">${esc$1(e.name)}</span>
@@ -15738,11 +15817,11 @@ function initHubController() {
 			body.innerHTML = `<div style="padding:14px 12px;color:#f8fafc;min-height:100%;overflow-x:auto;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;line-height:1.6;">${numbered}</div>`;
 		} else {
 			const srcdocAttr = escapeSrcdocAttr(buildSandboxedHtmlSrcdoc(activeHtmlOverlay.rawHtml || "", {
-				hostId: activeHtmlOverlay.hostId || "",
+				hostId: activeHtmlOverlay.isInlineSnippet ? "" : activeHtmlOverlay.hostId || "",
 				relPath: activeHtmlOverlay.relPath || "",
 				cwd: activeHtmlOverlay.cwd || "",
 				agentId: activeHtmlOverlay.agentId || "",
-				mediaTicket: hubState.mediaTicket || "",
+				mediaTicket: activeHtmlOverlay.isInlineSnippet ? "" : hubState.mediaTicket || "",
 				origin: typeof location !== "undefined" ? location.origin : ""
 			}));
 			body.style.background = "#ffffff";
@@ -15759,6 +15838,7 @@ function initHubController() {
 			relPath: opts?.relPath || "",
 			cwd: opts?.cwd || "",
 			agentId: opts?.agentId || "",
+			isInlineSnippet: Boolean(opts?.isInlineSnippet),
 			showSource: false
 		};
 		renderFullscreenHtmlOverlay();
@@ -15775,10 +15855,11 @@ function initHubController() {
 		openFullscreenHtmlOverlay({
 			title: "对话内 HTML 交互预览",
 			rawHtml,
-			hostId: found?.host?.hostId || "",
+			hostId: "",
 			relPath: "inline.html",
 			cwd: found?.session?.cwd || fileProjectCwd || "",
-			agentId: found?.session?.id || ""
+			agentId: found?.session?.id || "",
+			isInlineSnippet: true
 		});
 	}
 	async function openFullscreenHtmlFromPreview(hostId, inDrawer = false) {
@@ -15828,12 +15909,12 @@ function initHubController() {
 		if (kind === "text") {
 			const label = inDrawer ? "" : "<span>导出/保存</span>";
 			const titleText = isMarkdownFileName(preview.name || preview.relPath || "") ? "导出、分享或复制 Markdown 文档" : "保存、分享或复制文件";
-			return `<button type="button" class="icon-pill-btn file-export-trigger-btn${inDrawer ? " is-compact-icon" : ""}" title="${esc$1(titleText)}" aria-label="${esc$1(titleText)}" onclick="openFileExportSheet('${esc$1(hostId)}', ${inDrawer ? "true" : "false"})">${EXPORT_TRAY_ICON_SVG}${label}</button>`;
+			return `<button type="button" class="icon-pill-btn file-export-trigger-btn${inDrawer ? " is-compact-icon" : ""}" title="${esc$1(titleText)}" aria-label="${esc$1(titleText)}" onclick="openFileExportSheet('${escJsStr$1(hostId)}', ${inDrawer ? "true" : "false"})">${EXPORT_TRAY_ICON_SVG}${label}</button>`;
 		}
 		const effectiveDl = dlUrl || (kind === "image" ? imagePreviewSrc(preview, mt) : "");
 		if (!effectiveDl) return "";
 		const label = inDrawer ? "" : "<span>保存</span>";
-		return `<button type="button" class="icon-pill-btn file-export-trigger-btn${inDrawer ? " is-compact-icon" : ""}" title="保存或分享原文件" aria-label="保存或分享原文件" onclick="downloadPreviewMedia('${esc$1(effectiveDl)}', '${esc$1(preview.name || "download")}', this)">${EXPORT_TRAY_ICON_SVG}${label}</button>`;
+		return `<button type="button" class="icon-pill-btn file-export-trigger-btn${inDrawer ? " is-compact-icon" : ""}" title="保存或分享原文件" aria-label="保存或分享原文件" onclick="downloadPreviewMedia('${escJsStr$1(effectiveDl)}', '${escJsStr$1(preview.name || "download")}', this)">${EXPORT_TRAY_ICON_SVG}${label}</button>`;
 	}
 	function setExportBtnBusy(btnEl, busyText) {
 		if (!btnEl) return;
@@ -16360,6 +16441,7 @@ function initHubController() {
 			if (existing) existing.remove();
 			const frame = document.createElement("iframe");
 			frame.id = "dshPrintExportFrame";
+			frame.setAttribute("sandbox", "allow-same-origin allow-modals");
 			frame.setAttribute("aria-hidden", "true");
 			frame.style.cssText = "position:fixed;right:0;bottom:0;width:1px;height:1px;border:0;opacity:0;pointer-events:none;";
 			const cleanup = () => {
@@ -16461,14 +16543,14 @@ function initHubController() {
                <video class="file-preview-video" data-hls-src="${esc$1(videoHlsSrc(preview, mt))}" data-fallback-src="${esc$1(videoPreviewSrc(preview, mt))}" data-video-bytes="${Number(preview.size || 0)}" data-dsh-universal-direct="${preview.videoProbe?.universalDirectPlay ? "1" : "0"}" controls playsinline webkit-playsinline preload="metadata" onloadedmetadata="onSmartVideoLoadedMeta(this)" onerror="onSmartVideoError(this)"></video>
                <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:8px;">
                  <span data-dsh-video-status="1" style="font-size:12px;color:#94a3b8;">🎬 ${esc$1(formatBytes(preview.size))} · ${esc$1(videoMetaUi.badge)}</span>
-                 <button type="button" class="media-toolbar-pill" onclick="switchVideoTranscodeMode('${esc$1(host.hostId)}', false)">${esc$1(videoMetaUi.toggleLabel)}</button>
-                 ${dlUrl ? `<button type="button" class="media-toolbar-pill" onclick="downloadPreviewMedia('${esc$1(dlUrl)}', '${esc$1(preview.name || "video.mp4")}', this)">⬇️ 保存/分享视频</button>` : ""}
+                 <button type="button" class="media-toolbar-pill" onclick="switchVideoTranscodeMode('${escJsStr$1(host.hostId)}', false)">${esc$1(videoMetaUi.toggleLabel)}</button>
+                 ${dlUrl ? `<button type="button" class="media-toolbar-pill" onclick="downloadPreviewMedia('${escJsStr$1(dlUrl)}', '${escJsStr$1(preview.name || "video.mp4")}', this)">⬇️ 保存/分享视频</button>` : ""}
                </div>
              </div>` : kind === "image" ? buildPreviewImageBodyHtml(preview, host.hostId, false, mt, dlUrl, canToggleOrigImg) : kind === "binary" ? `<div class="file-preview-body" style="padding:36px 16px;background:#0f172a;color:#94a3b8;min-height:calc(100% - 44px);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;">
                    <div style="font-size:36px;">📦</div>
                    <div style="font-size:14.5px;font-weight:600;color:#e2e8f0;">${esc$1(preview.name)}</div>
                    <div style="font-size:13px;">二进制文件（${esc$1(formatBytes(preview.size))}），不支持直接文本预览</div>
-                   ${dlUrl ? `<button type="button" class="media-toolbar-pill" onclick="downloadPreviewMedia('${esc$1(dlUrl)}', '${esc$1(preview.name || "file")}', this)">⬇️ 保存/分享文件</button>` : ""}
+                   ${dlUrl ? `<button type="button" class="media-toolbar-pill" onclick="downloadPreviewMedia('${escJsStr$1(dlUrl)}', '${escJsStr$1(preview.name || "file")}', this)">⬇️ 保存/分享文件</button>` : ""}
                  </div>` : isHtml && !rawHtmlMode ? `<div class="file-preview-body html-sandbox-preview" style="padding:0;background:#ffffff;min-height:calc(100% - 44px);">
                    <iframe title="${esc$1(preview.name || "HTML Preview")}" sandbox="allow-scripts allow-forms allow-modals allow-popups" referrerpolicy="no-referrer" srcdoc="${htmlSrcdocAttr}" style="width:100%;height:calc(100vh - 150px);min-height:460px;border:none;background:#ffffff;display:block;"></iframe>
                  </div>` : isMarkdown && !rawMdMode ? `<div class="file-preview-body walkthrough-md-preview md-body" style="padding:16px 14px;background:var(--card-bg, #ffffff);color:var(--text, #0f172a);min-height:calc(100% - 44px);overflow-x:auto;">
@@ -16478,14 +16560,14 @@ function initHubController() {
                    </div>`;
 			container.innerHTML = `
           <div class="breadcrumbs-bar file-preview-header-bar">
-            <button class="back-btn" style="padding:0;font-size:13.5px;display:inline-flex !important;flex-shrink:0;" onclick="closeMainFilePreview('${esc$1(host.hostId)}')">‹ 返回文件列表</button>
+            <button class="back-btn" style="padding:0;font-size:13.5px;display:inline-flex !important;flex-shrink:0;" onclick="closeMainFilePreview('${escJsStr$1(host.hostId)}')">‹ 返回文件列表</button>
             <span class="file-preview-header-name" title="${esc$1(preview.name)}">${esc$1(preview.name)}</span>
             <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
-              ${isHtml ? `<button class="icon-pill-btn" style="color:var(--primary);border-color:#bfdbfe;background:var(--primary-soft);" onclick="openFullscreenHtmlFromPreview('${esc$1(host.hostId)}', false)">⛶ 全屏体验</button><button class="icon-pill-btn" onclick="toggleHtmlPreviewMode()">${rawHtmlMode ? "🌐 预览" : "</> 源码"}</button>` : ""}
+              ${isHtml ? `<button class="icon-pill-btn" style="color:var(--primary);border-color:#bfdbfe;background:var(--primary-soft);" onclick="openFullscreenHtmlFromPreview('${escJsStr$1(host.hostId)}', false)">⛶ 全屏体验</button><button class="icon-pill-btn" onclick="toggleHtmlPreviewMode()">${rawHtmlMode ? "🌐 预览" : "</> 源码"}</button>` : ""}
               ${isMarkdown ? `<button class="icon-pill-btn" onclick="toggleMdPreviewMode()">${rawMdMode ? "📖 渲染" : "</> 源码"}</button>` : ""}
               ${headerExportBtnHtml}
-              ${kind !== "text" ? "" : `<button class="icon-pill-btn" onclick="copyCodeText('${encodeURIComponent(preview.content || "")}')">📋 复制</button>`}
-              <button class="icon-pill-btn" style="color:var(--primary);border-color:#bfdbfe;background:var(--primary-soft);" onclick="askAiAboutFile('${esc$1(host.hostId)}', '${esc$1(fileProjectCwd)}', '${esc$1(preview.relPath || preview.name)}')">💬 让 AI 分析</button>
+              ${kind !== "text" ? "" : `<button class="icon-pill-btn" onclick="copyMainFilePreviewContent('${escJsStr$1(host.hostId)}')">📋 复制</button>`}
+              <button class="icon-pill-btn" style="color:var(--primary);border-color:#bfdbfe;background:var(--primary-soft);" onclick="askAiAboutFile('${escJsStr$1(host.hostId)}', '${escJsStr$1(fileProjectCwd)}', '${escJsStr$1(preview.relPath || preview.name)}')">💬 让 AI 分析</button>
             </div>
           </div>
           ${previewBodyHtml}
@@ -16517,21 +16599,21 @@ function initHubController() {
 		const projectPillsHtml = `
         <div class="filter-strip" style="border-bottom:1px solid var(--hairline);">
           ${projects.map((p) => `
-            <button class="filter-pill ${p.cwd === fileProjectCwd ? "active" : ""}" onclick="requestDirList('${esc$1(host.hostId)}', '${esc$1(agentId)}', '${esc$1(p.cwd)}', '')">📁 ${esc$1(p.name)}</button>
+            <button class="filter-pill ${p.cwd === fileProjectCwd ? "active" : ""}" onclick="requestDirList('${escJsStr$1(host.hostId)}', '${escJsStr$1(agentId)}', '${escJsStr$1(p.cwd)}', '')">📁 ${esc$1(p.name)}</button>
           `).join("")}
         </div>
       `;
 		const breadcrumbHtml = `
         <div class="breadcrumbs-bar">
-          <span class="crumb-link" onclick="requestDirList('${esc$1(host.hostId)}', '${esc$1(agentId)}', '${esc$1(rootCwd)}', '')">🏠 根目录</span>
+          <span class="crumb-link" onclick="requestDirList('${escJsStr$1(host.hostId)}', '${escJsStr$1(agentId)}', '${escJsStr$1(rootCwd)}', '')">🏠 根目录</span>
           ${crumbs.map((c, index) => {
-			return "<span style=\"color:#94a3b8;\">/</span>" + (index === crumbs.length - 1 ? `<span style="font-weight:600;color:var(--text);">${esc$1(c.name)}</span>` : `<span class="crumb-link" onclick="requestDirList('${esc$1(host.hostId)}', '${esc$1(agentId)}', '${esc$1(rootCwd)}', '${esc$1(c.path)}')">${esc$1(c.name)}</span>`);
+			return "<span style=\"color:#94a3b8;\">/</span>" + (index === crumbs.length - 1 ? `<span style="font-weight:600;color:var(--text);">${esc$1(c.name)}</span>` : `<span class="crumb-link" onclick="requestDirList('${escJsStr$1(host.hostId)}', '${escJsStr$1(agentId)}', '${escJsStr$1(rootCwd)}', '${escJsStr$1(c.path)}')">${esc$1(c.name)}</span>`);
 		}).join("")}
           ${crumbs.length === 0 ? `<span style="color:#94a3b8;margin-left:auto;font-family:monospace;">${esc$1(rootCwd)}</span>` : ""}
         </div>
       `;
 		const listHtml = loadingDir ? fileLoadingSpinnerHtml(activeSubDir ? `正在读取 ${activeSubDir} …` : "正在读取目录…") : entries.map((e) => `
-        <div class="file-row" onclick="clickRealFileEntry('${esc$1(host.hostId)}', '${esc$1(agentId)}', '${esc$1(listing?.rootCwd || fileProjectCwd)}', '${esc$1(e.relPath)}', ${Boolean(e.isDirectory)}, false)">
+        <div class="file-row" onclick="clickRealFileEntry('${escJsStr$1(host.hostId)}', '${escJsStr$1(agentId)}', '${escJsStr$1(listing?.rootCwd || fileProjectCwd)}', '${escJsStr$1(e.relPath)}', ${Boolean(e.isDirectory)}, false)">
           <div class="file-row-left">
             <span style="font-size:18px;">${fileEntryIcon(e)}</span>
             <span style="font-weight:500;">${esc$1(e.name)}</span>
@@ -16605,7 +16687,7 @@ function initHubController() {
 			hostChips.innerHTML = hosts.map((h) => {
 				const shortName = shortHostMap[h.hostId] || h.hostName;
 				return `
-            <button type="button" class="context-chip ${h.hostId === newTaskHostId ? "selected" : ""}" title="${esc$1(h.hostName)}" onclick="selectNewTaskHost('${esc$1(h.hostId)}')">
+            <button type="button" class="context-chip ${h.hostId === newTaskHostId ? "selected" : ""}" title="${esc$1(h.hostName)}" onclick="selectNewTaskHost('${escJsStr$1(h.hostId)}')">
               🟢 ${esc$1(shortName)}
             </button>
           `;
@@ -16651,9 +16733,9 @@ function initHubController() {
 			projChips.innerHTML = (newTaskCwd && !isKnownProj ? (() => {
 				const folderLabel = newTaskCwd.replace(/[/\\]+$/, "").split(/[/\\]/).pop() || newTaskCwd;
 				const prefix = newTaskCustomIsNew ? `✨ 新建：${folderLabel}` : `📂 ${folderLabel}`;
-				return `<button type="button" class="new-task-proj-pill selected" title="${esc$1(newTaskCwd)}" onclick="selectNewTaskProject('${esc$1(newTaskCwd)}', ${newTaskCustomIsNew ? "true" : "false"})">${esc$1(prefix)}</button>`;
+				return `<button type="button" class="new-task-proj-pill selected" title="${esc$1(newTaskCwd)}" onclick="selectNewTaskProject('${escJsStr$1(newTaskCwd)}', ${newTaskCustomIsNew ? "true" : "false"})">${esc$1(prefix)}</button>`;
 			})() : "") + projects.map((p) => `
-          <button type="button" class="new-task-proj-pill ${p.cwd === newTaskCwd ? "selected" : ""}" title="${esc$1(p.name)} (${esc$1(p.cwd)})" onclick="selectNewTaskProject('${esc$1(p.cwd)}', false)">
+          <button type="button" class="new-task-proj-pill ${p.cwd === newTaskCwd ? "selected" : ""}" title="${esc$1(p.name)} (${esc$1(p.cwd)})" onclick="selectNewTaskProject('${escJsStr$1(p.cwd)}', false)">
             📁 ${esc$1(formatCompactProjectLabel(p.name))}
           </button>
         `).join("");
@@ -16837,12 +16919,12 @@ function initHubController() {
         <div style="padding:10px 12px;background:var(--subtle);border:1px solid var(--border);border-radius:12px;margin-bottom:10px;">
           <div style="font-size:11.5px;color:var(--muted);word-break:break-all;margin-bottom:8px;">📂 ${esc$1(curDir)}</div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;">
-            <button type="button" class="pill-action-btn primary" style="flex:1;justify-content:center;padding:7px 12px;font-size:12.5px;" onclick="selectBrowsedNewTaskDir('${esc$1(curDir)}')">✓ 选定此目录作为工作区</button>
+            <button type="button" class="pill-action-btn primary" style="flex:1;justify-content:center;padding:7px 12px;font-size:12.5px;" onclick="selectBrowsedNewTaskDir('${escJsStr$1(curDir)}')">✓ 选定此目录作为工作区</button>
             <button type="button" class="pill-action-btn" style="padding:7px 10px;font-size:12.5px;" onclick="openCreateUnderCurrentBrowseDir()">＋ 新工作区</button>
           </div>
         </div>
         ${parentDir ? `
-          <div class="host-option" onclick="browseNewTaskDir('${esc$1(parentDir)}')">
+          <div class="host-option" onclick="browseNewTaskDir('${escJsStr$1(parentDir)}')">
             <div style="font-size:13px;font-weight:600;color:var(--primary);">⬆️ 返回上一级目录</div>
             <span style="font-size:11px;color:var(--muted);margin-left:auto;max-width:52%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc$1(parentDir)}</span>
           </div>
@@ -16853,7 +16935,7 @@ function initHubController() {
           <div style="padding:20px 12px;text-align:center;color:var(--muted);font-size:12.5px;">此目录下暂无子文件夹</div>
         ` : newTaskBrowseEntries.map((dir) => {
 				return `
-            <div class="host-option" onclick="browseNewTaskDir('${esc$1(joinRemotePath(curDir, dir.name, homeGuess))}')">
+            <div class="host-option" onclick="browseNewTaskDir('${escJsStr$1(joinRemotePath(curDir, dir.name, homeGuess))}')">
               <div style="min-width:0;flex:1;display:flex;align-items:center;gap:8px;">
                 <span>📁</span>
                 <span style="font-size:13.5px;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc$1(dir.name)}</span>
@@ -16916,7 +16998,7 @@ function initHubController() {
 		body.innerHTML = filtered.map((p) => {
 			const isSel = p.cwd === newTaskCwd;
 			return `
-        <div class="host-option ${isSel ? "selected" : ""}" onclick="selectNewTaskProject('${esc$1(p.cwd)}', false); closeSheet('newTaskProjectPickerSheet');">
+        <div class="host-option ${isSel ? "selected" : ""}" onclick="selectNewTaskProject('${escJsStr$1(p.cwd)}', false); closeSheet('newTaskProjectPickerSheet');">
           <div style="min-width:0;flex:1;">
             <div style="font-size:13.5px;font-weight:700;color:var(--text);">📁 ${esc$1(p.name)}</div>
             <div style="font-size:11px;color:var(--muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc$1(p.cwd)}</div>
@@ -17032,7 +17114,7 @@ function initHubController() {
           ${s.pinned ? "📌 取消置顶此对话" : "📌 置顶此对话（固定在列表最顶部）"}
         </button>
         <button class="action-item" onclick="shareTargetSession()">🔗 生成 AES-256 端到端加密回放链接</button>
-        <button class="action-item" onclick="jumpToSessionFiles('${esc$1(s.hostId)}', '${esc$1(s.id)}', '${esc$1(s.cwd)}')">📂 查看【${esc$1(s.project)}】项目文件夹</button>
+        <button class="action-item" onclick="jumpToSessionFiles('${escJsStr$1(s.hostId)}', '${escJsStr$1(s.id)}', '${escJsStr$1(s.cwd)}')">📂 查看【${esc$1(s.project)}】项目文件夹</button>
         <button class="action-item danger" onclick="deleteTargetSession()">
           ${confirmSheetDelete ? "⚠️ 再次点击确认彻底删除" : "🗑️ 删除此条会话记录"}
         </button>
@@ -17121,7 +17203,7 @@ function initHubController() {
           <button
             class="primary-block-btn"
             style="margin-top:0;flex:1;"
-            onclick="copyCodeText('${encodeURIComponent(url)}', '🔗 加密分享链接已复制到剪贴板！')"
+            onclick="copyCodeText('${escUriJsStr(url)}', '🔗 加密分享链接已复制到剪贴板！')"
           >
             📋 复制加密链接
           </button>
@@ -17341,7 +17423,7 @@ function initHubController() {
                 </div>
               </div>
               <div style="display:flex;align-items:center;gap:5px;flex-shrink:0;">
-                <button class="pill-action-btn primary" style="padding:5px 9px;font-size:11.5px;" onclick="event.stopPropagation(); copyCodeText('${encodeURIComponent(oneLineCmd)}', '📋 一行接入命令已复制！到电脑终端粘贴回车即可')">
+                <button class="pill-action-btn primary" style="padding:5px 9px;font-size:11.5px;" onclick="event.stopPropagation(); copyCodeText('${escUriJsStr(oneLineCmd)}', '📋 一行接入命令已复制！到电脑终端粘贴回车即可')">
                   📋 复制命令
                 </button>
                 <button class="pill-action-btn" style="padding:5px 8px;font-size:11.5px;" onclick="event.stopPropagation(); openPairingCodeSheet()">
@@ -17412,10 +17494,10 @@ function initHubController() {
           >${esc$1(oneLineCmd)}</div>
 
           <div style="display:flex;gap:8px;flex-wrap:wrap;">
-            <button class="pill-action-btn primary" onclick="copyCodeText('${encodeURIComponent(oneLineCmd)}', '📋 一行接入命令已复制！到电脑终端粘贴回车即可')">
+            <button class="pill-action-btn primary" onclick="copyCodeText('${escUriJsStr(oneLineCmd)}', '📋 一行接入命令已复制！到电脑终端粘贴回车即可')">
               📋 复制一行安装命令
             </button>
-            <button class="pill-action-btn" onclick="copyCodeText('${encodeURIComponent(localRepoCmd)}', '📋 本地仓库接入命令已复制')">
+            <button class="pill-action-btn" onclick="copyCodeText('${escUriJsStr(localRepoCmd)}', '📋 本地仓库接入命令已复制')">
               📋 已克隆仓库用此条
             </button>
             <button class="pill-action-btn" onclick="openPairingCodeSheet()">
@@ -17573,7 +17655,7 @@ function initHubController() {
                 <div class="host-visual-card ${h.isFeishuActive ? "active-feishu" : ""}" style="padding:12px 14px;${isHostLive ? "" : "opacity:0.78;"}">
                   <div
                     style="display:flex;align-items:center;justify-content:space-between;gap:8px;cursor:pointer;user-select:none;"
-                    onclick="toggleHostSettingsCard('${esc$1(h.hostId)}')"
+                    onclick="toggleHostSettingsCard('${escJsStr$1(h.hostId)}')"
                   >
                     <div style="min-width:0;flex:1;">
                       <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
@@ -17598,7 +17680,7 @@ function initHubController() {
                         <button
                           class="pill-action-btn primary"
                           style="padding:4px 9px;font-size:11.5px;"
-                          onclick="event.stopPropagation(); upgradeHostTurbo('${esc$1(h.hostId)}', '${esc$1(h.hostName)}')"
+                          onclick="event.stopPropagation(); upgradeHostTurbo('${escJsStr$1(h.hostId)}', '${escJsStr$1(h.hostName)}')"
                         >🔄 一键升级</button>
                       ` : ""}
                       <span style="font-size:11.5px;font-weight:600;color:var(--text-secondary);padding:4px 8px;border-radius:999px;background:var(--subtle);">
@@ -17650,24 +17732,24 @@ function initHubController() {
 
                       <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;flex-wrap:wrap;padding-top:4px;">
                         <div style="display:flex;gap:6px;flex-wrap:wrap;">
-                          <button class="pill-action-btn ${h.isFeishuActive ? "primary" : ""}" style="padding:5px 10px;font-size:11.5px;" onclick="activateFeishuHost('${esc$1(h.hostId)}')">
+                          <button class="pill-action-btn ${h.isFeishuActive ? "primary" : ""}" style="padding:5px 10px;font-size:11.5px;" onclick="activateFeishuHost('${escJsStr$1(h.hostId)}')">
                             ${h.isFeishuActive ? "🎯 飞书当前主控" : "切飞书到这台"}
                           </button>
-                          <button class="pill-action-btn ${h.remoteActive ? "primary" : ""}" style="padding:5px 10px;font-size:11.5px;" onclick="toggleHostRemoteMode('${esc$1(h.hostId)}', ${!h.remoteActive})">
+                          <button class="pill-action-btn ${h.remoteActive ? "primary" : ""}" style="padding:5px 10px;font-size:11.5px;" onclick="toggleHostRemoteMode('${escJsStr$1(h.hostId)}', ${!h.remoteActive})">
                             ${h.remoteActive ? "🔔 飞书通知: 开" : "🔕 飞书通知: 关"}
                           </button>
                           <button class="pill-action-btn" style="padding:5px 10px;font-size:11.5px;" onclick="openTurboGuideSheet()">
                             ${h.bridgeState?.turbo?.enabled ? "⚡ 极速详情" : "🚀 一键提速"}
                           </button>
-                          <button class="pill-action-btn ${isHostOutdated ? "primary" : ""}" style="padding:5px 10px;font-size:11.5px;" onclick="upgradeHostTurbo('${esc$1(h.hostId)}', '${esc$1(h.hostName)}')" ${isUpgradingHost ? "disabled" : ""}>
+                          <button class="pill-action-btn ${isHostOutdated ? "primary" : ""}" style="padding:5px 10px;font-size:11.5px;" onclick="upgradeHostTurbo('${escJsStr$1(h.hostId)}', '${escJsStr$1(h.hostName)}')" ${isUpgradingHost ? "disabled" : ""}>
                             ${isUpgradingHost ? "⏳ 正在升级重启..." : isHostOutdated ? `🔄 一键升级 (v${esc$1(hubVer)})` : "🔄 检查/重装更新"}
                           </button>
                         </div>
                         <div>
                           ${isRevoked ? `
-                            <button class="pill-action-btn" style="padding:5px 10px;font-size:11.5px;" onclick="unrevokeHostCredential('${esc$1(h.hostId)}', '${esc$1(h.hostName)}')">恢复接入</button>
+                            <button class="pill-action-btn" style="padding:5px 10px;font-size:11.5px;" onclick="unrevokeHostCredential('${escJsStr$1(h.hostId)}', '${escJsStr$1(h.hostName)}')">恢复接入</button>
                           ` : `
-                            <button class="pill-action-btn" style="padding:5px 10px;font-size:11.5px;color:var(--red);" onclick="revokeHostCredential('${esc$1(h.hostId)}', '${esc$1(h.hostName)}')">🚫 吊销凭证</button>
+                            <button class="pill-action-btn" style="padding:5px 10px;font-size:11.5px;color:var(--red);" onclick="revokeHostCredential('${escJsStr$1(h.hostId)}', '${escJsStr$1(h.hostName)}')">🚫 吊销凭证</button>
                           `}
                         </div>
                       </div>
@@ -17771,7 +17853,7 @@ function initHubController() {
                     ${esc$1(item.fullUrl)}
                   </div>
                   <div style="display:flex;gap:8px;">
-                    <button class="pill-action-btn primary" onclick="copyCodeText('${encodeURIComponent(item.fullUrl)}', '🔗 加密分享链接已复制')">📋 复制完整解密链接</button>
+                    <button class="pill-action-btn primary" onclick="copyCodeText('${escUriJsStr(item.fullUrl)}', '🔗 加密分享链接已复制')">📋 复制完整解密链接</button>
                     <a href="${esc$1(item.fullUrl)}" target="_blank" rel="noopener" class="pill-action-btn" style="text-decoration:none;display:inline-flex;align-items:center;">🌐 打开</a>
                   </div>
                 </div>
@@ -17782,7 +17864,7 @@ function initHubController() {
                     <div class="settings-item-title">${esc$1(s.title || "加密会话回放")}</div>
                     <div class="settings-item-desc">来自 ${esc$1(s.hostName || s.hostId || "远端电脑")} · ${formatTime(s.createdAt)} · ${formatBytes(s.sizeBytes || 0)}</div>
                   </div>
-                  <button class="pill-action-btn" style="color:var(--red);" onclick="deleteShareRecord('${esc$1(s.id || s.shareId)}')">🗑️ 销毁</button>
+                  <button class="pill-action-btn" style="color:var(--red);" onclick="deleteShareRecord('${escJsStr$1(s.id || s.shareId)}')">🗑️ 销毁</button>
                 </div>
               `).join("") : `
                 <div class="settings-item">
@@ -17830,7 +17912,7 @@ function initHubController() {
                             IP: <code>${esc$1(dev.ip || "-")}</code> · 最近活跃 ${formatTime(dev.lastSeen || dev.approvedAt)}
                           </div>
                         </div>
-                        <button class="pill-action-btn" style="color:var(--red);padding:4px 8px;font-size:11px;" onclick="revokeTrustedDeviceById('${esc$1(dev.id)}')">🚫 踢出</button>
+                        <button class="pill-action-btn" style="color:var(--red);padding:4px 8px;font-size:11px;" onclick="revokeTrustedDeviceById('${escJsStr$1(dev.id)}')">🚫 踢出</button>
                       </div>
                     `).join("")}
                   </div>
@@ -17943,7 +18025,7 @@ function initHubController() {
             </div>
             <div
               style="font-size:11.5px;color:var(--muted);cursor:pointer;user-select:none;"
-              onclick="copyCodeText('${encodeURIComponent(`DSH Hub v${buildInfo.version || "0.2.0"} (${buildInfo.uiBuild || "dev"}) · started ${buildInfo.startedAt ? new Date(buildInfo.startedAt).toISOString() : ""}`)}', '📋 版本信息已复制')"
+              onclick="copyCodeText('${escUriJsStr(`DSH Hub v${buildInfo.version || "0.2.0"} (${buildInfo.uiBuild || "dev"}) · started ${buildInfo.startedAt ? new Date(buildInfo.startedAt).toISOString() : ""}`)}', '📋 版本信息已复制')"
             >
               DSH 远控总控台 v${esc$1(buildInfo.version || "0.2.0")} · 构建 <code>${esc$1(buildInfo.uiBuild || "dev")}</code>${buildInfo.startedAt ? " · 云端启动于 " + formatTime(buildInfo.startedAt) : ""}
             </div>
@@ -18300,7 +18382,7 @@ function initHubController() {
 			const statusDesc = live ? "在线待命" : `已离线 (${formatTime(h.lastSeen)})`;
 			const feishuTag = h.isFeishuActive ? " · 🎯 飞书主控" : "";
 			return `
-          <div class="host-option ${h.hostId === currentHostId ? "selected" : ""}" style="${live ? "" : "opacity:0.78;"}" onclick="selectHost('${esc$1(h.hostId)}')">
+          <div class="host-option ${h.hostId === currentHostId ? "selected" : ""}" style="${live ? "" : "opacity:0.78;"}" onclick="selectHost('${escJsStr$1(h.hostId)}')">
             <div>
               <div style="font-weight:700;font-size:15px;color:var(--text);">${live ? "🟢" : "⚪"} ${esc$1(h.hostName)}</div>
               <div style="font-size:12.5px;color:var(--muted);margin-top:2px;">${(h.bridgeState?.tasks || []).length} 条会话 · ${esc$1(statusDesc)}${feishuTag}</div>
@@ -18426,6 +18508,11 @@ function initHubController() {
 	function copyCodeText(encoded, successMessage = "📋 已复制到剪贴板") {
 		copyText(decodeURIComponent(encoded), { successMessage });
 	}
+	function copyMainFilePreviewContent(hostId) {
+		const host = (hubState.hosts || []).find((h) => h.hostId === hostId);
+		const preview = pinnedMainPreviewByHost[hostId] || host?.lastFilePreview;
+		copyText(String(preview?.content || ""), { successMessage: "📋 已复制到剪贴板" });
+	}
 	function openTurboGuideSheet() {
 		const hosts = hubState.hosts || [];
 		const enrollCode = hubState.enrollment?.code || "配对码";
@@ -18455,10 +18542,10 @@ function initHubController() {
                   辅助功能遥控权限：${axOk ? "<span style=\"color:var(--green);font-weight:600;\">✅ 已授权 (支持 1ms 审批点击)</span>" : "<span style=\"color:var(--amber);font-weight:600;\">⚠️ 待开启或待升级</span>"}
                 </div>
                 <div style="display:flex;gap:8px;flex-wrap:wrap;">
-                  <button class="pill-action-btn primary" style="font-size:12px;padding:5px 11px;" onclick="upgradeHostTurbo('${esc$1(h.hostId)}')">
+                  <button class="pill-action-btn primary" style="font-size:12px;padding:5px 11px;" onclick="upgradeHostTurbo('${escJsStr$1(h.hostId)}')">
                     🚀 远程一键升级/刷新极速引擎
                   </button>
-                  <button class="pill-action-btn" style="font-size:12px;padding:5px 11px;" onclick="requestHostAxPermission('${esc$1(h.hostId)}')">
+                  <button class="pill-action-btn" style="font-size:12px;padding:5px 11px;" onclick="requestHostAxPermission('${escJsStr$1(h.hostId)}')">
                     🔓 在电脑弹出辅助功能授权框
                   </button>
                 </div>
@@ -18472,7 +18559,7 @@ function initHubController() {
           <div style="padding:10px 12px;border-radius:10px;background:var(--subtle);border:1px solid var(--border);color:var(--text);">
             <strong>① 一步命令接入（自动启用 Rust 加速 + 免二次安装）</strong><br/>
             新电脑只需运行一次 <code>./connect-host.sh</code>，脚本会自动寻找系统或 IDE 内置运行时、挂载 <code>dsh-turbo</code> 预编译 Rust 加速模块，并自动弹出 macOS 辅助功能授权框。<br/>
-            <button class="pill-action-btn" style="margin-top:6px;font-size:11.5px;padding:4px 10px;" onclick="copyCodeText('${encodeURIComponent(oneStepCmd)}')">📋 复制一键满血接入命令</button>
+            <button class="pill-action-btn" style="margin-top:6px;font-size:11.5px;padding:4px 10px;" onclick="copyCodeText('${escUriJsStr(oneStepCmd)}')">📋 复制一键满血接入命令</button>
           </div>
           <div style="padding:10px 12px;border-radius:10px;background:var(--subtle);border:1px solid var(--border);color:var(--text);">
             <strong>② 勾选 macOS「辅助功能」权限</strong><br/>
@@ -19992,8 +20079,8 @@ function initHubController() {
               设备：<strong>${esc$1(req.name)}</strong> · 来源 IP：<code>${esc$1(req.ip || "unknown")}</code>
             </div>
             <div style="display:flex;gap:8px;">
-              <button type="button" class="pill-action-btn primary" style="flex:1;justify-content:center;" onclick="decideDeviceLoginRequest('${esc$1(req.id)}', true)">✓ 允许此设备登录</button>
-              <button type="button" class="pill-action-btn" style="flex:1;justify-content:center;color:var(--red);" onclick="decideDeviceLoginRequest('${esc$1(req.id)}', false)">🚫 拒绝</button>
+              <button type="button" class="pill-action-btn primary" style="flex:1;justify-content:center;" onclick="decideDeviceLoginRequest('${escJsStr$1(req.id)}', true)">✓ 允许此设备登录</button>
+              <button type="button" class="pill-action-btn" style="flex:1;justify-content:center;color:var(--red);" onclick="decideDeviceLoginRequest('${escJsStr$1(req.id)}', false)">🚫 拒绝</button>
             </div>
           </div>
         `).join("")}
@@ -20004,8 +20091,8 @@ function initHubController() {
               电脑：<strong>${esc$1(h.hostName || h.hostId)}</strong> (${esc$1(h.platform || "host")}) · IP：<code>${esc$1(h.ip || "unknown")}</code>
             </div>
             <div style="display:flex;gap:8px;">
-              <button type="button" class="pill-action-btn primary" style="flex:1;justify-content:center;" onclick="decideHostJoinRequest('${esc$1(h.hostId)}', true)">✓ 允许此电脑接入</button>
-              <button type="button" class="pill-action-btn" style="flex:1;justify-content:center;color:var(--red);" onclick="decideHostJoinRequest('${esc$1(h.hostId)}', false)">🚫 拒绝并拉黑</button>
+              <button type="button" class="pill-action-btn primary" style="flex:1;justify-content:center;" onclick="decideHostJoinRequest('${escJsStr$1(h.hostId)}', true)">✓ 允许此电脑接入</button>
+              <button type="button" class="pill-action-btn" style="flex:1;justify-content:center;color:var(--red);" onclick="decideHostJoinRequest('${escJsStr$1(h.hostId)}', false)">🚫 拒绝并拉黑</button>
             </div>
           </div>
         `).join("")}
@@ -20336,6 +20423,7 @@ function initHubController() {
 		openCopyFallbackSheet,
 		retryCopyFromFallbackSheet,
 		copyCodeText,
+		copyMainFilePreviewContent,
 		openTurboGuideSheet,
 		requestHostAxPermission,
 		compareSemver,

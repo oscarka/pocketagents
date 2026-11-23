@@ -1,31 +1,38 @@
 import { randomInt, randomUUID } from 'node:crypto'
 import { basename } from 'node:path'
+import { assertSafeVoiceTargetUrl } from './voice-vault.js'
 
 const DEFAULT_HTTP_TIMEOUT_MS = 25_000
 const PIN_DEFAULT_TTL_MS = 30_000
 const PIN_MAX_ATTEMPTS = 3
+const PIN_LOCKOUT_TTL_MS = 10 * 60_000
+const MAX_TTS_AUDIO_BYTES = 15 * 1024 * 1024
 
 const L2_HIGH_RISK_PATTERNS = [
-  /\brm\s+-[a-z]*r[a-z]*f\b/i,
-  /\brm\s+-[a-z]*f[a-z]*r\b/i,
-  /\brm\s+-rf\b/i,
-  /\bgit\s+push\b[^\n]*(--force|-f\b)/i,
+  /\brm\s+(?:-[a-z]*r[a-z]*f|-[a-z]*f[a-z]*r|-rf|-r\s+-f|-f\s+-r|--recursive\b[^\n]*--force|--force\b[^\n]*--recursive|-r\b)/i,
+  /\bgit\s+push\b[^\n]*(--force(?:-with-lease)?|-f\b|\s\+[^\s]+)/i,
   /\bgit\s+reset\s+--hard\b/i,
   /\bgit\s+clean\s+-[a-z]*f/i,
-  /\bdrop\s+(table|database|schema|index)\b/i,
+  /\bgit\s+(?:branch\s+-D|checkout\s+--\s+\.)/i,
+  /\bdrop\s+(?:table|database|schema|index|view|user|role)\b/i,
+  /\balter\s+table\b[^\n]*\bdrop\b/i,
   /\btruncate\s+table\b/i,
-  /\bdelete\s+from\b(?![^\n]*\bwhere\b)/i,
+  /\bdelete\s+from\b(?:\s+\S+\s+where\s+1\s*=\s*1\b|(?![^\n]*\bwhere\b))/i,
   /\bsudo\b/i,
-  /\bchmod\s+777\b/i,
+  /\bchmod\s+(?:-R\s+)?(?:0?777|\+s)\b|\bchown\s+-R\b/i,
   /\bmkfs\b|\bdd\s+if=/i,
   /\b(shutdown|reboot|halt)\b/i,
   /\bkill\s+-9\b|\bpkill\s+-9\b/i,
-  /\bkubectl\s+delete\b/i,
-  /\bgcloud\b[^\n]*\bdelete\b/i,
-  /\bterraform\s+(apply|destroy)\b/i,
+  /\bkubectl\s+(?:delete|apply|exec)\b|\bhelm\s+uninstall\b/i,
+  /\b(?:gcloud|aws|az)\b[^\n]*\bdelete\b/i,
+  /\bterraform\s+(?:apply|destroy)\b/i,
+  /\bdocker\s+(?:system\s+prune|rm\s+-f|push)\b/i,
+  /\brsync\b[^\n]*--delete\b/i,
+  /\bfind\b[^\n]*-delete\b|\bxargs\s+rm\b/i,
   /\b(npm|yarn|pnpm)\s+publish\b/i,
   /\bdeploy\b[^\n]*(prod|production|live|main)\b/i,
-  /\bcurl\b[^\n]*\|\s*(ba)?sh\b/i,
+  /\b(?:curl|wget)\b[^\n]*\|\s*(?:ba|z)?sh\b|\b(?:curl|wget)\b[^\n]*\|\s*(?:python3?|node)\b|\bbash\s+<\(/i,
+  /\b(?:sh|bash|zsh)\s+-c\b|\bpython3?\s+-c\b|\bnode\s+-e\b|\bbase64\s+(?:-d|--decode)\s*\|/i,
   /\bwipe_host\b/i,
 ]
 
@@ -78,8 +85,12 @@ export function classifyApprovalRisk(approval = {}) {
     approval.toolName,
     approval.tool,
     approval.title,
+    approval.promptTitle,
     approval.summary,
     approval.command,
+    approval.commandLine,
+    approval.permissionTarget,
+    approval.reason,
     approval.description,
     approval.detail,
     typeof approval.input === 'string' ? approval.input : JSON.stringify(approval.input || ''),
@@ -87,6 +98,8 @@ export function classifyApprovalRisk(approval = {}) {
   ]
     .filter(Boolean)
     .join(' ')
+    .replace(/\\\r?\n\s*/g, ' ')
+    .replace(/\s+/g, ' ')
 
   for (const re of L2_HIGH_RISK_PATTERNS) {
     const m = re.exec(rawBlob)
@@ -252,11 +265,28 @@ export class VoicePinChallengeStore {
     this.ttlMs = ttlMs
     this.maxAttempts = maxAttempts
     this.challenges = new Map()
+    this.lockedApprovals = new Map()
+  }
+
+  isApprovalLocked(hostId = '', code = '') {
+    const cleanCode = String(code || '').trim().toUpperCase()
+    if (!cleanCode) return false
+    const lockKey = `${String(hostId || '').trim()}:${cleanCode}`
+    const until = this.lockedApprovals.get(lockKey)
+    if (!until) return false
+    if (this.now() > until) {
+      this.lockedApprovals.delete(lockKey)
+      return false
+    }
+    return true
   }
 
   issue(sessionKey = 'default', { hostId = '', code = '', agentId = '', summary = '', reason = '' } = {}) {
     const key = String(sessionKey || 'default').trim() || 'default'
     const now = this.now()
+    for (const [k, v] of this.challenges.entries()) {
+      if (now > v.expiresAt) this.challenges.delete(k)
+    }
     const pin = generateSafe3DigitPin()
     const entry = {
       id: `pin_${randomUUID().slice(0, 8)}`,
@@ -273,6 +303,10 @@ export class VoicePinChallengeStore {
       maxAttempts: this.maxAttempts,
     }
     this.challenges.set(key, entry)
+    while (this.challenges.size > 100) {
+      const oldest = this.challenges.keys().next().value
+      this.challenges.delete(oldest)
+    }
     return { ...entry }
   }
 
@@ -314,6 +348,13 @@ export class VoicePinChallengeStore {
       entry.attempts += 1
       if (entry.attempts >= entry.maxAttempts) {
         this.challenges.delete(key)
+        if (entry.code) {
+          this.lockedApprovals.set(`${entry.hostId}:${entry.code}`, this.now() + PIN_LOCKOUT_TTL_MS)
+          while (this.lockedApprovals.size > 200) {
+            const oldest = this.lockedApprovals.keys().next().value
+            this.lockedApprovals.delete(oldest)
+          }
+        }
         return { status: 'locked', extractedPin: extracted, challenge: { ...entry } }
       }
       return {
@@ -510,10 +551,11 @@ export function buildGeminiThinkingConfig(model = '', thinkingLevel = 'default',
 }
 
 async function fetchWithTimeout(fetchImpl, url, options = {}, timeoutMs = DEFAULT_HTTP_TIMEOUT_MS) {
+  await assertSafeVoiceTargetUrl(url, { resolveDns: fetchImpl === globalThis.fetch })
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), timeoutMs)
   try {
-    return await fetchImpl(url, { ...options, signal: ctrl.signal })
+    return await fetchImpl(url, { ...options, redirect: 'error', signal: ctrl.signal })
   } finally {
     clearTimeout(timer)
   }
@@ -811,7 +853,7 @@ export class VoiceCopilotEngine {
     if (provider === 'gemini') {
       const model = stageCfg?.model || cred.defaultModel || 'gemini-2.5-flash'
       const base = cred.baseUrl || 'https://generativelanguage.googleapis.com/v1beta'
-      const url = `${base}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(cred.apiKey)}`
+      const url = `${base}/models/${encodeURIComponent(model)}:generateContent`
       const thinkingConfig = buildGeminiThinkingConfig(model, stageCfg?.thinkingLevel || 'low', { isAudioStt: true })
       const hotwordHint = hotwords.length > 0 ? `参考专有名词：${hotwords.slice(0, 20).join('、')}。` : ''
       const payload = {
@@ -839,7 +881,10 @@ export class VoiceCopilotEngine {
       }
       const resp = await fetchWithTimeout(this.fetch, url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': cred.apiKey,
+        },
         body: JSON.stringify(payload),
       })
       const latencyMs = this.now() - t0
@@ -958,7 +1003,7 @@ export class VoiceCopilotEngine {
     if (provider === 'gemini') {
       const model = stageCfg?.model || cred.defaultModel || 'gemini-2.5-flash'
       const base = cred.baseUrl || 'https://generativelanguage.googleapis.com/v1beta'
-      const url = `${base}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(cred.apiKey)}`
+      const url = `${base}/models/${encodeURIComponent(model)}:generateContent`
       const thinkingConfig = buildGeminiThinkingConfig(model, stageCfg?.thinkingLevel || 'off', { isAudioStt: false })
       const contents = [
         ...history.slice(-6).map(m => ({
@@ -979,7 +1024,10 @@ export class VoiceCopilotEngine {
       }
       const resp = await fetchWithTimeout(this.fetch, url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': cred.apiKey,
+        },
         body: JSON.stringify(payload),
       })
       const latencyMs = this.now() - t0
@@ -1076,10 +1124,15 @@ export class VoiceCopilotEngine {
 
     if (type === 'approve' || type === 'reject' || type === 'answer_question') {
       const reqCode = String(action?.code || '').trim().toUpperCase()
-      const approval =
-        ctx.pendingApprovals.find(a => reqCode && a.code === reqCode) ||
-        ctx.pendingApprovals.find(a => action?.agentId && a.agentId === action.agentId) ||
-        (ctx.pendingApprovals.length === 1 ? ctx.pendingApprovals[0] : null)
+      const reqHostId = String(action?.hostId || '').trim()
+      const scopedApprovals = reqHostId
+        ? ctx.pendingApprovals.filter(a => a.hostId === reqHostId)
+        : ctx.pendingApprovals
+      const approval = reqCode
+        ? scopedApprovals.find(a => a.code === reqCode) || null
+        : (action?.agentId
+          ? scopedApprovals.find(a => a.agentId === action.agentId) || null
+          : (scopedApprovals.length === 1 ? scopedApprovals[0] : null))
 
       if (!approval) {
         return {
@@ -1090,16 +1143,32 @@ export class VoiceCopilotEngine {
         }
       }
 
-      if (type === 'approve' && approval.riskLevel === 'L2') {
-        if (l2Policy === 'screen_only') {
+      // Prevent L2 bypass via `answer_question` on non-question command approvals
+      if (type === 'answer_question' && approval.kind !== 'question') {
+        return {
+          executed: false,
+          blockedByPolicy: 'invalid_question_target',
+          riskLevel: approval.riskLevel,
+          type,
+          dryRun,
+          approval,
+          overrideReply: '该待审批项是命令执行确认而非多选题，请明确说明批准或拒绝。',
+        }
+      }
+
+      if (type !== 'reject' && approval.riskLevel === 'L2') {
+        if (l2Policy === 'screen_only' || this.pinStore.isApprovalLocked(approval.hostId, approval.code)) {
+          const isLocked = this.pinStore.isApprovalLocked(approval.hostId, approval.code)
           return {
             executed: false,
-            blockedByPolicy: 'screen_only',
+            blockedByPolicy: isLocked ? 'pin_locked' : 'screen_only',
             riskLevel: 'L2',
             type,
             dryRun,
             approval,
-            overrideReply: `这是高危操作（${approval.riskReason}），当前安全策略禁止语音放行，请在手机屏幕上手动点按确认。`,
+            overrideReply: isLocked
+              ? '该高危审批确认码已连续输错被锁定，请改为在手机屏幕上手动点按确认。'
+              : `这是高危操作（${approval.riskReason}），当前安全策略禁止语音放行，请在手机屏幕上手动点按确认。`,
           }
         }
         const challenge = this.pinStore.issue(voiceSessionId, {
@@ -1168,7 +1237,8 @@ export class VoiceCopilotEngine {
 
     if (type === 'create_task') {
       const prompt = String(action?.prompt || action?.text || '').trim()
-      if (!prompt || !hostId) {
+      const knownHost = (ctx.hosts || []).find(h => h.hostId === hostId)
+      if (!prompt || !hostId || !knownHost) {
         return { executed: false, dryRun, type, overrideReply: '没有可用电脑或任务描述为空，未能创建新任务。' }
       }
       const cmdPayload = {
@@ -1221,6 +1291,39 @@ export class VoiceCopilotEngine {
     const pinVerdict = this.pinStore.verify(voiceSessionId, userText)
     if (pinVerdict.status === 'matched') {
       const ch = pinVerdict.challenge
+      if (prefs.l2Policy === 'screen_only') {
+        const spokenReply = '当前安全策略已切换为仅限手机屏幕确认，请在屏幕手动点按。'
+        return {
+          ok: true,
+          fastPath: 'l2_pin_policy_blocked',
+          provider: 'hub_pin_guard',
+          model: 'deterministic-1ms',
+          latencyMs: this.now() - t0,
+          userText,
+          spokenReply,
+          spokenChunks: splitIntoProgressiveTtsChunks(spokenReply),
+          action: { type: 'none' },
+          execution: { executed: false, dryRun, blockedByPolicy: 'screen_only', riskLevel: 'L2' },
+          pinChallenge: null,
+        }
+      }
+      const stillPending = ctx.pendingApprovals.some(a => a.hostId === ch.hostId && a.code === ch.code)
+      if (!stillPending && !dryRun) {
+        const spokenReply = '该审批已处理或已过期，无需重复放行。'
+        return {
+          ok: true,
+          fastPath: 'l2_pin_stale',
+          provider: 'hub_pin_guard',
+          model: 'deterministic-1ms',
+          latencyMs: this.now() - t0,
+          userText,
+          spokenReply,
+          spokenChunks: splitIntoProgressiveTtsChunks(spokenReply),
+          action: { type: 'none' },
+          execution: { executed: false, dryRun, type: 'none' },
+          pinChallenge: null,
+        }
+      }
       const cmdPayload = { type: 'approve', code: ch.code, agentId: ch.agentId, optionIndex: 1 }
       const outcome = dryRun ? null : this.hub.queueCommand(ch.hostId, cmdPayload)
       const spokenReply = dryRun
@@ -1539,7 +1642,7 @@ export class VoiceCopilotEngine {
       const model = stageCfg.model || cred.defaultModel || 'gemini-2.5-flash-preview-tts'
       const voiceName = voice || stageCfg.voice || cred.defaultVoice || 'Kore'
       const base = cred.baseUrl || 'https://generativelanguage.googleapis.com/v1beta'
-      const url = `${base}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(cred.apiKey)}`
+      const url = `${base}/models/${encodeURIComponent(model)}:generateContent`
       const payload = {
         contents: [{ role: 'user', parts: [{ text: cleanText }] }],
         generationConfig: {
@@ -1553,7 +1656,10 @@ export class VoiceCopilotEngine {
       }
       const resp = await fetchWithTimeout(this.fetch, url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': cred.apiKey,
+        },
         body: JSON.stringify(payload),
       })
       const latencyMs = this.now() - t0
@@ -1626,14 +1732,37 @@ export class VoiceCopilotEngine {
           error: errData?.error?.message || `OpenAI-compat TTS HTTP ${resp.status}`,
         }
       }
+      const ct = String(resp.headers?.get?.('content-type') || '').toLowerCase()
+      if (ct && !ct.startsWith('audio/') && !ct.startsWith('application/octet-stream')) {
+        return {
+          ok: false,
+          provider,
+          model,
+          voice: chosenVoice,
+          credId: cred.id,
+          latencyMs,
+          error: `OpenAI-compat TTS 返回非音频类型 (${ct.split(';')[0]})`,
+        }
+      }
       const buf = Buffer.from(await resp.arrayBuffer())
+      if (buf.length > MAX_TTS_AUDIO_BYTES) {
+        return {
+          ok: false,
+          provider,
+          model,
+          voice: chosenVoice,
+          credId: cred.id,
+          latencyMs,
+          error: 'TTS 音频响应体积超限',
+        }
+      }
       return {
         ok: true,
         provider,
         model,
         voice: chosenVoice,
         credId: cred.id,
-        mimeType: 'audio/mpeg',
+        mimeType: ct.startsWith('audio/') ? ct.split(';')[0] : 'audio/mpeg',
         audioBase64: buf.toString('base64'),
         byteLength: buf.length,
         latencyMs,

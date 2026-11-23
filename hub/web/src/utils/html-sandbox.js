@@ -35,16 +35,20 @@ export function buildSandboxedHtmlSrcdoc(rawHtml, opts = {}) {
   let html = String(rawHtml || '');
   if (!html.trim()) return '<!doctype html><html><body></body></html>';
 
-  // Ensure mobile responsive viewport when AI snippet omits <meta name="viewport">
+  // Ensure mobile responsive viewport and strict exfiltration-blocking CSP
+  const originPrefixForCsp = opts.hostId && opts.mediaTicket
+    ? String(opts.origin || '').replace(/\/+$/, '').replace(/[^a-zA-Z0-9:/.%-]/g, '')
+    : '';
+  const cspOriginSrc = originPrefixForCsp ? ` ${originPrefixForCsp}` : '';
+  const cspMeta = `<meta http-equiv="Content-Security-Policy" content="default-src 'self'${cspOriginSrc} 'unsafe-inline' 'unsafe-eval' data: blob:; img-src * data: blob:; font-src * data: blob:; connect-src 'none'; form-action 'none';">`;
   const viewportMeta = '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">';
-  if (!/<meta[^>]+name=["']viewport["']/i.test(html)) {
-    if (/<head[^>]*>/i.test(html)) {
-      html = html.replace(/<head([^>]*)>/i, `<head$1>${viewportMeta}`);
-    } else if (/<html[^>]*>/i.test(html)) {
-      html = html.replace(/<html([^>]*)>/i, `<html$1><head>${viewportMeta}</head>`);
-    } else {
-      html = `<!doctype html><html><head><meta charset="utf-8">${viewportMeta}</head><body>${html}</body></html>`;
-    }
+  const injectedHead = `${cspMeta}${/<meta[^>]+name=["']viewport["']/i.test(html) ? '' : viewportMeta}`;
+  if (/<head[^>]*>/i.test(html)) {
+    html = html.replace(/<head([^>]*)>/i, `<head$1>${injectedHead}`);
+  } else if (/<html[^>]*>/i.test(html)) {
+    html = html.replace(/<html([^>]*)>/i, `<html$1><head>${injectedHead}</head>`);
+  } else {
+    html = `<!doctype html><html><head><meta charset="utf-8">${injectedHead}</head><body>${html}</body></html>`;
   }
 
   // Rewrite relative local assets (./style.css, ./app.js, images) ONLY via read-only mediaTicket (never HUB_TOKEN!)

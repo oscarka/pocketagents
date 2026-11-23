@@ -24,6 +24,7 @@ export class HubCore {
     pushFetch = globalThis.fetch,
     buildInfo = null,
     tokenSecret = '',
+    deviceApprovalEnabled = false,
   } = {}) {
     this.stateFile = stateFile
     this.now = now
@@ -60,7 +61,10 @@ export class HubCore {
     this.securityEvents = []
     this.securityIpHits = new Map()
     this.securityAlertCooldowns = new Map()
-    this.deviceApprovalEnabled = false
+    this.securityGlobalPushTimes = []
+    this.mfaPushWindowByIp = new Map()
+    this.revokedHostTokens = new Set()
+    this.deviceApprovalEnabled = Boolean(deviceApprovalEnabled)
     this.trustedDevices = new Map()
     this.pendingDeviceLogins = new Map()
     this.sseListeners = new Set()
@@ -89,8 +93,13 @@ export class HubCore {
   }
 
   getPrimaryMediaTicketKey() {
+    const signingExtra = String(process.env.HUB_SIGNING_SECRET || '').trim()
+    // Bind persisted mediaSeed whenever stateful, Zero-Trust Device Approval is enabled, or HUB_SIGNING_SECRET is configured
+    // so a leaked HUB_TOKEN alone can NEVER forge mediaTickets offline.
+    const bindSeed = Boolean(this.deviceApprovalEnabled || this.stateFile || signingExtra)
     if (this.tokenSecret) {
-      return createHmac('sha256', this.tokenSecret).update('dsh-media-ticket-v1').digest()
+      const ctx = bindSeed ? `dsh-media-ticket-v2:${this.mediaSeed}:${signingExtra}` : 'dsh-media-ticket-v1'
+      return createHmac('sha256', this.tokenSecret).update(ctx).digest()
     }
     return Buffer.from(this.mediaSeed, 'hex')
   }
@@ -170,8 +179,11 @@ export class HubCore {
     const cooldownKey = `${cleanIp}:${cleanKind}`
     const cooldownMs = 5 * 60_000
     const lastAlertAt = this.securityAlertCooldowns.get(cooldownKey) || 0
+    this.securityGlobalPushTimes = (this.securityGlobalPushTimes || []).filter(ts => now - ts < cooldownMs)
+    const underGlobalPushCap = this.securityGlobalPushTimes.length < 8
     let alerted = false
-    if (pushImmediately || now - lastAlertAt >= cooldownMs) {
+    if (underGlobalPushCap && (pushImmediately || now - lastAlertAt >= cooldownMs)) {
+      this.securityGlobalPushTimes.push(now)
       this.securityAlertCooldowns.set(cooldownKey, now)
       if (this.securityAlertCooldowns.size > 500) {
         const oldestKey = this.securityAlertCooldowns.keys().next().value
@@ -307,7 +319,7 @@ export class HubCore {
     const cleanIp = String(ip || 'unknown').trim().slice(0, 64)
 
     for (const req of this.pendingDeviceLogins.values()) {
-      if (req.deviceId === cleanDeviceId && req.status === 'pending' && now <= req.expiresAt) {
+      if (req.deviceId === cleanDeviceId && req.ip === cleanIp && req.status === 'pending' && now <= req.expiresAt) {
         return {
           ok: true,
           pendingApproval: true,
@@ -318,7 +330,7 @@ export class HubCore {
       }
     }
 
-    const requestId = `dreq_${randomBytes(8).toString('hex')}`
+    const requestId = `dreq_${randomBytes(16).toString('hex')}`
     const verifyCode = String(randomInt(100000, 1000000))
     const entry = {
       id: requestId,
@@ -334,20 +346,34 @@ export class HubCore {
       claimed: false,
     }
     this.pendingDeviceLogins.set(requestId, entry)
+    while (this.pendingDeviceLogins.size > 50) {
+      const oldest = this.pendingDeviceLogins.keys().next().value
+      this.pendingDeviceLogins.delete(oldest)
+    }
     this.emitStateChange('device_login_pending')
 
-    void this.broadcastWebPush({
-      title: '🔐 新设备请求访问你的总控台',
-      body: `${cleanName}（IP ${cleanIp}）输入了密码请求登录，核对码 ${verifyCode}。请在手机上点击「允许」或「拒绝」。`,
-      tag: `dsh-dev-login-${requestId}`,
-      badgeCount: 1,
-      data: {
-        type: 'device_login_pending',
-        requestId,
-        verifyCode,
-        url: '/',
-      },
-    })
+    // Rate-limit MFA push alerts per IP (max 5 per 5 minutes) to prevent MFA push-bombing
+    const mfaTimes = (this.mfaPushWindowByIp.get(cleanIp) || []).filter(ts => now - ts < 5 * 60_000)
+    if (mfaTimes.length < 5) {
+      mfaTimes.push(now)
+      this.mfaPushWindowByIp.set(cleanIp, mfaTimes)
+      if (this.mfaPushWindowByIp.size > 500) {
+        const oldestIp = this.mfaPushWindowByIp.keys().next().value
+        this.mfaPushWindowByIp.delete(oldestIp)
+      }
+      void this.broadcastWebPush({
+        title: '🔐 新设备请求访问你的总控台',
+        body: `${cleanName}（IP ${cleanIp}）输入了密码请求登录，核对码 ${verifyCode}。请在手机上点击「允许」或「拒绝」。`,
+        tag: `dsh-dev-login-${requestId}`,
+        badgeCount: 1,
+        data: {
+          type: 'device_login_pending',
+          requestId,
+          verifyCode,
+          url: '/',
+        },
+      })
+    }
 
     return {
       ok: true,
@@ -531,8 +557,11 @@ export class HubCore {
   }
 
   getHostTokenSigningKey() {
+    const signingExtra = String(process.env.HUB_SIGNING_SECRET || '').trim()
+    const bindSeed = Boolean(this.deviceApprovalEnabled || signingExtra)
     if (this.tokenSecret) {
-      return createHmac('sha256', this.tokenSecret).update('dsh-host-token-v1').digest()
+      const ctx = bindSeed ? `dsh-host-token-v2:${this.mediaSeed}:${signingExtra}` : 'dsh-host-token-v1'
+      return createHmac('sha256', this.tokenSecret).update(ctx).digest()
     }
     return createHmac('sha256', Buffer.from(this.mediaSeed, 'hex')).update('dsh-host-token-v1').digest()
   }
@@ -757,6 +786,11 @@ export class HubCore {
         }
         if (this.deviceApprovalEnabled && this.trustedDevices.size === 0) {
           this.deviceApprovalEnabled = false
+        }
+      }
+      if (Array.isArray(data.revokedHostTokens)) {
+        for (const tk of data.revokedHostTokens.slice(-500)) {
+          if (typeof tk === 'string' && tk.trim()) this.revokedHostTokens.add(tk.trim())
         }
       }
       if (data.enrollment && typeof data.enrollment === 'object' && data.enrollment.code) {
@@ -1047,6 +1081,7 @@ export class HubCore {
             securityEvents: this.securityEvents.slice(-100),
             deviceApprovalEnabled: Boolean(this.deviceApprovalEnabled),
             trustedDevices: [...this.trustedDevices.values()],
+            revokedHostTokens: [...this.revokedHostTokens].slice(-500),
             enrollment: this.enrollment,
           }
           tmpPath = `${this.stateFile}.tmp.${process.pid}`
@@ -1733,12 +1768,25 @@ export class HubCore {
       return { ok: false, error: '无效的 Web Push 订阅数据（缺少 endpoint 或 p256dh/auth 密钥）' }
     }
     const endpoint = String(subscription.endpoint).trim()
-    let endpointHost = 'push-service'
+    let parsedEp = null
     try {
-      endpointHost = new URL(endpoint).host
+      parsedEp = new URL(endpoint)
     } catch {
-      // ignore invalid URL parse
+      return { ok: false, error: '无效的 Web Push 订阅地址' }
     }
+    const epHost = String(parsedEp.hostname || '').toLowerCase().replace(/^\[|\]$/g, '').replace(/\.+$/, '')
+    const isUnsafePushHost =
+      parsedEp.protocol !== 'https:'
+      || !epHost
+      || epHost === 'localhost'
+      || epHost.endsWith('.local')
+      || epHost.endsWith('.internal')
+      || /^(?:127\.|10\.|169\.254\.|192\.168\.|0\.|100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.|172\.(?:1[6-9]|2\d|3[01])\.)/.test(epHost)
+      || /^(?:::1|::|fe[89ab][0-9a-f]:|f[cd][0-9a-f]{2}:|::ffff:)/i.test(epHost)
+    if (isUnsafePushHost) {
+      return { ok: false, error: 'Web Push 订阅地址仅允许公网 HTTPS 推送端点' }
+    }
+    const endpointHost = parsedEp.host || 'push-service'
     const existing = this.pushSubscriptions.get(endpoint)
     const record = {
       id: existing?.id || `sub-${randomBytes(4).toString('hex')}`,
@@ -2058,7 +2106,6 @@ export class HubCore {
     }
     if (record?.trust?.status === 'pending_approval') {
       record.lastSeen = now
-      record.hostName = hostName
       return {
         ok: true,
         pendingApproval: true,
@@ -2072,12 +2119,19 @@ export class HubCore {
     }
 
     const incomingIdentity = payload.identity && typeof payload.identity === 'object' ? payload.identity : null
-    if (record?.trust?.status === 'pinned' && record.trust.pinnedPublicKey && incomingIdentity?.publicKey) {
-      if (record.trust.pinnedPublicKey !== incomingIdentity.publicKey) {
+    if (record?.trust?.status === 'pinned' && record.trust.pinnedPublicKey) {
+      if (incomingIdentity?.publicKey && record.trust.pinnedPublicKey !== incomingIdentity.publicKey) {
         return {
           ok: false,
           code: 'PEER_IDENTITY_MISMATCH',
           error: `设备 ${hostId} 公钥指纹异常变更，已拒绝同步（防伪造保护）`,
+        }
+      }
+      if (!incomingIdentity?.publicKey && (this.deviceApprovalEnabled || payload._strictIdentityCheck)) {
+        return {
+          ok: false,
+          code: 'PEER_IDENTITY_MISMATCH',
+          error: `设备 ${hostId} 缺少已钉扎的设备公钥身份，已拒绝同步`,
         }
       }
     }
@@ -2219,20 +2273,6 @@ export class HubCore {
       }
       if (record.recentResults.length > 25) {
         record.recentResults.splice(0, record.recentResults.length - 25)
-      }
-    }
-
-    if (Array.isArray(payload.pushSubscriptionsBackup) && payload.pushSubscriptionsBackup.length > 0) {
-      for (const sub of payload.pushSubscriptionsBackup) {
-        if (
-          sub?.endpoint &&
-          sub?.keys?.p256dh &&
-          sub?.keys?.auth &&
-          !this.pushSubscriptions.has(sub.endpoint) &&
-          !this.unsubscribedEndpoints.has(sub.endpoint)
-        ) {
-          this.pushSubscriptions.set(sub.endpoint, sub)
-        }
       }
     }
 
@@ -2406,9 +2446,6 @@ export class HubCore {
       commands,
       ...(fsRequests.length > 0 ? { fsRequests } : {}),
       hostsSummary: this.getHostsSummary(),
-      ...(!payload.liteHeartbeat || needFullSync
-        ? { pushSubscriptionsBackup: [...this.pushSubscriptions.values()] }
-        : {}),
     }
   }
 
@@ -2548,6 +2585,10 @@ export class HubCore {
     const recordFail = () => {
       bucket.push(now)
       this.pairingFailBuckets.set(bucketKey, bucket)
+      if (this.pairingFailBuckets.size > 2000) {
+        const oldestKey = this.pairingFailBuckets.keys().next().value
+        this.pairingFailBuckets.delete(oldestKey)
+      }
       if (this.enrollment && !this.enrollment.revoked) {
         this.enrollment.failedAttempts = (this.enrollment.failedAttempts || 0) + 1
         if (this.enrollment.failedAttempts >= 8) {
@@ -2589,6 +2630,19 @@ export class HubCore {
     const hostTokenPreview = `${hostToken.slice(0, 8)}...${hostToken.slice(-4)}`
 
     const existing = this.hosts.get(cleanHostId)
+    if (
+      this.deviceApprovalEnabled
+      && existing
+      && existing.hostToken
+      && existing.trust?.status !== 'revoked'
+      && existing.trust?.status !== 'pending_approval'
+    ) {
+      return {
+        ok: false,
+        statusCode: 409,
+        error: `电脑 ${cleanHostId} 已绑定受信任凭证；为防越权接管，请先在手机「设备与设置」吊销旧凭证后再重新接入`,
+      }
+    }
     const record = existing ?? {
       hostId: cleanHostId,
       hostName: cleanHostName,
@@ -2609,10 +2663,7 @@ export class HubCore {
     record.hostToken = hostToken
     record.hostTokenCreatedAt = now
     record.hostTokenPreview = hostTokenPreview
-    const needsHostApproval = Boolean(
-      this.deviceApprovalEnabled &&
-      (!existing || existing.trust?.status === 'revoked' || existing.trust?.status === 'pending_approval'),
-    )
+    const needsHostApproval = Boolean(this.deviceApprovalEnabled)
     if (needsHostApproval) {
       record.trust = {
         status: 'pending_approval',
@@ -2670,6 +2721,7 @@ export class HubCore {
     const cleanHostId = String(hostId ?? '').trim()
     const candidate = String(candidateToken ?? '').trim()
     if (!candidate) return false
+    if (this.revokedHostTokens.has(candidate)) return false
     const isAllowedTrust = status =>
       status !== 'revoked' && (allowPending || status !== 'pending_approval')
     if (!cleanHostId) {
@@ -2691,6 +2743,8 @@ export class HubCore {
       if (a.length !== b.length) return false
       return timingSafeEqual(a, b)
     }
+    // Under Zero-Trust Device Approval, never auto-trust unknown hosts via stateless token recovery
+    if (this.deviceApprovalEnabled) return false
     // Stateless container cold-start recovery (e.g. Cloud Run redeploy):
     // ONLY accept cryptographically HMAC-signed host tokens bound to BOTH this Hub's secret and this exact hostId.
     if (this.verifySignedHostToken(cleanHostId, candidate)) {
@@ -2707,12 +2761,12 @@ export class HubCore {
   resolveAuthenticatedHostId(candidateToken, claimedHostId = '') {
     const candidate = String(candidateToken ?? '').trim()
     const cleanClaimed = String(claimedHostId ?? '').trim()
-    if (!candidate) return ''
+    if (!candidate || this.revokedHostTokens.has(candidate)) return ''
     if (cleanClaimed) {
       return this.verifyHostCredential(cleanClaimed, candidate) ? cleanClaimed : ''
     }
     for (const h of this.hosts.values()) {
-      if (h.hostToken && h.trust?.status !== 'revoked') {
+      if (h.hostToken && h.trust?.status !== 'revoked' && h.trust?.status !== 'pending_approval') {
         const a = Buffer.from(candidate)
         const b = Buffer.from(String(h.hostToken))
         if (a.length === b.length && timingSafeEqual(a, b)) {
@@ -2789,6 +2843,12 @@ export class HubCore {
   postSignalingMessage({ targetId, fromId = 'client', type = 'signal.offer', payload = {} } = {}) {
     const target = String(targetId ?? '').trim()
     if (!target) return { ok: false, error: 'targetId is required' }
+    const now = this.now()
+    for (const [k, msgs] of this.signalingMailboxes.entries()) {
+      const fresh = msgs.filter(m => now - (m.at || 0) < 2 * 60_000)
+      if (fresh.length === 0) this.signalingMailboxes.delete(k)
+      else if (fresh.length !== msgs.length) this.signalingMailboxes.set(k, fresh)
+    }
     const list = this.signalingMailboxes.get(target) ?? []
     const envelope = {
       id: `sig-${randomBytes(4).toString('hex')}`,
@@ -2796,11 +2856,15 @@ export class HubCore {
       fromId,
       type,
       payload,
-      at: this.now(),
+      at: now,
     }
     list.push(envelope)
     if (list.length > 50) list.shift()
     this.signalingMailboxes.set(target, list)
+    while (this.signalingMailboxes.size > 200) {
+      const oldestKey = this.signalingMailboxes.keys().next().value
+      this.signalingMailboxes.delete(oldestKey)
+    }
     return { ok: true, envelope }
   }
 
@@ -2816,7 +2880,8 @@ export class HubCore {
     turnSecret = process.env.TURN_SECRET || 'dsh-selfhosted-turn-secret',
     ttlSeconds = 3600,
   } = {}) {
-    const expiry = Math.floor(this.now() / 1000) + ttlSeconds
+    const safeTtl = Math.max(60, Math.min(3600, Number(ttlSeconds) || 3600))
+    const expiry = Math.floor(this.now() / 1000) + safeTtl
     const username = `${expiry}:dsh-peer`
     const credential = createHmac('sha1', turnSecret).update(username).digest('base64')
     const iceServers = [
@@ -2831,7 +2896,7 @@ export class HubCore {
     }
     return {
       ok: true,
-      ttlSeconds,
+      ttlSeconds: safeTtl,
       username,
       credential,
       iceServers,
@@ -2850,7 +2915,7 @@ export class HubCore {
     if (!ivBase64 || !ciphertextBase64) {
       throw new Error('ivBase64 and ciphertextBase64 are required for E2EE share')
     }
-    const id = `shr-${this.now().toString(36)}-${randomBytes(3).toString('hex')}`
+    const id = `shr-${this.now().toString(36)}-${randomBytes(12).toString('hex')}`
     const sizeBytes = Buffer.from(ciphertextBase64, 'base64').length
     const entry = {
       id,
@@ -2951,6 +3016,9 @@ export class HubCore {
     if (match.trust?.status === 'revoked') {
       return { ok: false, error: `Host ${match.hostId} is revoked` }
     }
+    if (match.trust?.status === 'pending_approval') {
+      return { ok: false, error: `Host ${match.hostId} is awaiting approval` }
+    }
     const previousHostId = this.activeHostId
     this.activeHostId = match.hostId
     void this.persist()
@@ -2963,6 +3031,14 @@ export class HubCore {
   }
 
   removeHost(hostId) {
+    const existing = this.hosts.get(hostId)
+    if (existing?.hostToken) {
+      this.revokedHostTokens.add(String(existing.hostToken))
+      if (this.revokedHostTokens.size > 500) {
+        const oldest = this.revokedHostTokens.values().next().value
+        this.revokedHostTokens.delete(oldest)
+      }
+    }
     const existed = this.hosts.delete(hostId)
     if (this.activeHostId === hostId) {
       const next = this.hosts.keys().next().value || ''
@@ -2995,6 +3071,9 @@ export class HubCore {
     }
     if (host.trust?.status === 'revoked') {
       return { ok: false, error: `Host ${cleanHostId} is revoked` }
+    }
+    if (host.trust?.status === 'pending_approval') {
+      return { ok: false, statusCode: 403, error: `Host ${cleanHostId} is awaiting approval` }
     }
     const ageMs = host.lastSeen ? now - host.lastSeen : Infinity
     const isActivelyOnline = Boolean(host.lastSeen && ageMs <= ACTIVE_HEARTBEAT_WINDOW_MS)
@@ -3195,15 +3274,16 @@ export class HubCore {
     return this.commandResultsById.get(cmdId) || null
   }
 
-  addSnapshot({ meta = {}, dataBase64 = '', migrationId = '' } = {}) {
+  addSnapshot({ meta = {}, dataBase64 = '', migrationId = '', authHostId = '' } = {}) {
     if (!dataBase64) throw new Error('Snapshot dataBase64 is empty')
-    const id = `snap-${this.now().toString(36)}-${randomBytes(3).toString('hex')}`
+    const id = `snap-${this.now().toString(36)}-${randomBytes(8).toString('hex')}`
+    const safeMeta = authHostId ? { ...meta, hostId: authHostId } : { ...meta }
     const entry = {
       id,
       createdAt: this.now(),
       meta: {
-        ...meta,
-        compressedBytes: Number(meta.compressedBytes) || Buffer.from(dataBase64, 'base64').length,
+        ...safeMeta,
+        compressedBytes: Number(safeMeta.compressedBytes) || Buffer.from(dataBase64, 'base64').length,
       },
       dataBase64,
     }
@@ -3215,6 +3295,15 @@ export class HubCore {
 
     if (migrationId && this.migrations.has(migrationId)) {
       const job = this.migrations.get(migrationId)
+      // Prevent cross-host migration hijacking: if uploaded by a host token, it MUST be the migration's sourceHostId
+      if (authHostId && job.sourceHostId && job.sourceHostId !== authHostId) {
+        return {
+          id,
+          createdAt: entry.createdAt,
+          meta: entry.meta,
+          migrationIgnored: true,
+        }
+      }
       job.snapshotId = id
       job.status = 'importing'
       job.updatedAt = this.now()
@@ -3403,11 +3492,11 @@ export class HubCore {
 
     for (const job of this.migrations.values()) {
       if (job.status === 'completed' || job.status === 'failed') continue
-      if (res.id === job.exportCommandId && !res.ok) {
+      if (res.id === job.exportCommandId && (!job.sourceHostId || hostId === job.sourceHostId) && !res.ok) {
         job.status = 'failed'
         job.error = res.error || '源电脑导出快照失败'
         job.updatedAt = this.now()
-      } else if (res.id === job.importCommandId) {
+      } else if (res.id === job.importCommandId && (!job.targetHostId || hostId === job.targetHostId)) {
         if (res.ok) {
           job.status = 'completed'
           job.updatedAt = this.now()
@@ -3436,7 +3525,7 @@ export class HubCore {
     if (parts.length !== 3) return false
     const exp = Number(parts[1])
     const sig = parts[2]
-    if (!Number.isFinite(exp) || exp <= now || !sig) return false
+    if (!Number.isFinite(exp) || exp <= now || exp - now > 4 * 60 * 60_000 || !sig) return false
     const expected = createHmac('sha256', this.getPrimaryMediaTicketKey())
       .update(`mt1.${exp}`)
       .digest('base64url')
@@ -3564,6 +3653,22 @@ export class HubCore {
         ok: false,
         status: 404,
         meta: { ok: false, status: 404, error: `Unknown host: ${cleanHost}` },
+        buffer: null,
+      })
+    }
+    if (host.trust?.status === 'revoked' || host.trust?.status === 'pending_approval') {
+      return Promise.resolve({
+        ok: false,
+        status: 403,
+        meta: { ok: false, status: 403, error: `Host access blocked: ${cleanHost}` },
+        buffer: null,
+      })
+    }
+    if (this.pendingFsRequests.size >= 32) {
+      return Promise.resolve({
+        ok: false,
+        status: 429,
+        meta: { ok: false, status: 429, error: 'Too many concurrent file tunnel requests' },
         buffer: null,
       })
     }

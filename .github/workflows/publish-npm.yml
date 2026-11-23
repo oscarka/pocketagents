@@ -10,7 +10,6 @@ on:
 
 permissions:
   contents: read
-  id-token: write
 
 concurrency:
   group: publish-to-npm
@@ -20,20 +19,24 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
-  publish:
-    name: Build & Publish npm Package (OIDC)
+  build-and-test:
+    name: Build, Test & Pack Tarball
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      pkg_name: ${{ steps.meta.outputs.pkg_name }}
+      pkg_ver: ${{ steps.meta.outputs.pkg_ver }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 24
-
-      - name: Ensure latest npm CLI for OIDC Trusted Publishing
-        run: npm install -g npm@latest
 
       - name: Install dependencies
         run: |
@@ -45,17 +48,62 @@ jobs:
           node --test --test-concurrency=4 dsh-feishu/test/*.test.js
           npm run build
 
-      - name: Publish to npm via OIDC Trusted Publisher
+      - name: Pack npm tarball & export metadata
+        id: meta
         run: |
-          set -eo pipefail
+          mkdir -p dist-pack
+          npm pack --pack-destination ./dist-pack
           PKG_NAME="$(node -e "import fs from 'node:fs'; console.log(JSON.parse(fs.readFileSync('./package.json', 'utf8')).name)")"
           PKG_VER="$(node -e "import fs from 'node:fs'; console.log(JSON.parse(fs.readFileSync('./package.json', 'utf8')).version)")"
+          echo "pkg_name=${PKG_NAME}" >> "${GITHUB_OUTPUT}"
+          echo "pkg_ver=${PKG_VER}" >> "${GITHUB_OUTPUT}"
+
+      - name: Upload packed tarball
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-tarball
+          path: dist-pack/*.tgz
+          retention-days: 1
+
+  publish:
+    name: Publish Packed Tarball to npm (OIDC)
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Download packed tarball
+        uses: actions/download-artifact@v4
+        with:
+          name: npm-tarball
+          path: ./dist-pack
+
+      - name: Ensure latest npm CLI for OIDC Trusted Publishing
+        run: npm install -g npm@latest
+
+      - name: Publish tarball to npm via OIDC Trusted Publisher
+        env:
+          PKG_NAME: ${{ needs.build-and-test.outputs.pkg_name }}
+          PKG_VER: ${{ needs.build-and-test.outputs.pkg_ver }}
+        run: |
+          set -eo pipefail
           if npm view "${PKG_NAME}@${PKG_VER}" version --registry https://registry.npmjs.org/ >/dev/null 2>&1; then
             echo "Package ${PKG_NAME}@${PKG_VER} is already published on npm. Skipping."
             exit 0
           fi
+          TGZ_FILE="$(ls -1 ./dist-pack/*.tgz | head -n 1)"
+          if [[ -z "${TGZ_FILE}" || ! -f "${TGZ_FILE}" ]]; then
+            echo "Missing packed tarball in ./dist-pack"
+            exit 1
+          fi
           PUB_LOG="$(mktemp)"
-          if npm publish --provenance --access public --registry https://registry.npmjs.org/ 2>&1 | tee "${PUB_LOG}"; then
+          if npm publish "${TGZ_FILE}" --provenance --access public --registry https://registry.npmjs.org/ 2>&1 | tee "${PUB_LOG}"; then
             rm -f "${PUB_LOG}"
             exit 0
           fi

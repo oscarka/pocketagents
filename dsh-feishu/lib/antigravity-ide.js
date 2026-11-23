@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import { access, mkdir, open, readdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
@@ -9,6 +9,224 @@ import { cleanForChat, redactText } from './redact.js'
 
 const execFileAsync = promisify(execFile)
 const sessionParseCache = new Map()
+
+function isSafeAntigravityConvId(id) {
+  const s = String(id ?? '').trim()
+  return Boolean(s && /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(s) && !s.includes('..'))
+}
+
+function isTrustedAgyBinPath(binPath = '', home = homedir()) {
+  const clean = String(binPath || '').trim()
+  if (!clean || !clean.startsWith('/') || clean.includes('..')) return false
+  const norm = resolve(clean)
+  const normHome = resolve(home || homedir())
+  const allowedPrefixes = [
+    `${join(normHome, '.gemini')}/`,
+    `${join(normHome, 'Applications')}/`,
+    '/Applications/',
+    '/opt/homebrew/',
+    '/usr/local/',
+    '/usr/bin/',
+  ]
+  return allowedPrefixes.some(prefix => norm.startsWith(prefix))
+}
+
+async function copyTextToClipboardSafe(text, execImpl = execFileAsync) {
+  const str = String(text ?? '')
+  if (execImpl !== execFileAsync) {
+    try {
+      await execImpl('pbcopy', [], { input: str, timeout: 3000 })
+    } catch {
+      // ignore pbcopy failure in test environments
+    }
+    return
+  }
+  await new Promise(resolveCopy => {
+    let settled = false
+    const done = () => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      resolveCopy()
+    }
+    const timer = setTimeout(done, 3000)
+    timer.unref?.()
+    try {
+      const child = spawn('pbcopy', [], { stdio: ['pipe', 'ignore', 'ignore'] })
+      child.on('error', done)
+      child.on('close', done)
+      child.stdin.on('error', done)
+      child.stdin.end(str, 'utf8')
+    } catch {
+      done()
+    }
+  })
+}
+
+function buildPendingApprovalFromWaitingStep(
+  activeLiveWaiting,
+  {
+    targetConvId = '',
+    subagentRole = '',
+    lastActivity = Date.now(),
+    now = Date.now(),
+    fallbackStepIndex = 0,
+    settledApprovals = new Set(),
+  } = {},
+) {
+  if (!activeLiveWaiting || !targetConvId) return null
+  const reqInt = activeLiveWaiting?.step?.requestedInteraction || null
+  const livePermSpec = reqInt?.permission
+    || (reqInt?.interaction?.case === 'permission' ? reqInt.interaction.value : null)
+  const liveFilePermSpec = reqInt?.filePermission
+    || (reqInt?.interaction?.case === 'filePermission' ? reqInt.interaction.value : null)
+  const liveRunCmdSpec = reqInt?.runCommand
+    || (reqInt?.interaction?.case === 'runCommand' ? reqInt.interaction.value : null)
+  const liveQuestionSpec = extractLiveWaitingQuestionSpec(activeLiveWaiting)
+  const waitingStepIndex = activeLiveWaiting?.step?.metadata?.sourceTrajectoryStepInfo?.stepIndex
+    ?? activeLiveWaiting?.stepIndex
+    ?? activeLiveWaiting?.index
+    ?? fallbackStepIndex
+  const waitingTrajectoryId = activeLiveWaiting?.step?.metadata?.sourceTrajectoryStepInfo?.trajectoryId
+    || targetConvId
+  const code = `AGY-${String(targetConvId).slice(0, 6).toUpperCase()}-${waitingStepIndex}`
+  if (settledApprovals?.has?.(code)) return null
+
+  const cleanSubRole = String(subagentRole || '').trim()
+  const subMeta = cleanSubRole
+    ? {
+      targetConversationId: targetConvId,
+      subagentConversationId: targetConvId,
+      subagentRole: cleanSubRole,
+    }
+    : {}
+
+  if (liveQuestionSpec?.questions?.length > 0) {
+    const baseTitle = liveQuestionSpec.promptTitle || '请做出选择以继续'
+    return {
+      code,
+      stepIndex: waitingStepIndex,
+      waitingStepIndex,
+      trajectoryId: waitingTrajectoryId,
+      ...subMeta,
+      harness: 'antigravity-ide',
+      kind: 'question',
+      toolName: 'ask_question',
+      promptTitle: cleanSubRole ? `🤖 ${cleanSubRole} · ${baseTitle}` : baseTitle,
+      subtitle: 'Waiting for user input.',
+      commandLine: '',
+      questions: liveQuestionSpec.questions,
+      options: [],
+      reason: redactText(
+        liveQuestionSpec.questions
+          .map((q, idx) => (liveQuestionSpec.questions.length > 1 ? `${idx + 1}. ${q.question}` : q.question))
+          .join(' · '),
+      ).slice(0, 600),
+      createdAt: lastActivity || now,
+      expiresAt: (lastActivity || now) + 10 * 60 * 1000,
+    }
+  }
+
+  // Extract generic / browser upload / filePermission / runCommand / permission metadata cleanly
+  const rawInteractionVal = reqInt?.interaction?.value || null
+  const rawInteractionCase = String(reqInt?.interaction?.case || '').trim()
+  const browserUploadSpec =
+    activeLiveWaiting?.step?.browserFileUpload ||
+    reqInt?.browserFileUpload ||
+    reqInt?.confirmUpload ||
+    null
+  const browserTarget = browserUploadSpec
+    ? [
+        browserUploadSpec.fileName ? `File: ${browserUploadSpec.fileName}` : '',
+        browserUploadSpec.targetUrl ? `To: ${browserUploadSpec.targetUrl}` : '',
+      ].filter(Boolean).join(' ')
+    : ''
+  const targetCmd = redactText(
+    String(
+      livePermSpec?.resource?.target
+      || liveRunCmdSpec?.proposedCommandLine
+      || liveFilePermSpec?.absolutePathUri
+      || browserTarget
+      || rawInteractionVal?.url
+      || rawInteractionVal?.target
+      || rawInteractionVal?.filePath
+      || rawInteractionVal?.file
+      || '',
+    ).trim(),
+  )
+  const permAction = String(
+    livePermSpec?.resource?.action
+    || (liveFilePermSpec ? 'file_permission' : '')
+    || (liveRunCmdSpec ? 'run_command' : '')
+    || (browserUploadSpec ? 'browser_upload' : '')
+    || rawInteractionCase
+    || 'unsandboxed',
+  ).trim()
+  const actDesc = String(
+    livePermSpec?.actionDescription
+    || browserUploadSpec?.promptTitle
+    || rawInteractionVal?.actionDescription
+    || rawInteractionVal?.title
+    || (liveFilePermSpec ? 'file access' : browserUploadSpec ? 'browser upload' : 'command execution'),
+  ).trim()
+  const lowerAct = actDesc ? actDesc.charAt(0).toLowerCase() + actDesc.slice(1) : 'command execution'
+  const firstSub = (targetCmd.split(/\s*(?:&&|\|\||;|\n)\s*/)[0] || targetCmd).trim()
+  const persistLabel = String(livePermSpec?.suggestedPersistPattern || firstSub || targetCmd).trim()
+  const isBrowserLike = /browser|upload|url|navigate|click/i.test(`${permAction} ${actDesc} ${cleanSubRole}`)
+  const hasPersistOption = Boolean(
+    livePermSpec?.suggestedPersistPattern
+    || livePermSpec?.persistSuggestionType
+    || liveFilePermSpec
+    || (!isBrowserLike && (permAction === 'unsandboxed' || permAction === 'run_command')),
+  )
+  const options = hasPersistOption
+    ? [
+      { index: 1, label: 'Yes, allow this time' },
+      { index: 2, label: persistLabel ? `Yes, and always allow '${persistLabel}' in this conversation` : 'Yes, and always allow in this conversation' },
+      { index: 3, label: persistLabel ? `Yes, and always allow '${persistLabel}'` : 'Yes, and always allow' },
+      { index: 4, label: 'No (tell the agent what to do instead)' },
+    ]
+    : [
+      { index: 1, label: 'Yes, allow this time' },
+      { index: 2, label: 'No (tell the agent what to do instead)' },
+    ]
+
+  const basePromptTitle = /^allow\b/i.test(actDesc) ? (actDesc.endsWith('?') ? actDesc : `${actDesc}?`) : `Allow ${lowerAct}?`
+  const subPrefix = cleanSubRole ? `${isBrowserLike ? '🌐' : '🤖'} ${cleanSubRole} · ` : ''
+  return {
+    code,
+    stepIndex: waitingStepIndex,
+    waitingStepIndex,
+    trajectoryId: waitingTrajectoryId,
+    ...subMeta,
+    permissionAction: permAction,
+    permissionTarget: targetCmd,
+    suggestedPersistPattern: livePermSpec?.suggestedPersistPattern || '',
+    persistSuggestionType: livePermSpec?.persistSuggestionType || '',
+    harness: 'antigravity-ide',
+    toolName: livePermSpec?.resource?.action
+      ? `permission (${livePermSpec.resource.action})`
+      : liveFilePermSpec
+        ? 'file_permission'
+        : 'run_command (BypassSandbox)',
+    promptTitle: `${subPrefix}${basePromptTitle}`,
+    subtitle: redactText(
+      String(
+        livePermSpec?.reason
+        || rawInteractionVal?.reason
+        || (cleanSubRole ? `子智能体 ${cleanSubRole} 正在等待你的确认` : 'the auto-run safety check did not reach a decision'),
+      ),
+    ),
+    commandLine: targetCmd || (cleanSubRole ? `${cleanSubRole} 请求执行确认` : '请求宿主机终端执行权限'),
+    firstSubcommand: firstSub,
+    options,
+    reason: redactText(
+      `${subPrefix}${actDesc ? `${actDesc}: ` : ''}${targetCmd || '请求执行权限确认'}`,
+    ).slice(0, 2000),
+    createdAt: lastActivity || now,
+    expiresAt: (lastActivity || now) + 10 * 60 * 1000,
+  }
+}
 
 export const AGY_IDE_PREFIX = 'agy-ide:'
 
@@ -517,6 +735,7 @@ export function parseAntigravityTranscript(jsonlText, {
   liveWaitingSteps = null,
   liveTrajectoryMeta = null,
   liveSummariesMap = null,
+  blockedSubagents = [],
   fullContentByStepIndex = null,
   diskArtifacts = [],
 } = {}) {
@@ -1053,72 +1272,13 @@ export function parseAntigravityTranscript(jsonlText, {
   // even after a GENERIC tool output line from a parallel tool call, surface the pending approval.
   if (hasLiveSummary && !pendingApproval && Array.isArray(liveWaitingSteps) && liveWaitingSteps.length > 0) {
     const activeLiveWaiting = liveWaitingSteps[liveWaitingSteps.length - 1]
-    const livePermSpec = activeLiveWaiting?.step?.requestedInteraction?.permission
-      || (activeLiveWaiting?.step?.requestedInteraction?.interaction?.case === 'permission'
-        ? activeLiveWaiting.step.requestedInteraction.interaction.value
-        : null)
-    const liveQuestionSpec = extractLiveWaitingQuestionSpec(activeLiveWaiting)
-    const waitingStepIndex = activeLiveWaiting?.step?.metadata?.sourceTrajectoryStepInfo?.stepIndex
-      ?? activeLiveWaiting?.stepIndex
-      ?? lines.length
-    const waitingTrajectoryId = activeLiveWaiting?.step?.metadata?.sourceTrajectoryStepInfo?.trajectoryId
-      || conversationId
-    const code = `AGY-${String(conversationId).slice(0, 6).toUpperCase()}-${waitingStepIndex}`
-    if (!settledApprovals.has(code)) {
-      if (liveQuestionSpec?.questions?.length > 0) {
-        pendingApproval = {
-          code,
-          stepIndex: waitingStepIndex,
-          waitingStepIndex,
-          trajectoryId: waitingTrajectoryId,
-          harness: 'antigravity-ide',
-          kind: 'question',
-          toolName: 'ask_question',
-          promptTitle: liveQuestionSpec.promptTitle || '请做出选择以继续',
-          subtitle: 'Waiting for user input.',
-          commandLine: '',
-          questions: liveQuestionSpec.questions,
-          options: [],
-          reason: liveQuestionSpec.questions
-            .map((q, idx) => (liveQuestionSpec.questions.length > 1 ? `${idx + 1}. ${q.question}` : q.question))
-            .join(' · ')
-            .slice(0, 600),
-          createdAt: lastActivity || now,
-          expiresAt: (lastActivity || now) + 10 * 60 * 1000,
-        }
-      } else {
-        const targetCmd = String(livePermSpec?.resource?.target || '').trim()
-        const actDesc = String(livePermSpec?.actionDescription || 'command execution').trim()
-        const lowerAct = actDesc ? actDesc.charAt(0).toLowerCase() + actDesc.slice(1) : 'command execution'
-        const firstSub = (targetCmd.split(/\s*(?:&&|\|\||;|\n)\s*/)[0] || targetCmd).trim()
-        const persistLabel = String(livePermSpec?.suggestedPersistPattern || firstSub || targetCmd).trim()
-        pendingApproval = {
-          code,
-          stepIndex: waitingStepIndex,
-          waitingStepIndex,
-          trajectoryId: waitingTrajectoryId,
-          permissionAction: livePermSpec?.resource?.action || 'unsandboxed',
-          permissionTarget: targetCmd,
-          suggestedPersistPattern: livePermSpec?.suggestedPersistPattern || '',
-          persistSuggestionType: livePermSpec?.persistSuggestionType || '',
-          harness: 'antigravity-ide',
-          toolName: livePermSpec?.resource?.action ? `permission (${livePermSpec.resource.action})` : 'run_command (BypassSandbox)',
-          promptTitle: `Allow ${lowerAct}?`,
-          subtitle: String(livePermSpec?.reason || 'the auto-run safety check did not reach a decision'),
-          commandLine: targetCmd || '请求宿主机终端执行权限',
-          firstSubcommand: firstSub,
-          options: [
-            { index: 1, label: 'Yes, allow this time' },
-            { index: 2, label: persistLabel ? `Yes, and always allow '${persistLabel}' in this conversation` : 'Yes, and always allow in this conversation' },
-            { index: 3, label: persistLabel ? `Yes, and always allow '${persistLabel}'` : 'Yes, and always allow' },
-            { index: 4, label: 'No (tell the agent what to do instead)' },
-          ],
-          reason: `${actDesc ? `${actDesc}: ` : ''}${targetCmd || '请求宿主机终端执行权限'}`.slice(0, 2000),
-          createdAt: lastActivity || now,
-          expiresAt: (lastActivity || now) + 10 * 60 * 1000,
-        }
-      }
-    }
+    pendingApproval = buildPendingApprovalFromWaitingStep(activeLiveWaiting, {
+      targetConvId: conversationId,
+      lastActivity,
+      now,
+      fallbackStepIndex: lines.length,
+      settledApprovals,
+    })
   }
 
   if (transcript.length === 0) return null
@@ -1140,9 +1300,37 @@ export function parseAntigravityTranscript(jsonlText, {
     || (!firstUserMsg && firstStep.type === 'SYSTEM_MESSAGE'),
   )
 
+  const effectiveBlockedSubagents = []
+  const seenBlockedSubIds = new Set()
+  const pushBlockedSubagent = entry => {
+    if (!entry?.convId || seenBlockedSubIds.has(entry.convId)) return
+    seenBlockedSubIds.add(entry.convId)
+    effectiveBlockedSubagents.push(entry)
+  }
+  if (Array.isArray(blockedSubagents)) {
+    for (const item of blockedSubagents) pushBlockedSubagent(item)
+  }
+
   for (const [subConvId, subTool] of subagentToolByConvId.entries()) {
-    if (subTool.subagentStatus !== 'running') continue
     const subLive = liveSummariesMap instanceof Map ? liveSummariesMap.get(subConvId) : null
+    const subWaitingSteps = Array.isArray(subLive?.waitingSteps) ? subLive.waitingSteps : []
+    const subIsWaiting = Boolean(
+      subLive?.status === 'CASCADE_RUN_STATUS_WAITING_FOR_USER' || subWaitingSteps.length > 0,
+    )
+    if (subIsWaiting) {
+      subTool.subagentStatus = 'waiting'
+      subTool.summary = `⏳ 子智能体等待授权: ${subTool.subagentRole || subConvId.slice(0, 8)}`
+      const baseCmd = String(subTool.commandLine || '').replace(/\n*\[子智能体状态\][^\n]*/g, '').trim()
+      subTool.commandLine = `${baseCmd}\n\n[子智能体状态] ⏳ 等待手机/桌面确认 (${subConvId.slice(0, 8)})`.trim()
+      pushBlockedSubagent({
+        convId: subConvId,
+        role: subTool.subagentRole || subLive?.trajectoryMetadata?.subagentSpec?.role || subLive?.summary || 'Subagent',
+        summary: subLive,
+        waitingSteps: subWaitingSteps,
+      })
+      continue
+    }
+    if (subTool.subagentStatus !== 'running') continue
     const subFinished = Boolean(
       subLive?.status === 'CASCADE_RUN_STATUS_IDLE'
       || subLive?.killed
@@ -1156,6 +1344,69 @@ export function parseAntigravityTranscript(jsonlText, {
       subTool.commandLine = `${baseCmd}\n\n[子智能体状态] ✅ 已完成 (${subConvId.slice(0, 8)})`.trim()
     } else if (subLive?.stepCount) {
       subTool.summary = `🟢 子智能体运行中: ${subTool.subagentRole || subConvId.slice(0, 8)} (已执行 ${subLive.stepCount} 步)`
+    }
+  }
+
+  // Bubble blocked subagent approval popup up to the parent conversation so mobile PWA & lock-screen push receive it!
+  if (!isSubagent && !pendingApproval && effectiveBlockedSubagents.length > 0) {
+    for (let i = effectiveBlockedSubagents.length - 1; i >= 0; i -= 1) {
+      const sub = effectiveBlockedSubagents[i]
+      const subWaitingSteps = Array.isArray(sub?.waitingSteps) && sub.waitingSteps.length > 0
+        ? sub.waitingSteps
+        : (Array.isArray(sub?.summary?.waitingSteps) ? sub.summary.waitingSteps : [])
+      const activeSubWaiting = subWaitingSteps[subWaitingSteps.length - 1] || null
+      const subRole = String(
+        sub?.role
+        || subagentToolByConvId.get(sub.convId)?.subagentRole
+        || sub?.summary?.trajectoryMetadata?.subagentSpec?.role
+        || sub?.summary?.summary
+        || 'Subagent',
+      ).trim()
+      const subModifiedMs = parseSummaryModifiedMs(sub?.summary) || lastActivity || now
+      if (activeSubWaiting) {
+        const bubbled = buildPendingApprovalFromWaitingStep(activeSubWaiting, {
+          targetConvId: sub.convId,
+          subagentRole: subRole,
+          lastActivity: subModifiedMs,
+          now,
+          fallbackStepIndex: Number(sub?.summary?.stepCount) || 0,
+          settledApprovals,
+        })
+        if (bubbled) {
+          pendingApproval = bubbled
+          break
+        }
+      } else if (sub?.summary?.status === 'CASCADE_RUN_STATUS_WAITING_FOR_USER') {
+        const stepIdx = Number(sub?.summary?.stepCount) || 0
+        const code = `AGY-${String(sub.convId).slice(0, 6).toUpperCase()}-${stepIdx}`
+        if (!settledApprovals?.has?.(code)) {
+          pendingApproval = {
+            code,
+            stepIndex: stepIdx,
+            waitingStepIndex: stepIdx,
+            trajectoryId: sub?.summary?.trajectoryId || sub.convId,
+            targetConversationId: sub.convId,
+            subagentConversationId: sub.convId,
+            subagentRole: subRole,
+            permissionAction: 'subagent_interaction',
+            permissionTarget: subRole,
+            harness: 'antigravity-ide',
+            toolName: `subagent (${subRole})`,
+            promptTitle: `🌐 ${subRole} · 需要你的授权确认`,
+            subtitle: `子智能体 ${subRole} 正在等待你确认操作以继续执行`,
+            commandLine: `${subRole} 等待授权确认`,
+            firstSubcommand: subRole,
+            options: [
+              { index: 1, label: 'Yes, allow this time' },
+              { index: 2, label: 'No (tell the agent what to do instead)' },
+            ],
+            reason: `子智能体 ${subRole} 正在等待授权确认`,
+            createdAt: subModifiedMs,
+            expiresAt: subModifiedMs + 10 * 60 * 1000,
+          }
+          break
+        }
+      }
     }
   }
   for (const msg of transcript) {
@@ -1761,6 +2012,39 @@ export async function loadAntigravityIdeSessions({
   ])
 
   const settledKey = settledApprovals ? [...settledApprovals].join(',') : ''
+  // Collect all live subagents currently blocked on a user approval popup, indexed by parent/root conversation ID
+  const blockedSubagentsByParent = new Map()
+  if (liveSummariesMap instanceof Map) {
+    for (const [subConvId, subSum] of liveSummariesMap.entries()) {
+      if (!subSum || typeof subSum !== 'object') continue
+      const subWaitingSteps = Array.isArray(subSum.waitingSteps) ? subSum.waitingSteps : []
+      const isWaiting = subSum.status === 'CASCADE_RUN_STATUS_WAITING_FOR_USER' || subWaitingSteps.length > 0
+      if (!isWaiting) continue
+      const subMeta = subSum.trajectoryMetadata || null
+      const parentIds = new Set()
+      const parentConvId = String(subMeta?.parentConversationId || subSum.parentConversationId || '').trim()
+      const rootConvId = String(subMeta?.rootConversationId || subSum.rootConversationId || '').trim()
+      if (parentConvId && parentConvId !== subConvId) {
+        parentIds.add(parentConvId)
+      }
+      if (rootConvId && rootConvId !== subConvId) {
+        parentIds.add(rootConvId)
+      }
+      if (parentIds.size === 0) continue
+      const role = String(subMeta?.subagentSpec?.role || subSum.summary || 'Subagent').trim()
+      const entry = {
+        convId: subConvId,
+        role,
+        summary: subSum,
+        waitingSteps: subWaitingSteps,
+      }
+      for (const pid of parentIds) {
+        const list = blockedSubagentsByParent.get(pid) || []
+        list.push(entry)
+        blockedSubagentsByParent.set(pid, list)
+      }
+    }
+  }
   const sessions = []
   for (const item of topCandidates) {
     if (sessions.length >= maxSessions * 2) break
@@ -1771,6 +2055,9 @@ export async function loadAntigravityIdeSessions({
       const isLiveSubagent = Boolean(
         (liveTrajMeta?.parentConversationId && liveTrajMeta.parentConversationId !== item.convId)
         || (liveTrajMeta?.rootConversationId && liveTrajMeta.rootConversationId !== item.convId)
+        || (liveSummary?.parentConversationId && liveSummary.parentConversationId !== item.convId)
+        || (liveSummary?.rootConversationId && liveSummary.rootConversationId !== item.convId)
+        || liveSummary?.isSubagent
         || liveTrajMeta?.subagentSpec
         || Number(liveTrajMeta?.nestingDepth) > 0,
       )
@@ -1798,9 +2085,13 @@ export async function loadAntigravityIdeSessions({
       const effectivePinned = nativeMeta?.hasPbtxt
         ? Boolean(nativeMeta.pinned)
         : Boolean(liveSummary?.annotations?.pinned)
+      const blockedSubagents = blockedSubagentsByParent.get(item.convId) || []
+      const blockedSubKey = blockedSubagents
+        .map(s => `${s.convId}:${(s.waitingSteps || []).map(w => w?.stepIndex ?? '').join(',')}:${s.summary?.status || ''}`)
+        .join('|')
       const sessionId = `${AGY_IDE_PREFIX}${item.convId}`
       const customTitle = extractCustomTitleValue(customTitles[sessionId]) || extractCustomTitleValue(customTitles[item.convId]) || ''
-      const cacheKey = `${item.convId}:${item.mtimeMs}:${item.size || 0}:${maxMessages}:${customTitle}:${effectiveNativeTitle}:${effectivePinned ? 1 : 0}:${settledKey}:${liveStepCount ?? ''}:${liveLastUserInputStepIndex ?? ''}:${liveStatus}:${liveModel}:${liveLastModifiedMs}:${hasLiveSummary ? 1 : 0}:${waitingKey}`
+      const cacheKey = `${item.convId}:${item.mtimeMs}:${item.size || 0}:${maxMessages}:${customTitle}:${effectiveNativeTitle}:${effectivePinned ? 1 : 0}:${settledKey}:${liveStepCount ?? ''}:${liveLastUserInputStepIndex ?? ''}:${liveStatus}:${liveModel}:${liveLastModifiedMs}:${hasLiveSummary ? 1 : 0}:${waitingKey}:${blockedSubKey}`
       const cached = sessionParseCache.get(item.convId)
       if (cached && cached.cacheKey === cacheKey && cached.session) {
         if (cached.session.isSubagent) continue
@@ -1865,6 +2156,7 @@ export async function loadAntigravityIdeSessions({
         liveWaitingSteps,
         liveTrajectoryMeta: liveTrajMeta,
         liveSummariesMap,
+        blockedSubagents,
         fullContentByStepIndex,
         diskArtifacts,
       })
@@ -2210,7 +2502,10 @@ export async function discoverAntigravityHubInstances({
     for (const inst of cachedRawHubInstances) addInstance(inst)
   } else if (typeof execImpl === 'function') {
     try {
-      const { stdout } = await execImpl('ps', ['-ax', '-o', 'pid=,command='], { timeout: 2500 })
+      const psArgs = typeof process.getuid === 'function'
+        ? ['-u', String(process.getuid()), '-o', 'pid=,command=']
+        : ['-ax', '-o', 'pid=,command=']
+      const { stdout } = await execImpl('ps', psArgs, { timeout: 2500 })
       const standalonePids = []
       for (const rawLine of String(stdout || '').split('\n')) {
         const line = rawLine.trim()
@@ -2224,6 +2519,7 @@ export async function discoverAntigravityHubInstances({
           const csrfMatch = cmdLine.match(/--csrf_token=([^\s]+)/)
           const dirs = [...cmdLine.matchAll(/--add-dir=([^\s]+)/g)].map(m => m[1])
           const binMatch = cmdLine.match(/^(\S+\/agy)\b/)
+          const candidateBin = binMatch ? binMatch[1] : ''
           if (portMatch && csrfMatch) {
             addInstance({
               address: `127.0.0.1:${portMatch[1]}`,
@@ -2231,7 +2527,7 @@ export async function discoverAntigravityHubInstances({
               csrfToken: csrfMatch[1],
               addDir: dirs[0] || '',
               addDirs: dirs,
-              binPath: binMatch ? binMatch[1] : '',
+              binPath: isTrustedAgyBinPath(candidateBin) ? candidateBin : '',
               kind: 'agy-hub',
             })
           }
@@ -2331,8 +2627,14 @@ function buildCleanAgentApiEnv(hub) {
     'all_proxy',
     'RPC_PROXY_DEST_OVERRIDE',
     'RPC_PROXY_HEADER_AS_EXTENSION',
+    'HUB_TOKEN',
+    'VOICE_VAULT_SECRET',
+    'VAPID_SECRET',
   ]) {
     delete env[k]
+  }
+  for (const k of Object.keys(env)) {
+    if (k.startsWith('FEISHU_')) delete env[k]
   }
   if (hub?.address) env.ANTIGRAVITY_LS_ADDRESS = hub.address
   else delete env.ANTIGRAVITY_LS_ADDRESS
@@ -2632,13 +2934,17 @@ export async function executeAntigravityIdeAction(action, {
 
   if (type === 'approve' || type === 'deny') {
     const allow = type === 'approve'
+    const explicitSubConvId = toRawConversationId(
+      action?.pendingApproval?.targetConversationId || action?.pendingApproval?.subagentConversationId || '',
+    )
+    const primaryConvId = explicitSubConvId || rawConvId
     let reachedAnyLsHub = false
     let sawConversationWithoutWaiting = false
     if (typeof fetchImpl === 'function') {
       try {
         const rawHubs = await discoverAntigravityHubInstances({ execImpl, preferredCwd })
-        const hubs = rawConvId && rawHubs.length > 1
-          ? await probeHubsForTrajectory(rawHubs, rawConvId, fetchImpl)
+        const hubs = primaryConvId && rawHubs.length > 1
+          ? await probeHubsForTrajectory(rawHubs, primaryConvId, fetchImpl)
           : rawHubs
         for (const hub of hubs) {
           try {
@@ -2659,10 +2965,29 @@ export async function executeAntigravityIdeAction(action, {
             const sumData = sumResp?.ok ? await sumResp.json().catch(() => null) : null
             const summaries = sumData?.trajectorySummaries || {}
 
-            let targetConvId = rawConvId
+            let targetConvId = primaryConvId
             if (!targetConvId) {
               for (const [cid, sum] of Object.entries(summaries)) {
                 if (Array.isArray(sum?.waitingSteps) && sum.waitingSteps.length > 0) {
+                  targetConvId = cid
+                  break
+                }
+              }
+            }
+
+            // If the parent conversation itself has no waitingSteps, automatically locate a blocked child subagent
+            if (rawConvId && (!summaries[targetConvId]?.waitingSteps?.length)) {
+              for (const [cid, sum] of Object.entries(summaries)) {
+                if (!sum || typeof sum !== 'object' || cid === rawConvId) continue
+                const meta = sum.trajectoryMetadata || null
+                const isChildOfParent =
+                  meta?.parentConversationId === rawConvId
+                  || meta?.rootConversationId === rawConvId
+                  || sum.parentConversationId === rawConvId
+                  || sum.rootConversationId === rawConvId
+                if (!isChildOfParent) continue
+                const childWaiting = Array.isArray(sum.waitingSteps) ? sum.waitingSteps : []
+                if (childWaiting.length > 0 || sum.status === 'CASCADE_RUN_STATUS_WAITING_FOR_USER') {
                   targetConvId = cid
                   break
                 }
@@ -2722,6 +3047,7 @@ export async function executeAntigravityIdeAction(action, {
             const stepIndex =
               waitingEntry?.step?.metadata?.sourceTrajectoryStepInfo?.stepIndex ??
               waitingEntry?.stepIndex ??
+              waitingEntry?.index ??
               (!hasConversationOnHub ? (action?.pendingApproval?.waitingStepIndex ?? action?.stepIndex) : undefined)
             const trajectoryId = String(
               waitingEntry?.step?.metadata?.sourceTrajectoryStepInfo?.trajectoryId ||
@@ -3166,14 +3492,16 @@ export async function executeAntigravityIdeAction(action, {
       : [buildCleanAgentApiEnv(null)]
 
     for (const binPath of uniqueBins) {
+      if (!isTrustedAgyBinPath(binPath, home)) continue
       try {
         await access(binPath)
       } catch {
         continue
       }
+      if (!isSafeAntigravityConvId(rawConvId)) continue
       const args = binPath.endsWith('/agy')
-        ? ['agentapi', 'send-message', rawConvId, text]
-        : ['send-message', rawConvId, text]
+        ? ['agentapi', 'send-message', '--', rawConvId, text]
+        : ['send-message', '--', rawConvId, text]
       for (const envOpt of envTargets) {
         try {
           const execOpts = envOpt ? { timeout: 8000, env: envOpt } : { timeout: 8000 }
@@ -3193,12 +3521,8 @@ export async function executeAntigravityIdeAction(action, {
       }
     }
 
-    // Strategy 2: Focus Antigravity IDE chat panel and paste prompt
-    try {
-      await execImpl('sh', ['-c', `printf %s ${JSON.stringify(text)} | pbcopy`], { timeout: 3000 })
-    } catch {
-      // ignore pbcopy failure in non-macOS test environments
-    }
+    // Strategy 2: Focus Antigravity IDE chat panel and paste prompt (zero shell invocation)
+    await copyTextToClipboardSafe(text, execImpl)
     const script = `
       tell application "System Events"
         set procList to every process whose name contains "Antigravity IDE" or name contains "Electron" or name contains "Antigravity"
@@ -3304,6 +3628,7 @@ export async function executeAntigravityIdeAction(action, {
       : [buildCleanAgentApiEnv(null)]
 
     for (const binPath of uniqueBins) {
+      if (!isTrustedAgyBinPath(binPath, home)) continue
       try {
         await access(binPath)
       } catch {
@@ -3311,7 +3636,7 @@ export async function executeAntigravityIdeAction(action, {
       }
       const args = binPath.endsWith('/agy')
         ? ['agentapi', 'new-conversation', `--title=${title}`, '--', promptText || '你好']
-        : ['new-conversation', `--title=${title}`, promptText || '你好']
+        : ['new-conversation', `--title=${title}`, '--', promptText || '你好']
       for (const envOpt of envTargets) {
         try {
           const execOpts = envOpt ? { timeout: 8000, env: envOpt } : { timeout: 8000 }
@@ -3333,9 +3658,7 @@ export async function executeAntigravityIdeAction(action, {
     }
 
     if (promptText) {
-      try {
-        await execImpl('sh', ['-c', `printf %s ${JSON.stringify(promptText)} | pbcopy`], { timeout: 3000 })
-      } catch { }
+      await copyTextToClipboardSafe(promptText, execImpl)
     }
     const script = `
       tell application "System Events"
@@ -3377,7 +3700,7 @@ export async function setAntigravityConversationPinned(
   } = {},
 ) {
   const rawConvId = toRawConversationId(sessionIdOrConvId)
-  if (!rawConvId) return { ok: false, error: 'conversationId is required' }
+  if (!isSafeAntigravityConvId(rawConvId)) return { ok: false, error: 'valid conversationId is required' }
   const wantPin = Boolean(pinned)
   let rpcUpdated = false
 
@@ -3494,8 +3817,8 @@ export async function setAntigravityConversationTitle(
 ) {
   const rawConvId = toRawConversationId(sessionIdOrConvId)
   const cleanTitle = String(newTitle ?? '').replace(/[\r\n]+/g, ' ').trim()
-  if (!rawConvId || !cleanTitle) {
-    return { ok: false, error: '会话 ID 或新标题不能为空' }
+  if (!isSafeAntigravityConvId(rawConvId) || !cleanTitle) {
+    return { ok: false, error: '会话 ID 无效或新标题不能为空' }
   }
   let rpcUpdated = false
 
@@ -3783,7 +4106,7 @@ export async function toggleAntigravityPlugin(
   { execImpl = execFileAsync, agyBin = '' } = {},
 ) {
   const cleanName = String(pluginName || '').trim()
-  if (!cleanName || !/^[a-zA-Z0-9._-]+$/.test(cleanName)) {
+  if (!cleanName || !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(cleanName) || cleanName.includes('..')) {
     return { ok: false, error: '无效的插件名称' }
   }
   const verb = enabled ? 'enable' : 'disable'
@@ -3791,7 +4114,7 @@ export async function toggleAntigravityPlugin(
     const cli = agyBin || (await resolveOfficialAgyCliPath())
     const { stdout, stderr } = await execImpl(cli, ['plugin', verb, cleanName], { timeout: 12_000 })
     invalidateAntigravityPluginsCache()
-    const detail = String(stdout || stderr || '').trim()
+    const detail = redactText(String(stdout || stderr || '').trim())
     return {
       ok: true,
       pluginName: cleanName,
@@ -3801,7 +4124,7 @@ export async function toggleAntigravityPlugin(
         : `⏸ 已在电脑端停用插件 ${cleanName}${detail ? ` (${detail.slice(0, 80)})` : ''}`,
     }
   } catch (error) {
-    const errText = String(error?.stderr || error?.stdout || error?.message || '操作失败').trim()
+    const errText = redactText(String(error?.stderr || error?.stdout || error?.message || '操作失败').trim())
     return {
       ok: false,
       pluginName: cleanName,

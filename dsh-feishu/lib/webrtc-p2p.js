@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, createECDH, createHash, createHmac, generateKeyPairSync, randomBytes, sign } from 'node:crypto'
+import { createCipheriv, createDecipheriv, createECDH, createHash, createHmac, generateKeyPairSync, randomBytes, sign, timingSafeEqual } from 'node:crypto'
 import dgram from 'node:dgram'
 import { open } from 'node:fs/promises'
 import { networkInterfaces } from 'node:os'
@@ -327,6 +327,7 @@ function parseRemoteOfferSdp(sdp) {
   let ufrag = ''
   let pwd = ''
   let sctpPort = 5000
+  let fingerprint = ''
   const candidates = []
   let hasLoopbackOrLocal = false
 
@@ -337,6 +338,8 @@ function parseRemoteOfferSdp(sdp) {
       ufrag = line.slice(12).trim()
     } else if (line.startsWith('a=ice-pwd:')) {
       pwd = line.slice(10).trim()
+    } else if (line.toLowerCase().startsWith('a=fingerprint:sha-256 ')) {
+      fingerprint = line.slice(22).trim().replace(/:/g, '').toLowerCase()
     } else if (line.startsWith('a=sctp-port:')) {
       const p = Number.parseInt(line.slice(12).trim(), 10)
       if (Number.isFinite(p) && p > 0) sctpPort = p
@@ -360,7 +363,7 @@ function parseRemoteOfferSdp(sdp) {
       }
     }
   }
-  return { mid, ufrag, pwd, sctpPort, candidates, hasLoopbackOrLocal }
+  return { mid, ufrag, pwd, sctpPort, fingerprint, candidates, hasLoopbackOrLocal }
 }
 
 function buildDtlsHandshakeMsg(msgType, msgSeq, bodyBuf) {
@@ -847,6 +850,26 @@ class WebRtcPeerSession {
     if (clientSentNonEmptyCert) {
       const cvEntry = this.hsFragments.get(ckeEntry.seq + 1)
       if (!cvEntry || !cvEntry.done) return
+    }
+    // Enforce RFC 8827 SDP DTLS fingerprint authentication: reject unknown/MITM peers when SDP carries a=fingerprint:sha-256
+    if (this.remoteOffer?.fingerprint) {
+      if (!clientSentNonEmptyCert || !certEntry?.body || certEntry.body.length < 6) {
+        this.close()
+        return
+      }
+      const leafLen = certEntry.body.readUIntBE(3, 3)
+      if (!leafLen || 6 + leafLen > certEntry.body.length) {
+        this.close()
+        return
+      }
+      const leafDer = certEntry.body.subarray(6, 6 + leafLen)
+      const actualFp = createHash('sha256').update(leafDer).digest('hex')
+      const a = Buffer.from(actualFp, 'utf8')
+      const b = Buffer.from(this.remoteOffer.fingerprint, 'utf8')
+      if (a.length !== b.length || !timingSafeEqual(a, b)) {
+        this.close()
+        return
+      }
     }
 
     const ckeBody = ckeEntry.body

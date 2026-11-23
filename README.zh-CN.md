@@ -235,8 +235,11 @@ HUB_TOKEN="自定义一个安全密码" \
 > 💡 按**自然日**折叠汇总，每条内保留完整子版本号；逐版本详细变更请见 [`CHANGELOG.md`](CHANGELOG.md)。
 
 <details open>
-<summary><strong><code>2026-11-23 · v0.9.9–v0.9.10</code> — 零信任手机审批门禁、实时入侵告警与 BYOK 随行耳机语音总管</strong></summary>
+<summary><strong><code>2026-11-23 · v0.9.9–v0.9.11</code> — 子智能体审批冒泡、第二轮纵深安全加固、零信任手机审批门禁与 BYOK 语音总管</strong></summary>
 
+- **Antigravity 子智能体审批冒泡与第二轮全栈安全加固（`v0.9.11`）**：
+  - **子智能体审批冒泡与手机直达批准**：当父会话已处于 `IDLE`、但后台浏览器/研究子智能体（如文件上传或权限确认）卡在 `WAITING_FOR_USER` 时，自动将子智能体待审批弹窗冒泡到父会话与手机锁屏推送，并在手机点击允许/拒绝时自动将 `HandleCascadeUserInteraction` 精准路由至被阻塞的子智能体 `cascadeId`（兼容 2 选项浏览器弹窗与 4 选项终端弹窗）。
+  - **第二轮全栈纵深安全加固**：`mediaTicket` 与零信任 `hst_` 令牌绑定持久化 `mediaSeed` 防离线伪造、新增已删除主机令牌墓碑集、`POST /api/heartbeat` 彻底封堵裸 `HUB_TOKEN`（`403`）、全部跨主机共享接口按 `authHostId` 严格隔离、`/fs/rtc-offer` 收紧为管理员鉴权并核验 DTLS SHA-256 指纹、全局 `/api/*` 防爆破与防预认证 gzip 炸弹、Voice SSRF 升级 IPv4/IPv6/DNS 全拦截与 L2 高危 `commandLine` 识别 + 3 次 PIN 失败持久化锁定、宿主机 `Range:` 脱敏与路径遍历修复、无 shell 剪贴板、前端 `escJsStr` 与沙箱 CSP 加固、只读部署目录与最小权限拆分 CI/OIDC 发布。
 - **零信任「手机审批接入保护」与实时入侵告警监控（`v0.9.10`）**：设置页新增一键开关 **「新设备 / 新电脑接入需我手机审批」**——开启后每个已批准浏览器持有独立 `dev_...` 凭证，就算管理密码 `HUB_TOKEN` 泄露，陌生浏览器输密码也会卡在 6 位核对码等待页，你手机锁屏立刻收到推送与顶部审批横幅（`✓ 允许登录` / `🚫 拒绝`），直接持裸密码调接口将被 `403 DEVICE_APPROVAL_REQUIRED` 拦截并报警；新电脑配对接入也强制进入 `pending_approval` 隔离态，需你手机点头才放行（支持随时踢出旧设备与 `HUB_RESET_TRUSTED_DEVICES=1` 紧急逃生）。同步上线实时入侵监控告警（伪造 `hst_` 令牌、敏感凭证路径探测、密码爆破、高频扫描，支持 `TRUST_PROXY=1` 真实公网 IP 与 `[REDACTED]` 自动脱敏）、`voice-vault.js` 云内网元数据 SSRF 拦截、原子化状态落盘（`tmp + rename`）、`/api/health` 公网去敏与 CORS 收紧。
 - **BYOK 随行耳机语音总管、全屏 OLED 步行模式（`🎧`）与高危 3 位语音确认码（`v0.9.9`）**：开源中立零硬编码 Key，支持 AES-256-GCM 加密自填密钥池（`0600`），可三段独立混搭 Google Gemini、火山豆包 Flash ASR / Seed-TTS 2.0 及任意 OpenAI 兼容接口（DeepSeek / 方舟 Ark / OpenAI / OpenRouter / SiliconFlow / Groq / Ollama）并独立调优思考档位；内置纯黑省电 **OLED 步行盲操模式**（AirPods 硬件键联动、Auto-VAD 自动停顿收音、随时打断插话、屏幕常亮）、**1ms 确定性高危 3 位语音确认码护栏（L2）**（拦截 `rm -rf` / `git push --force` / `DROP TABLE` / `sudo` 等危险审批）与 **Voice Lab** 试跑延迟打点台；同步强化宿主机 HMAC 签名 `hst_...` 令牌校验与工作区敏感目录黑名单。
 

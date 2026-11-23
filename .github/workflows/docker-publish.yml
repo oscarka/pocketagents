@@ -16,7 +16,6 @@ on:
 
 permissions:
   contents: read
-  packages: write
 
 concurrency:
   group: ci-docker-${{ github.ref }}
@@ -29,8 +28,12 @@ jobs:
   test:
     name: Unit & Integration Tests
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -48,8 +51,13 @@ jobs:
     needs: test
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3

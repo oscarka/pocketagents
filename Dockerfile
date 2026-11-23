@@ -8,7 +8,10 @@ COPY hub ./hub
 
 RUN mkdir -p /data \
   && chmod +x /app/connect-host.sh \
-  && chown -R node:node /app /data
+  && chown -R root:root /app \
+  && chmod -R a+rX,go-w /app \
+  && chmod 700 /data \
+  && chown node:node /data
 
 ENV NODE_ENV=production
 ENV PORT=8080

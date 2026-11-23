@@ -1,4 +1,5 @@
 import { execFile, spawn } from 'node:child_process'
+import { randomBytes } from 'node:crypto'
 import {
   appendFileSync,
   existsSync,
@@ -11,7 +12,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { homedir } from 'node:os'
-import { basename, join } from 'node:path'
+import { basename, join, resolve, sep } from 'node:path'
 import { promisify } from 'node:util'
 import {
   getClaudeApprovalDir,
@@ -20,6 +21,36 @@ import {
 } from '../claude-permission-hook.js'
 
 const execFileAsync = promisify(execFile)
+
+function isSafeClaudeId(rawId = '') {
+  return /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(String(rawId || ''))
+}
+
+function isSafeClaudeModel(model = '') {
+  return /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}$/.test(String(model || ''))
+}
+
+function isSafeClaudeApprovalCode(code = '') {
+  return /^CLD-[A-Z2-9]{6}$/.test(String(code || ''))
+}
+
+function buildCleanClaudeEnv() {
+  const env = { ...process.env }
+  for (const key of Object.keys(env)) {
+    if (
+      key.startsWith('FEISHU_') ||
+      key === 'HUB_TOKEN' ||
+      key === 'HUB_SIGNING_SECRET' ||
+      key === 'DSH_HUB_TOKEN' ||
+      key === 'VOICE_VAULT_SECRET' ||
+      key.startsWith('VAPID_') ||
+      key === 'TURN_SECRET'
+    ) {
+      delete env[key]
+    }
+  }
+  return env
+}
 
 function isPidAlive(pid) {
   const n = Number(pid)
@@ -302,13 +333,20 @@ export class ClaudeAdapter {
       (cleanSid && pending.find(p => p.agentId === cleanSid || p.rawSessionId === toRawClaudeId(cleanSid))) ||
       null
 
-    const targetCode = matched?.code || cleanCode
+    const targetCode = String(matched?.code || cleanCode || '').trim().toUpperCase()
     if (!targetCode) {
       return { ok: false, error: '未找到对应的 Claude Code 待审批请求（可能已在电脑端处理）' }
     }
+    if (!isSafeClaudeApprovalCode(targetCode)) {
+      return { ok: false, error: '无效的 Claude Code 审批码格式' }
+    }
 
-    const resPath = join(dir, `res-${targetCode}.json`)
-    const tmpPath = `${resPath}.tmp-${process.pid}-${Date.now()}`
+    const resolvedDir = resolve(dir)
+    const resPath = resolve(resolvedDir, `res-${targetCode}.json`)
+    if (!resPath.startsWith(`${resolvedDir}${sep}`)) {
+      return { ok: false, error: '无效的审批响应路径' }
+    }
+    const tmpPath = `${resPath}.tmp-${process.pid}-${randomBytes(6).toString('hex')}`
     const payload = {
       code: targetCode,
       allow: allow !== false,
@@ -331,7 +369,11 @@ export class ClaudeAdapter {
   async hasExternalClaudeProcess() {
     const runExec = this.execImpl || execFileAsync
     try {
-      const { stdout } = await runExec('ps', ['-ax', '-o', 'command='], { timeout: 1500 })
+      const psArgs =
+        typeof process.getuid === 'function'
+          ? ['-u', String(process.getuid()), '-o', 'command=']
+          : ['-ax', '-o', 'command=']
+      const { stdout } = await runExec('ps', psArgs, { timeout: 1500 })
       const lines = String(stdout || '').split('\n')
       return lines.some(line => /\bclaude\b/.test(line) && !line.includes('probe-harnesses'))
     } catch {
@@ -501,8 +543,12 @@ export class ClaudeAdapter {
       return { ok: false, error: '当前电脑未检测到 claude CLI 可执行文件' }
     }
     const cleanModel = String(model || '').trim()
+    if (cleanModel && !isSafeClaudeModel(cleanModel)) {
+      return { ok: false, error: '无效的 Claude 模型名称' }
+    }
     const modelFlags = cleanModel ? ['--model', cleanModel] : []
-    const args = [...modelFlags, '-p', text]
+    const promptArgs = text.startsWith('-') ? ['--', text] : [text]
+    const args = [...modelFlags, '-p', ...promptArgs]
     if (runExec) {
       await runExec(bin || 'claude', args, { cwd: cwd || undefined, timeout: 60_000 })
       return {
@@ -513,6 +559,7 @@ export class ClaudeAdapter {
     }
     const child = this.spawnImpl(bin, args, {
       cwd: cwd && existsSync(cwd) ? cwd : homedir(),
+      env: buildCleanClaudeEnv(),
       stdio: 'ignore',
       detached: false,
     })
@@ -529,6 +576,9 @@ export class ClaudeAdapter {
 
   async sendPrompt({ sessionId, text, cwd, model = '', mode = 'prompt', execImpl } = {}) {
     const rawId = toRawClaudeId(sessionId)
+    if (!isSafeClaudeId(rawId)) {
+      return { ok: false, error: '无效的 Claude Code 会话 ID' }
+    }
     const prompt = String(text || '').trim()
     if (!prompt) return { ok: false, error: '请输入指令内容' }
     if (this.activeRuns.has(rawId)) {
@@ -551,8 +601,12 @@ export class ClaudeAdapter {
       return { ok: false, error: '当前电脑未检测到 claude CLI 可执行文件' }
     }
     const cleanModel = String(model || '').trim()
+    if (cleanModel && !isSafeClaudeModel(cleanModel)) {
+      return { ok: false, error: '无效的 Claude 模型名称' }
+    }
     const modelFlags = cleanModel ? ['--model', cleanModel] : []
-    const args = ['--resume', rawId, ...modelFlags, '-p', prompt]
+    const promptArgs = prompt.startsWith('-') ? ['--', prompt] : [prompt]
+    const args = ['--resume', rawId, ...modelFlags, '-p', ...promptArgs]
     if (runExec) {
       await runExec(bin || 'claude', args, { cwd: cwd || undefined, timeout: 60_000 })
       return {
@@ -563,6 +617,7 @@ export class ClaudeAdapter {
     }
     const child = this.spawnImpl(bin, args, {
       cwd: cwd && existsSync(cwd) ? cwd : homedir(),
+      env: buildCleanClaudeEnv(),
       stdio: 'ignore',
       detached: false,
     })

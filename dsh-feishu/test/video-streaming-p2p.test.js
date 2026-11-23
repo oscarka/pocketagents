@@ -175,11 +175,28 @@ test('Plan 1 + Plan 2: 720p preview=1 stream, fs_abort upload cancellation, and 
       })
       assert.equal(unauthOffer.status, 401)
 
-      const validOffer = await fetchAdapter(
+      // v0.9.11 Security: read-only mediaTicket (?mt=) MUST NOT authorize /fs/rtc-offer (requires admin auth)
+      const mtOnlyOffer = await fetchAdapter(
         `http://hub.local/api/hosts/mac-air-p2p/fs/rtc-offer?mt=${encodeURIComponent(mt)}`,
         {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            sdp: 'v=0\r\na=mid:0\r\na=ice-ufrag:u\r\na=ice-pwd:p1234567890123456789012\r\n',
+            cwd: wsDir,
+          }),
+        },
+      )
+      assert.equal(mtOnlyOffer.status, 401)
+
+      const validOffer = await fetchAdapter(
+        `http://hub.local/api/hosts/mac-air-p2p/fs/rtc-offer?mt=${encodeURIComponent(mt)}`,
+        {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            authorization: 'Bearer p2p-hub-token',
+          },
           body: JSON.stringify({
             sdp: [
               'v=0',
