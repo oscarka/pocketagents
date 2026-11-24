@@ -117,6 +117,8 @@ export const DEFAULT_VOICE_PREFS = Object.freeze({
   proactiveBriefing: 'approvals', // 'approvals' | 'all' | 'manual'
   autoVad: true,
   vadSilenceMs: 850,
+  autoListenAfterBriefing: true,
+  duckMusicMode: true,
   useByokForChatStt: false,
   useByokForChatTts: false,
   autoPlayWalkReplies: true,
@@ -339,6 +341,8 @@ function normalizePrefs(input = {}) {
       : 'approvals',
     autoVad: input?.autoVad !== undefined ? Boolean(input.autoVad) : true,
     vadSilenceMs: Number.isFinite(vadMs) && vadMs >= 350 && vadMs <= 3000 ? Math.round(vadMs) : 850,
+    autoListenAfterBriefing: input?.autoListenAfterBriefing !== undefined ? Boolean(input.autoListenAfterBriefing) : true,
+    duckMusicMode: input?.duckMusicMode !== undefined ? Boolean(input.duckMusicMode) : true,
     useByokForChatStt: Boolean(input?.useByokForChatStt),
     useByokForChatTts: Boolean(input?.useByokForChatTts),
     autoPlayWalkReplies: input?.autoPlayWalkReplies !== undefined ? Boolean(input.autoPlayWalkReplies) : true,

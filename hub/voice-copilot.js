@@ -421,6 +421,213 @@ export function splitIntoProgressiveTtsChunks(text = '', { firstChunkMax = 32, n
   return chunks
 }
 
+const FOCUS_APPROVAL_TTL_MS = 45_000
+const SLOT_ZH_MAP = {
+  一: 1, 幺: 1,
+  二: 2, 两: 2,
+  三: 3,
+  四: 4,
+  五: 5,
+  六: 6,
+  七: 7,
+  八: 8,
+  九: 9,
+}
+const OPTION_LETTER_MAP = { a: 1, b: 2, c: 3, d: 4, e: 5, f: 6 }
+
+function parseSmallZhOrDigit(token = '') {
+  const t = String(token || '').trim()
+  if (!t) return 0
+  if (/^[1-9]$/.test(t)) return Number(t)
+  return SLOT_ZH_MAP[t] || 0
+}
+
+/**
+ * Extract an explicit approval queue slot number (1..9) from spoken text,
+ * e.g. "放行1号", "拒绝二号", "第一条允许", "#2 批准", "2号选第三个" -> 1/2/1/2/2.
+ * Carefully avoids matching option choices like "选第二个" or "选项2".
+ */
+export function extractSpokenSlotNumber(text = '') {
+  const raw = String(text ?? '').trim()
+  if (!raw) return 0
+  const m1 = /(?:第\s*([1-9一二两三四五六七八九])\s*(?:条|号)|([1-9一二两三四五六七八九])\s*号|#([1-9])\b|slot\s*([1-9])\b)/i.exec(raw)
+  if (m1) {
+    return parseSmallZhOrDigit(m1[1] || m1[2] || m1[3] || m1[4])
+  }
+  const m2 = /(?:批准|放行|拒绝|取消|同意|允许|跳过|驳回)\s*(?:第\s*)?([1-9一二两三四五六七八九])(?:\s*(?:号|条|个))?(?!\s*(?:项|选项|方案))/i.exec(raw)
+  if (m2) {
+    return parseSmallZhOrDigit(m2[1])
+  }
+  return 0
+}
+
+/**
+ * Extract an explicit spoken choice/option index (1..9) from text,
+ * e.g. "选第二个", "选项2", "选B", "方案三", "option 2" -> 2/2/2/3/2.
+ */
+export function extractSpokenOptionIndex(text = '') {
+  const raw = String(text ?? '').trim()
+  if (!raw) return 0
+  const mNum = /(?:选择?|选项|方案)\s*(?:第\s*)?([1-9一二两三四五六七八九])(?:\s*(?:个|项))?|第\s*([1-9一二两三四五六七八九])\s*(?:个选项|项|个方案)|option\s*([1-9])\b/i.exec(raw)
+  if (mNum) {
+    return parseSmallZhOrDigit(mNum[1] || mNum[2] || mNum[3])
+  }
+  const mLetter = /(?:选择?|选项|方案)\s*([a-fA-F])(?![a-zA-Z0-9])/i.exec(raw)
+  if (mLetter) {
+    return OPTION_LETTER_MAP[mLetter[1].toLowerCase()] || 0
+  }
+  return 0
+}
+
+export function sanitizeTextForVoiceBriefing(rawText = '', maxChars = 120) {
+  let s = String(rawText ?? '')
+  if (!s.trim()) return ''
+  // Strip fenced code blocks and inline code
+  s = s.replace(/```[\s\S]*?```/g, ' ')
+  s = s.replace(/`([^`]{1,40})`/g, '$1').replace(/`[^`]+`/g, ' ')
+  // Replace markdown links with display text only
+  s = s.replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
+  s = s.replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+  // Strip URLs, absolute paths, and long hex hashes
+  s = s.replace(/https?:\/\/[^\s)]+/gi, ' ')
+  s = s.replace(/(?:\/Users\/|\/home\/|\/var\/|\/tmp\/|\/opt\/|[A-Za-z]:\\)[^\s,，。;；)]+/g, ' ')
+  s = s.replace(/\b[0-9a-f]{12,64}\b/gi, ' ')
+  // Strip markdown formatting symbols
+  s = s.replace(/[#>*_~|]+/g, ' ')
+  s = s.replace(/\s+/g, ' ').trim()
+  if (s.length <= maxChars) return s
+  // Prefer stopping cleanly at sentence boundary
+  const head = s.slice(0, maxChars)
+  const stopIdx = Math.max(head.lastIndexOf('。'), head.lastIndexOf('！'), head.lastIndexOf('？'), head.lastIndexOf('；'))
+  if (stopIdx >= Math.floor(maxChars * 0.45)) {
+    return head.slice(0, stopIdx + 1)
+  }
+  return `${head.trim()}。`
+}
+
+export function computeDenyOptionIndex(approval = {}) {
+  const opts = Array.isArray(approval?.options) ? approval.options : []
+  for (let i = 0; i < opts.length; i += 1) {
+    const o = opts[i]
+    const label = String(typeof o === 'string' ? o : (o?.label || '')).trim().toLowerCase()
+    if (/^(no\b|deny\b|reject\b|skip\b|拒绝|取消)/.test(label)) {
+      return Number(o?.index) || (i + 1)
+    }
+  }
+  return opts.length === 2 ? 2 : 4
+}
+
+export function formatApprovalBriefingSpeech(approval = {}, { totalCount = 1 } = {}) {
+  if (!approval) return ''
+  const slot = Number(approval.slot) || 1
+  const host = String(approval.hostName || approval.hostId || '电脑').trim()
+  const sess = String(approval.sessionTitle || '').trim()
+  const who = sess && sess !== approval.title ? `${host}的${sess}` : host
+  const slotTag = `${slot}号`
+
+  if (approval.kind === 'question' && Array.isArray(approval.questions) && approval.questions.length > 0) {
+    const q = approval.questions[0] || {}
+    const qText = sanitizeTextForVoiceBriefing(q.question || approval.promptTitle || approval.title || '需要你选择', 70)
+    const opts = Array.isArray(q.options) ? q.options.slice(0, 4) : []
+    const optStr = opts
+      .map((o, i) => `选项${i + 1}，${sanitizeTextForVoiceBriefing(typeof o === 'string' ? o : (o?.label || ''), 24)}`)
+      .filter(Boolean)
+      .join('；')
+    const suffix = totalCount > 1 ? `请说${slotTag}选第几个。` : '请直接说选第几个。'
+    return `${slotTag}提问，${who}问你：${qText}${optStr ? `。${optStr}。` : '。'}${suffix}`
+  }
+
+  const rawSummary = approval.promptTitle || approval.title || approval.command || approval.toolName || '工具执行确认'
+  const cleanSummary = sanitizeTextForVoiceBriefing(rawSummary, 68)
+  const opts = Array.isArray(approval.options) ? approval.options : []
+  let optHint = ''
+  if (opts.length === 2) {
+    optHint = '选项1允许，选项2拒绝。'
+  } else if (opts.length > 2 && opts.length <= 4 && approval.kind !== 'approval') {
+    optHint = `${opts
+      .slice(0, 3)
+      .map((o, i) => `选项${i + 1}${sanitizeTextForVoiceBriefing(typeof o === 'string' ? o : (o?.label || ''), 16)}`)
+      .join('，')}。`
+  }
+
+  if (approval.riskLevel === 'L2') {
+    return `${slotTag}高危待审批，${who}：${cleanSummary}。如需放行请说放行${slotTag}触发确认码，或说拒绝。`
+  }
+  const replyCue = totalCount > 1 ? `请说放行${slotTag}或拒绝${slotTag}。` : '请说放行或拒绝。'
+  return `${slotTag}待审批，${who}：${cleanSummary}。${optHint}${replyCue}`
+}
+
+export function buildAmbiguousApprovalsReply(approvals = []) {
+  const list = approvals
+    .slice(0, 4)
+    .map(a => {
+      const who = a.sessionTitle ? `${a.hostName}的${a.sessionTitle}` : a.hostName
+      const desc = sanitizeTextForVoiceBriefing(a.promptTitle || a.title || a.toolName || '待确认', 28)
+      return `${a.slot}号，${who}${desc ? `：${desc}` : ''}`
+    })
+    .join('；')
+  return `当前有 ${approvals.length} 条待审批，为防批错请说编号：${list}。请说放行几号或拒绝几号。`
+}
+
+export function resolveApprovalTarget(userText = '', approvals = [], { focusedApproval = null, now = Date.now() } = {}) {
+  const list = Array.isArray(approvals) ? approvals : []
+  if (list.length === 0) return { status: 'empty', approval: null }
+  const text = String(userText || '').trim()
+  const upper = text.toUpperCase()
+
+  // 1. Exact approval code match
+  const byCode = list.find(a => a.code && upper.includes(a.code))
+  if (byCode) return { status: 'matched', approval: byCode, reason: 'code' }
+
+  // 2. Explicit spoken slot number ("1号", "第二条")
+  const slot = extractSpokenSlotNumber(text)
+  if (slot > 0) {
+    const bySlot = list.find(a => Number(a.slot) === slot) || list[slot - 1] || null
+    if (bySlot) return { status: 'matched', approval: bySlot, reason: 'slot' }
+    return { status: 'not_found', slot, approval: null }
+  }
+
+  // 3. Unique session title / host name keyword match
+  if (text.length >= 2) {
+    const lower = text.toLowerCase()
+    const matchedByName = list.filter(a => {
+      const sess = String(a.sessionTitle || '').trim().toLowerCase()
+      const host = String(a.hostName || '').trim().toLowerCase()
+      const title = String(a.title || '').trim().toLowerCase()
+      const hitSess = sess.length >= 2 && (lower.includes(sess) || (sess.length >= 4 && lower.includes(sess.slice(0, 3))))
+      const hitHost = host.length >= 3 && lower.includes(host)
+      const hitTitle = title.length >= 4 && lower.includes(title.slice(0, 6))
+      return hitSess || hitHost || hitTitle
+    })
+    if (matchedByName.length === 1) {
+      return { status: 'matched', approval: matchedByName[0], reason: 'name' }
+    }
+  }
+
+  // 4. Single pending approval -> unambiguous!
+  if (list.length === 1) {
+    return { status: 'matched', approval: list[0], reason: 'sole' }
+  }
+
+  // 5. Multiple pending approvals -> ONLY use a fresh focusedApproval announced within 45s
+  if (focusedApproval && focusedApproval.code) {
+    const announcedAt = Number(focusedApproval.announcedAt) || 0
+    const isFresh = announcedAt === 0 || (now - announcedAt <= FOCUS_APPROVAL_TTL_MS)
+    if (isFresh) {
+      const focused = list.find(
+        a => a.code === String(focusedApproval.code).toUpperCase()
+          && (!focusedApproval.hostId || a.hostId === focusedApproval.hostId),
+      )
+      if (focused) {
+        return { status: 'matched', approval: focused, reason: 'focus' }
+      }
+    }
+  }
+
+  // 6. Ambiguous multi-approval -> NEVER guess!
+  return { status: 'ambiguous', approval: null, approvals: list }
+}
+
 export function buildDynamicVoiceContext(hub, { activeHostId = '', activeSessionId = '' } = {}) {
   const state = typeof hub?.getFullState === 'function' ? hub.getFullState() : { hosts: [], activeHostId: '' }
   const hosts = Array.isArray(state?.hosts) ? state.hosts : []
@@ -433,6 +640,11 @@ export function buildDynamicVoiceContext(hub, { activeHostId = '', activeSession
     '批准',
     '拒绝',
     '确认码',
+    '一号',
+    '二号',
+    '三号',
+    '选第一个',
+    '选第二个',
     '新建任务',
     '停止任务',
     'PocketAgents',
@@ -452,34 +664,19 @@ export function buildDynamicVoiceContext(hub, { activeHostId = '', activeSession
     const hostApprovals = Array.isArray(bridge.approvals) ? bridge.approvals : []
     const hostTasks = Array.isArray(bridge.tasks) ? bridge.tasks : []
 
-    for (const a of hostApprovals) {
-      if (!a) continue
-      const risk = classifyApprovalRisk(a)
-      const code = String(a.code || '').trim().toUpperCase()
-      if (code) hotwords.add(code)
-      pendingApprovals.push({
-        hostId,
-        hostName,
-        code,
-        agentId: String(a.agentId || ''),
-        kind: String(a.kind || 'approval'),
-        toolName: String(a.toolName || a.tool || ''),
-        title: String(a.title || a.summary || a.toolName || '工具审批').slice(0, 120),
-        command: String(a.command || a.summary || a.description || '').slice(0, 220),
-        riskLevel: risk.level,
-        riskReason: risk.reason,
-        options: Array.isArray(a.options) ? a.options.slice(0, 6) : [],
-        questions: Array.isArray(a.questions) ? a.questions.slice(0, 3) : [],
-      })
-    }
-
+    const taskTitleByAgentId = new Map()
     for (const t of hostTasks) {
       if (!t || !t.id) continue
       const cwd = String(t.cwd || '')
       const projectName = cwd ? basename(cwd) : ''
       if (projectName) hotwords.add(projectName)
       const title = String(t.title || t.name || projectName || t.id).slice(0, 80)
+      taskTitleByAgentId.set(String(t.id), title)
       if (title && title.length <= 24) hotwords.add(title)
+      const latestAsstMsg = Array.isArray(t.transcript)
+        ? [...t.transcript].reverse().find(m => m?.role === 'assistant' && String(m?.text || '').trim())
+        : null
+      const fullConclusionText = String(latestAsstMsg?.text || t.lastOutput || t.lastSummary || '')
       tasks.push({
         hostId,
         hostName,
@@ -490,11 +687,48 @@ export function buildDynamicVoiceContext(hub, { activeHostId = '', activeSession
         harness: String(t.harness || t.source || 'dsh'),
         status: String(t.status || 'idle'),
         updatedAt: Number(t.updatedAt || t.lastActivity || 0),
-        lastOutput: String(t.lastOutput || t.lastSummary || '').replace(/\s+/g, ' ').slice(0, 180),
+        lastOutput: fullConclusionText.replace(/\s+/g, ' ').slice(0, 420),
         hasPendingApproval: Boolean(t.pendingApproval),
       })
     }
+
+    for (const a of hostApprovals) {
+      if (!a) continue
+      const risk = classifyApprovalRisk(a)
+      const code = String(a.code || '').trim().toUpperCase()
+      if (code) hotwords.add(code)
+      const agentId = String(a.agentId || '')
+      const sessionTitle = String(taskTitleByAgentId.get(agentId) || a.sessionTitle || '').slice(0, 60)
+      pendingApprovals.push({
+        hostId,
+        hostName,
+        code,
+        agentId,
+        sessionTitle,
+        kind: String(a.kind || 'approval'),
+        toolName: String(a.toolName || a.tool || ''),
+        promptTitle: String(a.promptTitle || '').slice(0, 140),
+        title: String(a.promptTitle || a.title || a.summary || a.toolName || '工具审批').slice(0, 120),
+        command: String(a.commandLine || a.command || a.summary || a.description || '').slice(0, 220),
+        riskLevel: risk.level,
+        riskReason: risk.reason,
+        createdAt: Number(a.createdAt) || 0,
+        options: Array.isArray(a.options) ? a.options.slice(0, 6) : [],
+        questions: Array.isArray(a.questions) ? a.questions.slice(0, 3) : [],
+      })
+    }
   }
+
+  // Deterministic FIFO numbering so slot #1 stays stable as new approvals arrive as #2, #3...
+  pendingApprovals.sort((a, b) => {
+    const ca = a.createdAt || Number.MAX_SAFE_INTEGER
+    const cb = b.createdAt || Number.MAX_SAFE_INTEGER
+    if (ca !== cb) return ca - cb
+    return `${a.hostId}:${a.code}`.localeCompare(`${b.hostId}:${b.code}`)
+  })
+  pendingApprovals.forEach((a, idx) => {
+    a.slot = idx + 1
+  })
 
   tasks.sort((a, b) => {
     const score = s => (s.hasPendingApproval ? 3 : s.status === 'running' ? 2 : 1)
@@ -598,9 +832,9 @@ function extractJsonObject(rawText = '') {
   }
 }
 
-function buildVoiceSystemPrompt(ctx, l2Policy = 'pin') {
+function buildVoiceSystemPrompt(ctx, l2Policy = 'pin', focusedApproval = null) {
   return [
-    '你是 PocketAgents 的「随行语音总管」，专门服务于戴耳机散步/通勤时的开发者。',
+    '你是 PocketAgents 的「随行语音总管」，专门服务于戴耳机听歌/散步/通勤时的开发者。',
     '你必须严格输出一个 JSON 对象，不要输出任何额外解释文字或 Markdown 代码块以外的废话。',
     'JSON Schema:',
     '{',
@@ -610,6 +844,7 @@ function buildVoiceSystemPrompt(ctx, l2Policy = 'pin') {
     '    "hostId": "目标电脑 hostId（可空，默认当前活跃电脑）",',
     '    "agentId": "目标会话 agentId（涉及具体会话时必填）",',
     '    "code": "审批单号 code（涉及 approve/reject/answer_question 时必填，必须来自上下文真实列表）",',
+    '    "slot": 1,',
     '    "optionIndex": 1,',
     '    "answers": [],',
     '    "prompt": "要追问或新建任务的清晰提示词",',
@@ -617,16 +852,18 @@ function buildVoiceSystemPrompt(ctx, l2Policy = 'pin') {
     '    "harness": "可选引擎名（dsh / antigravity-ide / claude / codex）"',
     '  }',
     '}',
-    '安全铁律：',
-    '1. 只能引用下方实时上下文中真实存在的 hostId、agentId 和 code，绝不编造。',
-    `2. 高危审批策略当前为 ${l2Policy === 'pin' ? '「念出随机 3 位确认码放行」' : '「仅允许在手机屏幕点按确认」'}；若用户想批准风险标记为 L2 的审批，你仍然输出 action.type="approve" 与对应 code，后端安全闸门会自动生成 3 位确认码拦截，绝不要在 spokenReply 中声称“已直接放行高危操作”。`,
-    '3. 如果用户只是在问进度、汇总、某任务结果，使用 type="query_status" 或 "inspect_session"，并把关键结论用自然口语念出来。',
-    '4. 如果有多个待审批且用户没说清是哪一个，action.type 设为 "none"，简短报出每个待审批要点让用户指定。',
+    '安全铁律与防串台规则：',
+    '1. 只能引用下方实时上下文中真实存在的 hostId、agentId、slot 和 code，绝不编造。',
+    '2. 每条待审批都有唯一序号 slot（1号、2号、3号…）。如果当前有多条待审批，且用户没有说出序号/会话名/单号，同时也没有刚播报过的 focusedApproval，严禁盲批！必须把 action.type 设为 "none"，简短念出 1号、2号 摘要让用户指定编号。',
+    '3. 若存在有效的 focusedApproval（刚刚 45 秒内播报给用户并自动开麦等待回答），用户直接说“放行/拒绝/选第二个”即指该 focusedApproval，输出它对应的 hostId、code、slot，并在 spokenReply 中报出编号与名称方便用户核对。',
+    `4. 高危审批策略当前为 ${l2Policy === 'pin' ? '「念出随机 3 位确认码放行」' : '「仅允许在手机屏幕点按确认」'}；若用户想批准风险标记为 L2 的审批，你仍然输出 action.type="approve" 与对应 code，后端安全闸门会自动生成 3 位确认码拦截，绝不要在 spokenReply 中声称“已直接放行高危操作”。`,
+    '5. 如果用户问进度、汇总、某任务结论，使用 type="query_status" 或 "inspect_session"，把关键结论用自然口语念出来；若有待审批，按 1号、2号 简短念出要点和选项。',
     '',
     '当前实时电脑与任务上下文：',
     JSON.stringify({
       activeHostId: ctx.activeHostId,
       activeSessionId: ctx.activeSessionId,
+      focusedApproval: focusedApproval || null,
       hosts: ctx.hosts,
       pendingApprovals: ctx.pendingApprovals,
       tasks: ctx.tasks,
@@ -640,28 +877,33 @@ export function runNativeRuleRouter(userText = '', ctx = {}) {
   const tasks = Array.isArray(ctx.tasks) ? ctx.tasks : []
   const runningTasks = tasks.filter(t => t.status === 'running')
   const defaultHostId = ctx.activeHostId || ctx.hosts?.[0]?.hostId || ''
+  const focusedApproval = ctx.focusedApproval || null
+  const now = Number(ctx.now) || Date.now()
 
   if (!text) {
     return {
-      spokenReply: '没听清，你可以再说一遍，比如问我现在什么进度，或者说放行当前审批。',
+      spokenReply: '没听清，你可以再说一遍，比如问我现在什么进度，或者说放行1号。',
       action: { type: 'none' },
     }
   }
 
   // 1. Check status / briefing queries
-  if (/(状态|进度|怎么样|汇报|几个任务|有啥|有什么审批|待审批|status|brief)/i.test(text)) {
+  if (/(状态|进度|怎么样|汇报|几个任务|有啥|有什么审批|待审批|念一下|总结|status|brief)/i.test(text)) {
     const parts = []
     if (approvals.length > 0) {
-      const top = approvals[0]
-      const riskLabel = top.riskLevel === 'L2' ? '高危' : '常规'
-      parts.push(`当前有 ${approvals.length} 条待审批，第一条是 ${top.hostName} 上的${riskLabel}操作：${top.title}`)
+      parts.push(`当前有 ${approvals.length} 条待审批。${formatApprovalBriefingSpeech(approvals[0], { totalCount: approvals.length })}`)
+      if (approvals.length > 1) {
+        const rest = approvals.slice(1, 3).map(a => `${a.slot}号，${a.sessionTitle || a.hostName}：${sanitizeTextForVoiceBriefing(a.title, 24)}`).join('；')
+        parts.push(`另外还有：${rest}。`)
+      }
     } else {
       parts.push('目前没有待审批。')
     }
     if (runningTasks.length > 0) {
       parts.push(`有 ${runningTasks.length} 个任务正在运行，例如 ${runningTasks[0].title}。`)
     } else if (tasks.length > 0) {
-      parts.push(`最近完成的任务是 ${tasks[0].title}${tasks[0].lastOutput ? '，结论摘要：' + tasks[0].lastOutput.slice(0, 60) : ''}。`)
+      const cleanSummary = sanitizeTextForVoiceBriefing(tasks[0].lastOutput || '', 72)
+      parts.push(`最近完成的任务是 ${tasks[0].title}${cleanSummary ? '，摘要：' + cleanSummary : ''}。`)
     } else {
       parts.push('当前没有活跃任务。')
     }
@@ -671,38 +913,131 @@ export function runNativeRuleRouter(userText = '', ctx = {}) {
     }
   }
 
-  // 2. Reject approval
-  if (approvals.length > 0 && REJECT_INTENT_RE.test(text) && !/(任务|会话|新建)/.test(text)) {
-    const target = approvals.find(a => a.code && text.toUpperCase().includes(a.code)) || approvals[0]
-    return {
-      spokenReply: `好的，已为你拒绝 ${target.title}。`,
-      action: {
-        type: 'reject',
-        hostId: target.hostId,
-        agentId: target.agentId,
-        code: target.code,
-      },
+  // 2. Select option for multiple-choice question or multi-option approval ("选第二个", "1号选B")
+  const chosenOptionIdx = extractSpokenOptionIndex(text)
+  if (approvals.length > 0 && chosenOptionIdx > 0) {
+    const resolved = resolveApprovalTarget(text, approvals, { focusedApproval, now })
+    if (resolved.status === 'ambiguous') {
+      return {
+        spokenReply: buildAmbiguousApprovalsReply(approvals),
+        action: { type: 'none', ambiguousApprovals: true },
+      }
     }
-  }
-
-  // 3. Approve pending approval
-  if (approvals.length > 0 && APPROVE_INTENT_RE.test(text)) {
-    const target = approvals.find(a => a.code && text.toUpperCase().includes(a.code)) || approvals[0]
+    if (resolved.status === 'not_found') {
+      return {
+        spokenReply: `没有找到 ${resolved.slot} 号待审批，当前共有 ${approvals.length} 条待审批。`,
+        action: { type: 'none' },
+      }
+    }
+    const target = resolved.approval
+    if (target.kind === 'question' && Array.isArray(target.questions) && target.questions.length > 0) {
+      const q = target.questions[0]
+      const opts = Array.isArray(q.options) ? q.options : []
+      const picked = opts[chosenOptionIdx - 1]
+      const pickedLabel = typeof picked === 'string' ? picked : (picked?.label || `选项 ${chosenOptionIdx}`)
+      return {
+        spokenReply: `好的，已为 ${target.slot} 号「${target.sessionTitle || target.title}」选择第 ${chosenOptionIdx} 项：${sanitizeTextForVoiceBriefing(pickedLabel, 24)}。`,
+        action: {
+          type: 'answer_question',
+          hostId: target.hostId,
+          agentId: target.agentId,
+          code: target.code,
+          slot: target.slot,
+          optionIndex: chosenOptionIdx,
+          answers: [{ questionId: q.id || 'q_1', selected: [pickedLabel] }],
+        },
+      }
+    }
+    const denyIdx = computeDenyOptionIndex(target)
+    if (chosenOptionIdx === denyIdx) {
+      return {
+        spokenReply: `好的，已拒绝 ${target.slot} 号：${sanitizeTextForVoiceBriefing(target.title, 30)}。`,
+        action: {
+          type: 'reject',
+          hostId: target.hostId,
+          agentId: target.agentId,
+          code: target.code,
+          slot: target.slot,
+          optionIndex: denyIdx,
+        },
+      }
+    }
     return {
       spokenReply: target.riskLevel === 'L2'
-        ? `检测到高危操作 ${target.title}，正在启动语音确认码校验。`
-        : `好的，已放行 ${target.title}。`,
+        ? `检测到高危操作 ${target.slot} 号 ${sanitizeTextForVoiceBriefing(target.title, 30)}，正在启动语音确认码校验。`
+        : `好的，已为 ${target.slot} 号选择第 ${chosenOptionIdx} 项并提交。`,
       action: {
         type: 'approve',
         hostId: target.hostId,
         agentId: target.agentId,
         code: target.code,
+        slot: target.slot,
+        optionIndex: chosenOptionIdx,
+      },
+    }
+  }
+
+  // 3. Reject approval (strict anti-mixup!)
+  if (approvals.length > 0 && REJECT_INTENT_RE.test(text) && !/(任务|会话|新建)/.test(text)) {
+    const resolved = resolveApprovalTarget(text, approvals, { focusedApproval, now })
+    if (resolved.status === 'ambiguous') {
+      return {
+        spokenReply: buildAmbiguousApprovalsReply(approvals),
+        action: { type: 'none', ambiguousApprovals: true },
+      }
+    }
+    if (resolved.status === 'not_found') {
+      return {
+        spokenReply: `没有找到 ${resolved.slot} 号待审批，当前共有 ${approvals.length} 条。`,
+        action: { type: 'none' },
+      }
+    }
+    const target = resolved.approval
+    return {
+      spokenReply: `好的，已为你拒绝 ${target.slot} 号：${sanitizeTextForVoiceBriefing(target.title, 32)}。`,
+      action: {
+        type: 'reject',
+        hostId: target.hostId,
+        agentId: target.agentId,
+        code: target.code,
+        slot: target.slot,
+        optionIndex: computeDenyOptionIndex(target),
+      },
+    }
+  }
+
+  // 4. Approve pending approval (strict anti-mixup!)
+  if (approvals.length > 0 && APPROVE_INTENT_RE.test(text)) {
+    const resolved = resolveApprovalTarget(text, approvals, { focusedApproval, now })
+    if (resolved.status === 'ambiguous') {
+      return {
+        spokenReply: buildAmbiguousApprovalsReply(approvals),
+        action: { type: 'none', ambiguousApprovals: true },
+      }
+    }
+    if (resolved.status === 'not_found') {
+      return {
+        spokenReply: `没有找到 ${resolved.slot} 号待审批，当前共有 ${approvals.length} 条。`,
+        action: { type: 'none' },
+      }
+    }
+    const target = resolved.approval
+    return {
+      spokenReply: target.riskLevel === 'L2'
+        ? `检测到高危操作 ${target.slot} 号 ${sanitizeTextForVoiceBriefing(target.title, 32)}，正在启动语音确认码校验。`
+        : `好的，已放行 ${target.slot} 号：${sanitizeTextForVoiceBriefing(target.title, 32)}。`,
+      action: {
+        type: 'approve',
+        hostId: target.hostId,
+        agentId: target.agentId,
+        code: target.code,
+        slot: target.slot,
         optionIndex: 1,
       },
     }
   }
 
-  // 4. Stop running task
+  // 5. Stop running task
   if (/(停止|停一下|别跑了|中断|stop)/i.test(text) && runningTasks.length > 0) {
     const target = runningTasks.find(t => t.agentId === ctx.activeSessionId) || runningTasks[0]
     return {
@@ -715,7 +1050,7 @@ export function runNativeRuleRouter(userText = '', ctx = {}) {
     }
   }
 
-  // 5. Create new task
+  // 6. Create new task
   const createMatch = /^(?:新建(?:一个)?(?:任务|对话)|开个新任务|帮我新开一个任务|create task)[：:，,\s]*(.+)$/i.exec(text)
   if (createMatch && createMatch[1].trim()) {
     const prompt = createMatch[1].trim()
@@ -729,7 +1064,7 @@ export function runNativeRuleRouter(userText = '', ctx = {}) {
     }
   }
 
-  // 6. Send follow-up prompt to active or latest task
+  // 7. Send follow-up prompt to active or latest task
   const followTarget = tasks.find(t => t.agentId === ctx.activeSessionId) || tasks[0]
   if (followTarget && /^(?:告诉它|跟它说|继续|追问|帮我|请帮我|让它)/i.test(text)) {
     const cleanPrompt = text.replace(/^(?:告诉它|跟它说|让它)[：:，,\s]*/, '').trim() || text
@@ -745,7 +1080,7 @@ export function runNativeRuleRouter(userText = '', ctx = {}) {
   }
 
   return {
-    spokenReply: '当前处于系统原生免费模式，仅支持基础口令（查进度、放行、拒绝、停止、新建任务）。如需自由自然语言对话，可在语音配置中接入任意 BYOK 大脑模型。',
+    spokenReply: '当前处于系统原生免费模式，仅支持基础口令（查进度、放行1号、拒绝2号、选第几个、停止、新建任务）。如需自由自然语言对话，可在语音配置中接入任意 BYOK 大脑模型。',
     action: { type: 'none' },
   }
 }
@@ -763,6 +1098,48 @@ export class VoiceCopilotEngine {
     this.now = now
     this.pinStore = new VoicePinChallengeStore({ now })
     this.turnHistory = new Map() // voiceSessionId -> recent messages
+    this.focusedApprovals = new Map() // voiceSessionId -> { hostId, code, slot, announcedAt }
+  }
+
+  setFocusedApproval(voiceSessionId = 'default', approval = null) {
+    const sid = String(voiceSessionId || 'default')
+    if (!approval || !approval.code) {
+      this.focusedApprovals.delete(sid)
+      return null
+    }
+    const entry = {
+      hostId: String(approval.hostId || ''),
+      code: String(approval.code || '').trim().toUpperCase(),
+      slot: Number(approval.slot) || 1,
+      announcedAt: this.now(),
+    }
+    this.focusedApprovals.set(sid, entry)
+    while (this.focusedApprovals.size > 50) {
+      const oldest = this.focusedApprovals.keys().next().value
+      this.focusedApprovals.delete(oldest)
+    }
+    return entry
+  }
+
+  getFreshFocusedApproval(voiceSessionId = 'default', clientHint = null) {
+    const sid = String(voiceSessionId || 'default')
+    const now = this.now()
+    const stored = this.focusedApprovals.get(sid) || null
+    if (stored && now - stored.announcedAt <= FOCUS_APPROVAL_TTL_MS) {
+      return stored
+    }
+    if (clientHint && clientHint.code) {
+      const announcedAt = Number(clientHint.announcedAt) || now
+      if (now - announcedAt <= FOCUS_APPROVAL_TTL_MS) {
+        return {
+          hostId: String(clientHint.hostId || ''),
+          code: String(clientHint.code || '').trim().toUpperCase(),
+          slot: Number(clientHint.slot) || 0,
+          announcedAt,
+        }
+      }
+    }
+    return null
   }
 
   getActivePinChallenge(voiceSessionId = 'default') {
@@ -1113,7 +1490,7 @@ export class VoiceCopilotEngine {
     return { ok: false, provider, error: `不支持的大脑服务商：${provider}`, latencyMs: this.now() - t0 }
   }
 
-  _executeValidatedAction(action, ctx, { voiceSessionId = 'default', dryRun = false, l2Policy = 'pin' } = {}) {
+  _executeValidatedAction(action, ctx, { voiceSessionId = 'default', dryRun = false, l2Policy = 'pin', focusedApproval = null } = {}) {
     const type = String(action?.type || 'none').trim()
     const defaultHostId = ctx.activeHostId || ctx.hosts?.[0]?.hostId || ''
     const hostId = String(action?.hostId || defaultHostId).trim()
@@ -1124,15 +1501,37 @@ export class VoiceCopilotEngine {
 
     if (type === 'approve' || type === 'reject' || type === 'answer_question') {
       const reqCode = String(action?.code || '').trim().toUpperCase()
+      const reqSlot = Number(action?.slot) || 0
       const reqHostId = String(action?.hostId || '').trim()
       const scopedApprovals = reqHostId
         ? ctx.pendingApprovals.filter(a => a.hostId === reqHostId)
         : ctx.pendingApprovals
-      const approval = reqCode
-        ? scopedApprovals.find(a => a.code === reqCode) || null
-        : (action?.agentId
-          ? scopedApprovals.find(a => a.agentId === action.agentId) || null
-          : (scopedApprovals.length === 1 ? scopedApprovals[0] : null))
+      let approval = null
+      if (reqCode) {
+        approval = scopedApprovals.find(a => a.code === reqCode) || null
+      } else if (reqSlot > 0) {
+        approval = scopedApprovals.find(a => Number(a.slot) === reqSlot) || scopedApprovals[reqSlot - 1] || null
+      } else if (action?.agentId) {
+        const byAgent = scopedApprovals.filter(a => a.agentId === action.agentId)
+        if (byAgent.length === 1) approval = byAgent[0]
+      } else if (scopedApprovals.length === 1) {
+        approval = scopedApprovals[0]
+      } else if (focusedApproval?.code) {
+        approval = scopedApprovals.find(
+          a => a.code === String(focusedApproval.code).toUpperCase()
+            && (!focusedApproval.hostId || a.hostId === focusedApproval.hostId),
+        ) || null
+      }
+
+      if (!approval && scopedApprovals.length > 1) {
+        return {
+          executed: false,
+          ambiguousApprovals: true,
+          type: 'none',
+          dryRun,
+          overrideReply: buildAmbiguousApprovalsReply(scopedApprovals),
+        }
+      }
 
       if (!approval) {
         return {
@@ -1186,13 +1585,14 @@ export class VoiceCopilotEngine {
           dryRun,
           approval,
           pinChallenge: challenge,
-          overrideReply: `高危操作预警：${approval.title}。请念出确认码 ${formatPinForSpeech(challenge.pin)} 放行，或说拒绝。`,
+          overrideReply: `高危操作预警：${approval.slot}号 ${approval.title}。请念出确认码 ${formatPinForSpeech(challenge.pin)} 放行，或说拒绝。`,
         }
       }
 
+      const denyIdx = computeDenyOptionIndex(approval)
       const cmdPayload =
         type === 'reject'
-          ? { type: 'deny', code: approval.code, agentId: approval.agentId, optionIndex: 4 }
+          ? { type: 'deny', code: approval.code, agentId: approval.agentId, optionIndex: Number(action?.optionIndex) || denyIdx }
           : type === 'answer_question'
             ? {
                 type: 'approve',
@@ -1277,6 +1677,7 @@ export class VoiceCopilotEngine {
     voiceSessionId = 'default',
     activeHostId = '',
     activeSessionId = '',
+    focusedApproval = null,
     profileId = '',
     stageOverride = null,
     dryRun = false,
@@ -1284,6 +1685,7 @@ export class VoiceCopilotEngine {
     const t0 = this.now()
     const userText = String(text || '').trim()
     const ctx = buildDynamicVoiceContext(this.hub, { activeHostId, activeSessionId })
+    const activeFocus = this.getFreshFocusedApproval(voiceSessionId, focusedApproval)
     const prefs = this.vault.state.prefs
     const profile = this._resolveEffectiveProfile(profileId, stageOverride ? { brain: stageOverride } : null)
 
@@ -1452,11 +1854,15 @@ export class VoiceCopilotEngine {
     let brainLatencyMs = 0
 
     if (provider === 'native') {
-      parsed = runNativeRuleRouter(userText, ctx)
+      parsed = runNativeRuleRouter(userText, {
+        ...ctx,
+        focusedApproval: activeFocus,
+        now: this.now(),
+      })
       brainLatencyMs = this.now() - t0
     } else {
       const history = this.turnHistory.get(voiceSessionId) || []
-      const systemPrompt = buildVoiceSystemPrompt(ctx, prefs.l2Policy)
+      const systemPrompt = buildVoiceSystemPrompt(ctx, prefs.l2Policy, activeFocus)
       const llmRes = await this._callBrainModel(profile.brain, { systemPrompt, history, userText })
       brainLatencyMs = llmRes.latencyMs
       if (!llmRes.ok) {
@@ -1481,9 +1887,34 @@ export class VoiceCopilotEngine {
       voiceSessionId,
       dryRun,
       l2Policy: prefs.l2Policy,
+      focusedApproval: activeFocus,
     })
 
-    const spokenReply = String(execution.overrideReply || parsed?.spokenReply || '已处理。').trim()
+    let spokenReply = String(execution.overrideReply || parsed?.spokenReply || '已处理。').trim()
+    let nextFocusedApproval = null
+
+    if (execution.executed && execution.approval && ['approve', 'reject', 'answer_question'].includes(execution.type)) {
+      const handledCode = execution.approval.code
+      const handledHost = execution.approval.hostId
+      const remaining = ctx.pendingApprovals.filter(a => !(a.code === handledCode && a.hostId === handledHost))
+      if (remaining.length > 0) {
+        const nextApp = remaining[0]
+        nextFocusedApproval = this.setFocusedApproval(voiceSessionId, nextApp)
+        spokenReply = `${spokenReply} 还有下一条：${formatApprovalBriefingSpeech(nextApp, { totalCount: remaining.length })}`
+      } else {
+        this.setFocusedApproval(voiceSessionId, null)
+      }
+    } else if (execution.requiresPin && execution.approval) {
+      nextFocusedApproval = this.setFocusedApproval(voiceSessionId, execution.approval)
+    }
+
+    const expectReply = Boolean(
+      execution.requiresPin
+      || execution.ambiguousApprovals
+      || action?.ambiguousApprovals
+      || nextFocusedApproval,
+    )
+
     const historyList = this.turnHistory.get(voiceSessionId) || []
     historyList.push({ role: 'user', text: userText }, { role: 'assistant', text: spokenReply })
     if (historyList.length > 12) historyList.splice(0, historyList.length - 12)
@@ -1503,12 +1934,127 @@ export class VoiceCopilotEngine {
       spokenChunks: splitIntoProgressiveTtsChunks(spokenReply),
       action,
       execution,
+      expectReply,
+      nextFocusedApproval,
       pinChallenge: execution.pinChallenge || this.pinStore.getActive(voiceSessionId),
       contextSummary: {
         pendingApprovals: ctx.pendingApprovals.length,
         runningTasks: ctx.tasks.filter(t => t.status === 'running').length,
       },
     }
+  }
+
+  /**
+   * Build a concise, ear-friendly proactive spoken briefing when a new approval,
+   * multiple-choice question, or task completion arrives in Walk Mode.
+   * Also locks the announced approval into `focusedApprovals` for 45s so immediate
+   * hands-free voice replies ("放行" / "选第二个") unambiguously target this exact item.
+   */
+  async buildProactiveBriefing({
+    kind = 'approval',
+    hostId = '',
+    code = '',
+    agentId = '',
+    profileId = '',
+    voiceSessionId = 'default',
+  } = {}) {
+    const t0 = this.now()
+    const ctx = buildDynamicVoiceContext(this.hub, { activeHostId: hostId, activeSessionId: agentId })
+
+    if (kind === 'approval') {
+      const cleanCode = String(code || '').trim().toUpperCase()
+      const approval = (cleanCode && ctx.pendingApprovals.find(a => a.code === cleanCode && (!hostId || a.hostId === hostId)))
+        || (agentId && ctx.pendingApprovals.find(a => a.agentId === agentId && (!hostId || a.hostId === hostId)))
+        || ctx.pendingApprovals[0]
+        || null
+      if (!approval) {
+        return { ok: false, error: '当前没有待播报的审批项', latencyMs: this.now() - t0 }
+      }
+      const focused = this.setFocusedApproval(voiceSessionId, approval)
+      const spokenReply = formatApprovalBriefingSpeech(approval, { totalCount: ctx.pendingApprovals.length })
+      return {
+        ok: true,
+        kind: 'approval',
+        latencyMs: this.now() - t0,
+        spokenReply,
+        spokenChunks: splitIntoProgressiveTtsChunks(spokenReply),
+        focusedApproval: focused,
+        approval: {
+          slot: approval.slot,
+          hostId: approval.hostId,
+          hostName: approval.hostName,
+          code: approval.code,
+          sessionTitle: approval.sessionTitle,
+          title: approval.title,
+          kind: approval.kind,
+          riskLevel: approval.riskLevel,
+        },
+        expectReply: true,
+      }
+    }
+
+    if (kind === 'completed') {
+      const task = ctx.tasks.find(t => t.agentId === agentId && (!hostId || t.hostId === hostId))
+        || ctx.tasks.find(t => t.agentId === agentId)
+        || null
+      if (!task) {
+        return { ok: false, error: '未找到对应的已完成任务', latencyMs: this.now() - t0 }
+      }
+      const rawConclusion = String(task.lastOutput || '').trim()
+      const fallbackClean = sanitizeTextForVoiceBriefing(rawConclusion, 95)
+      let summaryText = fallbackClean
+      let summarizedByBrain = false
+
+      const profile = this._resolveEffectiveProfile(profileId)
+      if (rawConclusion.length > 50 && profile.brain?.provider && profile.brain.provider !== 'native') {
+        try {
+          const sumSystemPrompt = [
+            '你是 PocketAgents 语音播报编辑。请把 AI 刚完成的工作结论，压缩成 1 到 2 句给耳朵听的自然口语中文摘要（总字数不超过 75 字）。',
+            '要求：说清完成了什么、结果成没成；如果 AI 最后给出了选项或需要用户拍板，简短说出选项要点。',
+            '严禁输出 JSON、Markdown、文件路径、代码、哈希或括号备注，只输出最终要念出来的纯中文句子。',
+          ].join('\n')
+          const llmRes = await this._callBrainModel(
+            { ...profile.brain, thinkingLevel: 'off', maxTokens: 160 },
+            {
+              systemPrompt: sumSystemPrompt,
+              history: [],
+              userText: `电脑：${task.hostName}\n会话：${task.title}\n最新回复：\n${rawConclusion.slice(0, 1200)}`,
+            },
+          )
+          if (llmRes.ok && llmRes.rawText) {
+            const cleaned = sanitizeTextForVoiceBriefing(llmRes.rawText, 110)
+            if (cleaned) {
+              summaryText = cleaned
+              summarizedByBrain = true
+            }
+          }
+        } catch {
+          // Graceful fallback to deterministic summary
+        }
+      }
+
+      const spokenReply = summaryText
+        ? `${task.hostName}的「${task.title}」已完成：${summaryText}`
+        : `${task.hostName}的「${task.title}」已完成。`
+      const expectsDecision = /[？?]|要不要|是否需要|需要我|请选择|方案\s*[12一二AB]/i.test(summaryText)
+      return {
+        ok: true,
+        kind: 'completed',
+        summarizedByBrain,
+        latencyMs: this.now() - t0,
+        spokenReply,
+        spokenChunks: splitIntoProgressiveTtsChunks(spokenReply),
+        focusedSession: {
+          hostId: task.hostId,
+          hostName: task.hostName,
+          agentId: task.agentId,
+          title: task.title,
+        },
+        expectReply: expectsDecision,
+      }
+    }
+
+    return { ok: false, error: `不支持的播报类型：${kind}`, latencyMs: this.now() - t0 }
   }
 
   async runTts({ text = '', profileId = '', stageOverride = null, voice = '', speed = null } = {}) {

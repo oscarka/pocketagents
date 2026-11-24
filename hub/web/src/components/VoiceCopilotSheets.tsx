@@ -6,6 +6,7 @@ import {
   WalkWakeLockManager,
   bindWalkMediaSession,
   playEarcon,
+  setWalkAudioSessionMode,
 } from '../voice/walkAudio';
 
 interface ProviderCatalogItem {
@@ -63,6 +64,8 @@ interface VoicePrefs {
   proactiveBriefing: 'approvals' | 'all' | 'manual';
   autoVad: boolean;
   vadSilenceMs: number;
+  autoListenAfterBriefing: boolean;
+  duckMusicMode: boolean;
   useByokForChatStt: boolean;
   useByokForChatTts: boolean;
   autoPlayWalkReplies: boolean;
@@ -110,6 +113,8 @@ const DEFAULT_CONFIG: VoiceConfigState = {
     proactiveBriefing: 'approvals',
     autoVad: true,
     vadSilenceMs: 850,
+    autoListenAfterBriefing: true,
+    duckMusicMode: true,
     useByokForChatStt: false,
     useByokForChatTts: false,
     autoPlayWalkReplies: true,
@@ -149,9 +154,9 @@ function toast(msg: string) {
 
 function summarizeHubState(state: any) {
   const hosts = Array.isArray(state?.hosts) ? state.hosts : [];
-  const approvals: Array<{ hostId: string; hostName: string; code: string; title: string; risk: string }> = [];
+  const approvals: Array<{ hostId: string; hostName: string; agentId: string; code: string; title: string; risk: string }> = [];
   let runningCount = 0;
-  const completedKeys: Array<{ key: string; title: string; hostName: string }> = [];
+  const completedKeys: Array<{ key: string; hostId: string; agentId: string; title: string; hostName: string }> = [];
   for (const h of hosts) {
     const hostName = h?.hostName || h?.hostId || '';
     const bridge = h?.bridgeState || {};
@@ -160,8 +165,9 @@ function summarizeHubState(state: any) {
       approvals.push({
         hostId: h.hostId,
         hostName,
+        agentId: String(a.agentId || ''),
         code: String(a.code || ''),
-        title: String(a.title || a.summary || a.toolName || '工具审批'),
+        title: String(a.promptTitle || a.title || a.summary || a.toolName || '工具审批'),
         risk: String(a.risk || ''),
       });
     }
@@ -171,6 +177,8 @@ function summarizeHubState(state: any) {
       if (t.status === 'idle' && t.lastConclusionAt) {
         completedKeys.push({
           key: `${h.hostId}:${t.id}:${t.lastConclusionAt}`,
+          hostId: h.hostId,
+          agentId: String(t.id),
           title: String(t.title || t.id),
           hostName,
         });
@@ -474,6 +482,9 @@ export function VoiceCopilotSheets() {
   const voiceSessionIdRef = useRef(`walk_${Math.random().toString(36).slice(2, 10)}`);
   const seenApprovalsRef = useRef<Set<string>>(new Set());
   const seenCompletedRef = useRef<Set<string>>(new Set());
+  const focusedApprovalRef = useRef<{ hostId: string; code: string; slot?: number; announcedAt?: number } | null>(null);
+  const briefingQueueRef = useRef<Array<{ kind: 'approval' | 'completed'; key: string; hostId: string; hostName: string; code?: string; agentId?: string; title?: string }>>([]);
+  const drainingBriefingRef = useRef(false);
   const walkOpenRef = useRef(false);
   const walkPhaseRef = useRef(walkPhase);
   const configRef = useRef(config);
@@ -666,11 +677,15 @@ export function VoiceCopilotSheets() {
     return () => clearInterval(timer);
   }, [activePin]);
 
-  // WakeLock + AirPods MediaSession lifecycle when Walk Mode opens/closes
+  // WakeLock + AirPods MediaSession + Safari AudioSession lifecycle when Walk Mode opens/closes
   useEffect(() => {
     if (!walkOpen) {
       playerRef.current?.stop();
       stopAllListening();
+      briefingQueueRef.current = [];
+      drainingBriefingRef.current = false;
+      focusedApprovalRef.current = null;
+      setWalkAudioSessionMode('auto');
       void wakeRef.current?.disable();
       setWakeLocked(false);
       setWalkPhase('idle');
@@ -682,12 +697,20 @@ export function VoiceCopilotSheets() {
     seenApprovalsRef.current = new Set(snap.approvals.map(a => `${a.hostId}:${a.code}`));
     seenCompletedRef.current = new Set(snap.completedKeys.map(c => c.key));
 
+    // Keep background music playing at full stereo quality while Walk Mode is idle
+    if (configRef.current?.prefs?.duckMusicMode !== false) {
+      setWalkAudioSessionMode('ambient');
+    }
+
     void wakeRef.current?.enable().then(ok => setWakeLocked(ok));
     const unbindMedia = bindWalkMediaSession({
       onToggleListen: () => { void toggleWalkMic(); },
       onNextBriefing: () => { void runBriefingTurn(); },
       onStopSpeaking: () => {
         playerRef.current?.stop();
+        if (configRef.current?.prefs?.duckMusicMode !== false) {
+          setWalkAudioSessionMode('ambient');
+        }
         if (walkPhaseRef.current === 'speaking') setWalkPhase('idle');
       },
     });
@@ -695,6 +718,72 @@ export function VoiceCopilotSheets() {
       unbindMedia();
     };
   }, [walkOpen]);
+
+  const drainBriefingQueue = async () => {
+    if (drainingBriefingRef.current || !walkOpenRef.current) return;
+    if (walkPhaseRef.current !== 'idle') return;
+    const nextItem = briefingQueueRef.current.shift();
+    if (!nextItem) return;
+    drainingBriefingRef.current = true;
+    try {
+      const cfg = configRef.current;
+      const duckMusic = cfg.prefs.duckMusicMode !== false;
+      const res = await apiCall('/api/voice/briefing', {
+        method: 'POST',
+        body: JSON.stringify({
+          kind: nextItem.kind,
+          hostId: nextItem.hostId,
+          code: nextItem.code || '',
+          agentId: nextItem.agentId || '',
+          profileId: cfg.activeProfile.id,
+          voiceSessionId: voiceSessionIdRef.current,
+        }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!walkOpenRef.current) return;
+
+      const fallbackText = nextItem.kind === 'approval'
+        ? `注意，${nextItem.hostName} 收到新的审批请求：${nextItem.title || nextItem.code}。请说放行或拒绝。`
+        : `${nextItem.hostName} 上的任务「${nextItem.title || ''}」已完成。`;
+      const spokenText = String(data?.spokenReply || fallbackText).trim();
+      const chunks = Array.isArray(data?.spokenChunks) && data.spokenChunks.length > 0 ? data.spokenChunks : [spokenText];
+      if (data?.focusedApproval) {
+        focusedApprovalRef.current = data.focusedApproval;
+      }
+
+      if (duckMusic) {
+        setWalkAudioSessionMode('transient');
+      }
+      playEarcon(nextItem.kind === 'approval' ? 'approval' : 'done');
+      setLastReplyText(spokenText);
+      setLastActionBadge(
+        nextItem.kind === 'approval'
+          ? `🔔 ${data?.approval?.slot ? `${data.approval.slot}号` : '新'}待审批 ${nextItem.code || ''}`
+          : `✅ 任务完成${data?.summarizedByBrain ? ' · AI 摘要' : ''}`,
+      );
+
+      const shouldAutoListen = Boolean(
+        (data?.expectReply ?? nextItem.kind === 'approval')
+        && cfg.prefs.autoListenAfterBriefing
+        && walkOpenRef.current,
+      );
+
+      await speakWalkReply(chunks, undefined, { keepAudioSessionAfter: shouldAutoListen });
+
+      if (shouldAutoListen && walkOpenRef.current && walkPhaseRef.current === 'idle') {
+        void startWalkListening({ isAutoFollowUp: true });
+      }
+    } catch {
+      if (configRef.current?.prefs?.duckMusicMode !== false && walkOpenRef.current) {
+        setWalkAudioSessionMode('ambient');
+      }
+    } finally {
+      drainingBriefingRef.current = false;
+      if (walkOpenRef.current && walkPhaseRef.current === 'idle' && briefingQueueRef.current.length > 0) {
+        setTimeout(() => { void drainBriefingQueue(); }, 250);
+      }
+    }
+  };
 
   // Subscribe to live Hub SSE state updates for proactive Walk Mode briefings
   useEffect(() => {
@@ -706,37 +795,44 @@ export function VoiceCopilotSheets() {
       const mode = configRef.current?.prefs?.proactiveBriefing || 'approvals';
       if (mode === 'manual') return;
 
-      // Detect newly arrived approvals
-      const freshApprovals = snap.approvals.filter(a => {
+      let enqueued = false;
+      for (const a of snap.approvals) {
         const k = `${a.hostId}:${a.code}`;
-        if (seenApprovalsRef.current.has(k)) return false;
+        if (seenApprovalsRef.current.has(k)) continue;
         seenApprovalsRef.current.add(k);
-        return true;
-      });
-      if (freshApprovals.length > 0 && walkPhaseRef.current === 'idle') {
-        const a = freshApprovals[0];
-        playEarcon('approval');
-        const briefText = `注意，${a.hostName} 收到新的审批请求：${a.title}。点圆球说放行或拒绝。`;
-        setLastReplyText(briefText);
-        setLastActionBadge(`🔔 新待审批 ${a.code}`);
-        void speakWalkReply([briefText]);
-        return;
+        briefingQueueRef.current.push({
+          kind: 'approval',
+          key: k,
+          hostId: a.hostId,
+          hostName: a.hostName,
+          code: a.code,
+          agentId: a.agentId,
+          title: a.title,
+        });
+        enqueued = true;
       }
 
       if (mode === 'all') {
-        const freshCompleted = snap.completedKeys.filter(c => {
-          if (seenCompletedRef.current.has(c.key)) return false;
+        for (const c of snap.completedKeys) {
+          if (seenCompletedRef.current.has(c.key)) continue;
           seenCompletedRef.current.add(c.key);
-          return true;
-        });
-        if (freshCompleted.length > 0 && walkPhaseRef.current === 'idle') {
-          const c = freshCompleted[0];
-          playEarcon('done');
-          const briefText = `${c.hostName} 上的任务「${c.title}」已完成。`;
-          setLastReplyText(briefText);
-          setLastActionBadge('✅ 任务完成');
-          void speakWalkReply([briefText]);
+          briefingQueueRef.current.push({
+            kind: 'completed',
+            key: c.key,
+            hostId: c.hostId,
+            hostName: c.hostName,
+            agentId: c.agentId,
+            title: c.title,
+          });
+          enqueued = true;
         }
+      }
+
+      if (briefingQueueRef.current.length > 12) {
+        briefingQueueRef.current.splice(0, briefingQueueRef.current.length - 12);
+      }
+      if (enqueued && walkPhaseRef.current === 'idle') {
+        void drainBriefingQueue();
       }
     };
     window.addEventListener('dsh:hub-state', onHubState);
@@ -754,10 +850,18 @@ export function VoiceCopilotSheets() {
     setMicLevel(0);
   };
 
-  const speakWalkReply = async (chunks: string[], onFirstTtsMs?: (ms: number) => void) => {
+  const speakWalkReply = async (
+    chunks: string[],
+    onFirstTtsMs?: (ms: number) => void,
+    opts: { keepAudioSessionAfter?: boolean } = {},
+  ) => {
     const cfg = configRef.current;
+    const duckMusic = cfg.prefs.duckMusicMode !== false;
     if (!cfg.prefs.autoPlayWalkReplies) {
       setWalkPhase('idle');
+      if (duckMusic && !opts.keepAudioSessionAfter) {
+        setWalkAudioSessionMode('ambient');
+      }
       return;
     }
     const useCloud = cfg.activeProfile?.tts?.provider && cfg.activeProfile.tts.provider !== 'native';
@@ -765,6 +869,8 @@ export function VoiceCopilotSheets() {
     await playerRef.current!.speakChunksProgressive(chunks, {
       useCloudTts: Boolean(useCloud),
       speechRate: cfg.prefs.speechRate || 1.0,
+      duckMusicMode: duckMusic,
+      keepAudioSessionAfter: Boolean(opts.keepAudioSessionAfter),
       fetchTts: async (text, signal) => {
         const r = await apiCall('/api/voice/tts', {
           method: 'POST',
@@ -784,8 +890,10 @@ export function VoiceCopilotSheets() {
 
   const handleWalkUserText = async (spokenText: string, sttMs: number | null = null, wavKb: number | null = null) => {
     const clean = String(spokenText || '').trim();
+    const duckMusic = configRef.current?.prefs?.duckMusicMode !== false;
     if (!clean) {
       setWalkPhase('idle');
+      if (duckMusic) setWalkAudioSessionMode('ambient');
       setLastReplyText('刚才没有听到清晰人声，轻点圆球再说一次。');
       return;
     }
@@ -802,6 +910,7 @@ export function VoiceCopilotSheets() {
           voiceSessionId: voiceSessionIdRef.current,
           activeHostId: snap.activeHostId,
           activeSessionId: snap.activeSessionId,
+          focusedApproval: focusedApprovalRef.current,
           profileId: configRef.current.activeProfile.id,
           dryRun: false,
         }),
@@ -810,6 +919,7 @@ export function VoiceCopilotSheets() {
       if (!res.ok || !data?.ok) {
         playEarcon('alert');
         setWalkPhase('idle');
+        if (duckMusic) setWalkAudioSessionMode('ambient');
         const errMsg = data?.error || '语音大脑调用失败，请检查密钥与网络';
         setLastReplyText(errMsg);
         setLastActionBadge('❌ 调用失败');
@@ -820,6 +930,11 @@ export function VoiceCopilotSheets() {
       const chunks = Array.isArray(data.spokenChunks) && data.spokenChunks.length ? data.spokenChunks : [reply];
       setLastReplyText(reply);
       setActivePin(data.pinChallenge || null);
+      if (data.nextFocusedApproval !== undefined) {
+        focusedApprovalRef.current = data.nextFocusedApproval || null;
+      } else if (data.execution?.executed) {
+        focusedApprovalRef.current = null;
+      }
 
       if (data.fastPath === 'l2_pin_matched') {
         playEarcon('pin_ok');
@@ -827,6 +942,9 @@ export function VoiceCopilotSheets() {
       } else if (data.execution?.requiresPin) {
         playEarcon('alert');
         setLastActionBadge(`⚠️ L2 高危拦截 · 需念出 ${data.pinChallenge?.pin || ''}`);
+      } else if (data.execution?.ambiguousApprovals || data.action?.ambiguousApprovals) {
+        playEarcon('alert');
+        setLastActionBadge('🔢 多条待审批 · 请说编号');
       } else if (data.execution?.executed) {
         playEarcon('done');
         const mapLabel: Record<string, string> = {
@@ -848,22 +966,53 @@ export function VoiceCopilotSheets() {
       baseMetrics.push(`大脑 ${data.latencyMs ?? 0}ms${data.fastPath ? ' ⚡' : ''}`);
       setLastLatencyBadge(baseMetrics.join(' · '));
 
-      await speakWalkReply(chunks, ttsMs => {
-        setLastLatencyBadge([...baseMetrics, `TTS ${ttsMs}ms`].join(' · '));
-      });
+      const shouldAutoListen = Boolean(
+        data.expectReply
+        && configRef.current.prefs.autoListenAfterBriefing
+        && walkOpenRef.current,
+      );
+
+      await speakWalkReply(
+        chunks,
+        ttsMs => {
+          setLastLatencyBadge([...baseMetrics, `TTS ${ttsMs}ms`].join(' · '));
+        },
+        { keepAudioSessionAfter: shouldAutoListen },
+      );
+
+      if (shouldAutoListen && walkOpenRef.current && walkPhaseRef.current === 'idle') {
+        void startWalkListening({ isAutoFollowUp: true });
+      } else if (walkOpenRef.current && walkPhaseRef.current === 'idle' && briefingQueueRef.current.length > 0) {
+        setTimeout(() => { void drainBriefingQueue(); }, 350);
+      }
     } catch (err: any) {
       playEarcon('alert');
       setWalkPhase('idle');
+      if (duckMusic) setWalkAudioSessionMode('ambient');
       setLastReplyText(err?.message || '网络异常，请稍后再试');
       setLastActionBadge('❌ 网络异常');
     }
   };
 
-  const handleWalkWavReady = async (rec: { wavBase64: string; byteLength: number; hadSpeech: boolean }) => {
+  const handleWalkWavReady = async (
+    rec: { wavBase64: string; byteLength: number; hadSpeech: boolean; silentTimeout?: boolean },
+    isAutoFollowUp = false,
+  ) => {
     setMicLevel(0);
+    const duckMusic = configRef.current?.prefs?.duckMusicMode !== false;
+    if (rec.silentTimeout || (isAutoFollowUp && !rec.hadSpeech)) {
+      // User stayed silent during auto-listen window -> quietly restore background music!
+      setWalkPhase('idle');
+      if (duckMusic) setWalkAudioSessionMode('ambient');
+      if (walkOpenRef.current && briefingQueueRef.current.length > 0) {
+        setTimeout(() => { void drainBriefingQueue(); }, 350);
+      }
+      return;
+    }
     const wavKb = Math.max(1, Math.round(rec.byteLength / 1024));
     if (rec.byteLength < 1600) {
       setWalkPhase('idle');
+      if (duckMusic) setWalkAudioSessionMode('ambient');
       return;
     }
     setWalkPhase('transcribing');
@@ -880,40 +1029,59 @@ export function VoiceCopilotSheets() {
       if (!res.ok || !data?.ok) {
         playEarcon('alert');
         setWalkPhase('idle');
+        if (duckMusic) setWalkAudioSessionMode('ambient');
         setLastReplyText(data?.error || '云端语音识别失败，请在语音配置检查密钥');
         setLastActionBadge('❌ STT 失败');
         return;
       }
       if (data.silence || !String(data.text || '').trim()) {
         setWalkPhase('idle');
-        setLastReplyText('没有检测到清晰人声（静音），轻点圆球重新说。');
-        setLastLatencyBadge(`WAV ${wavKb}KB · STT ${data.latencyMs ?? 0}ms · 静音`);
+        if (duckMusic) setWalkAudioSessionMode('ambient');
+        if (!isAutoFollowUp) {
+          setLastReplyText('没有检测到清晰人声（静音），轻点圆球重新说。');
+          setLastLatencyBadge(`WAV ${wavKb}KB · STT ${data.latencyMs ?? 0}ms · 静音`);
+        }
         return;
       }
       await handleWalkUserText(data.text, data.latencyMs ?? 0, wavKb);
     } catch (err: any) {
       playEarcon('alert');
       setWalkPhase('idle');
+      if (duckMusic) setWalkAudioSessionMode('ambient');
       setLastReplyText(err?.message || '语音上传失败');
       setLastActionBadge('❌ 网络失败');
     }
   };
 
-  const startNativeWalkSpeech = () => {
+  const startNativeWalkSpeech = (isAutoFollowUp = false) => {
+    const duckMusic = configRef.current?.prefs?.duckMusicMode !== false;
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SR) {
-      toast('当前浏览器不支持原生语音识别，可在「配置」添加云端 STT 密钥或使用下方文字输入');
-      setWalkTextInputOpen(true);
+      if (!isAutoFollowUp) {
+        toast('当前浏览器不支持原生语音识别，可在「配置」添加云端 STT 密钥或使用下方文字输入');
+        setWalkTextInputOpen(true);
+      }
       setWalkPhase('idle');
+      if (duckMusic) setWalkAudioSessionMode('ambient');
       return;
     }
+    setWalkAudioSessionMode('play-and-record');
     const rec = new SR();
     rec.lang = 'zh-CN';
     rec.interimResults = true;
     rec.continuous = false;
     let finalText = '';
+    let gotAnyResult = false;
     const t0 = Date.now();
+    const silenceGuard = isAutoFollowUp
+      ? setTimeout(() => {
+          if (!gotAnyResult && nativeRecRef.current === rec) {
+            try { rec.stop(); } catch {}
+          }
+        }, 5500)
+      : null;
     rec.onresult = (ev: any) => {
+      gotAnyResult = true;
       let txt = '';
       for (let i = 0; i < ev.results.length; i += 1) {
         txt += ev.results[i][0]?.transcript || '';
@@ -922,22 +1090,69 @@ export function VoiceCopilotSheets() {
       if (finalText) setLastUserText(finalText);
     };
     rec.onerror = () => {
+      if (silenceGuard) clearTimeout(silenceGuard);
       nativeRecRef.current = null;
       setWalkPhase('idle');
+      if (duckMusic) setWalkAudioSessionMode('ambient');
     };
     rec.onend = () => {
+      if (silenceGuard) clearTimeout(silenceGuard);
       nativeRecRef.current = null;
       const elapsed = Date.now() - t0;
       if (finalText) {
         void handleWalkUserText(finalText, elapsed, null);
       } else {
         setWalkPhase('idle');
+        if (duckMusic) setWalkAudioSessionMode('ambient');
+        if (walkOpenRef.current && briefingQueueRef.current.length > 0) {
+          setTimeout(() => { void drainBriefingQueue(); }, 350);
+        }
       }
     };
     nativeRecRef.current = rec;
     setWalkPhase('listening');
     playEarcon('listen');
-    rec.start();
+    try {
+      rec.start();
+    } catch {
+      if (silenceGuard) clearTimeout(silenceGuard);
+      nativeRecRef.current = null;
+      setWalkPhase('idle');
+      if (duckMusic) setWalkAudioSessionMode('ambient');
+    }
+  };
+
+  const startWalkListening = async ({ isAutoFollowUp = false }: { isAutoFollowUp?: boolean } = {}) => {
+    if (!walkOpenRef.current) return;
+    if (walkPhaseRef.current === 'transcribing' || walkPhaseRef.current === 'thinking' || walkPhaseRef.current === 'listening') {
+      return;
+    }
+    const sttProvider = configRef.current.activeProfile?.stt?.provider || 'native';
+    if (sttProvider === 'native') {
+      startNativeWalkSpeech(isAutoFollowUp);
+      return;
+    }
+    try {
+      playEarcon('listen');
+      setWalkPhase('listening');
+      await recorderRef.current!.start({
+        autoVad: isAutoFollowUp ? true : configRef.current.prefs.autoVad,
+        vadSilenceMs: configRef.current.prefs.vadSilenceMs || 850,
+        noSpeechTimeoutMs: isAutoFollowUp ? 5500 : 0,
+        onLevel: lvl => setMicLevel(lvl),
+        onAutoStop: res => {
+          void handleWalkWavReady(res, isAutoFollowUp);
+        },
+      });
+    } catch (err: any) {
+      setWalkPhase('idle');
+      if (configRef.current?.prefs?.duckMusicMode !== false) {
+        setWalkAudioSessionMode('ambient');
+      }
+      if (!isAutoFollowUp) {
+        toast(err?.message || '无法打开麦克风，请检查浏览器权限');
+      }
+    }
   };
 
   const toggleWalkMic = async () => {
@@ -948,7 +1163,7 @@ export function VoiceCopilotSheets() {
     if (walkPhaseRef.current === 'listening') {
       if (recorderRef.current?.isRecording()) {
         const res = recorderRef.current.stop();
-        if (res) void handleWalkWavReady(res);
+        if (res) void handleWalkWavReady(res, false);
       } else if (nativeRecRef.current) {
         try { nativeRecRef.current.stop(); } catch {}
       }
@@ -957,27 +1172,7 @@ export function VoiceCopilotSheets() {
     if (walkPhaseRef.current === 'transcribing' || walkPhaseRef.current === 'thinking') {
       return;
     }
-
-    const sttProvider = configRef.current.activeProfile?.stt?.provider || 'native';
-    if (sttProvider === 'native') {
-      startNativeWalkSpeech();
-      return;
-    }
-    try {
-      playEarcon('listen');
-      setWalkPhase('listening');
-      await recorderRef.current!.start({
-        autoVad: configRef.current.prefs.autoVad,
-        vadSilenceMs: configRef.current.prefs.vadSilenceMs || 850,
-        onLevel: lvl => setMicLevel(lvl),
-        onAutoStop: res => {
-          void handleWalkWavReady(res);
-        },
-      });
-    } catch (err: any) {
-      setWalkPhase('idle');
-      toast(err?.message || '无法打开麦克风，请检查浏览器权限');
-    }
+    await startWalkListening({ isAutoFollowUp: false });
   };
 
   const runBriefingTurn = async () => {
@@ -1474,13 +1669,6 @@ export function VoiceCopilotSheets() {
             <div class="walk-footer-toggles">
               <button
                 type="button"
-                class={`walk-mini-toggle ${config.prefs.autoVad ? 'on' : ''}`}
-                onClick={() => void updatePrefPatch({ autoVad: !config.prefs.autoVad })}
-              >
-                {config.prefs.autoVad ? '🟢 自动停顿收音' : '⚪ 手动点停'}
-              </button>
-              <button
-                type="button"
                 class={`walk-mini-toggle ${config.prefs.proactiveBriefing !== 'manual' ? 'on' : ''}`}
                 onClick={() => {
                   const order: Array<'approvals' | 'all' | 'manual'> = ['approvals', 'all', 'manual'];
@@ -1488,11 +1676,33 @@ export function VoiceCopilotSheets() {
                   void updatePrefPatch({ proactiveBriefing: next });
                 }}
               >
-                🔔 主动播报：{config.prefs.proactiveBriefing === 'approvals' ? '仅审批' : config.prefs.proactiveBriefing === 'all' ? '审批+完成' : '手动'}
+                🔔 播报：{config.prefs.proactiveBriefing === 'approvals' ? '仅审批' : config.prefs.proactiveBriefing === 'all' ? '审批+完成' : '手动'}
               </button>
-              <span class="walk-mini-hint">
-                高危：{config.prefs.l2Policy === 'pin' ? '3位确认码' : '仅屏触'}
-              </span>
+              <button
+                type="button"
+                class={`walk-mini-toggle ${config.prefs.autoListenAfterBriefing ? 'on' : ''}`}
+                onClick={() => void updatePrefPatch({ autoListenAfterBriefing: !config.prefs.autoListenAfterBriefing })}
+              >
+                {config.prefs.autoListenAfterBriefing ? '🎙️ 播完自动开麦' : '⚪ 手动点开麦'}
+              </button>
+              <button
+                type="button"
+                class={`walk-mini-toggle ${config.prefs.duckMusicMode ? 'on' : ''}`}
+                onClick={() => {
+                  const nextDuck = !config.prefs.duckMusicMode;
+                  setWalkAudioSessionMode(nextDuck ? 'ambient' : 'auto');
+                  void updatePrefPatch({ duckMusicMode: nextDuck });
+                }}
+              >
+                {config.prefs.duckMusicMode ? '🎵 听歌压低混音' : '🔇 独占音频'}
+              </button>
+              <button
+                type="button"
+                class={`walk-mini-toggle ${config.prefs.autoVad ? 'on' : ''}`}
+                onClick={() => void updatePrefPatch({ autoVad: !config.prefs.autoVad })}
+              >
+                {config.prefs.autoVad ? '🟢 自动停顿发送' : '⚪ 手动点停'}
+              </button>
             </div>
           </div>
         </div>
@@ -2174,6 +2384,32 @@ export function VoiceCopilotSheets() {
                         <option value="pin">🔢 念出随机 3 位确认码</option>
                         <option value="screen_only">📱 仅限手机屏幕点按</option>
                       </select>
+                    </div>
+
+                    <div class="voice-toggle-row">
+                      <div>
+                        <div class="voice-row-main">播报完选项后自动开麦等我回答</div>
+                        <div class="voice-row-sub">新审批或提问念完后自动用耳机收音 5.5 秒；不说话自动静默还回音乐</div>
+                      </div>
+                      <input
+                        type="checkbox"
+                        class="voice-switch"
+                        checked={config.prefs.autoListenAfterBriefing}
+                        onChange={(e: any) => void updatePrefPatch({ autoListenAfterBriefing: e.target.checked })}
+                      />
+                    </div>
+
+                    <div class="voice-toggle-row">
+                      <div>
+                        <div class="voice-row-main">🎵 边听歌边播报（Safari 压低混音）</div>
+                        <div class="voice-row-sub">空闲时保持立体声听歌，播报时自动压低背景音乐音量，说完自动恢复</div>
+                      </div>
+                      <input
+                        type="checkbox"
+                        class="voice-switch"
+                        checked={config.prefs.duckMusicMode}
+                        onChange={(e: any) => void updatePrefPatch({ duckMusicMode: e.target.checked })}
+                      />
                     </div>
 
                     <div class="voice-toggle-row">

@@ -1859,6 +1859,11 @@ export function createHubServer({
           return { status: outcome.ok ? 200 : 502, json: outcome }
         }
 
+        if (method === 'POST' && pathname === '/api/voice/briefing') {
+          const outcome = await voiceCopilot.buildProactiveBriefing(body || {})
+          return { status: outcome.ok ? 200 : 404, json: outcome }
+        }
+
         if (method === 'POST' && pathname === '/api/voice/pin/clear') {
           voiceCopilot.pinStore.clear(body?.sessionId || 'default')
           return { status: 200, json: { ok: true } }

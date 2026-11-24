@@ -235,8 +235,12 @@ The background daemon automatically discovers local sessions across all 6 suppor
 > 💡 Grouped **one drawer per day** with every exact version tag preserved inside; see [`CHANGELOG.md`](CHANGELOG.md) for granular per-release notes.
 
 <details open>
-<summary><strong><code>2026-11-23 · v0.9.9–v0.9.13</code> — Mobile-First Guided BYOK Voice Setup, Subagent Running/Approval Bubbling &amp; Round-2 Security Hardening</strong></summary>
+<summary><strong><code>2026-11-24 · v0.9.9–v0.9.14</code> — Safari AudioSession Music-Ducking, Numbered Multi-Approval Voice Queue, Spoken Summaries &amp; Guided BYOK Setup</strong></summary>
 
+- **Walk Mode Music-Ducking, Anti-Mixup Numbered Voice Queue &amp; Proactive Spoken Summaries (`v0.9.14`)**:
+  - **iOS Safari `navigator.audioSession` Music-Ducking**: Keeps background music playing in crisp stereo (`ambient`) while Walk Mode idles, switches to `transient` to duck music volume during spoken briefings (auto-restoring afterward), and locks AirPods hands-free mic routing (`play-and-record`) after `getUserMedia`.
+  - **Numbered Multi-Approval Anti-Mixup Queue &amp; Sequential Triage**: Every pending approval gets a stable FIFO slot (`#1`, `#2`, `#3`) with session name; when multiple approvals exist, vague `"approve"` without a slot/code/session or fresh 45s briefing focus is strictly blocked and prompts by slot number; finishing `#1` automatically reads `#2` next. Supports dynamic 2-option browser deny (`optionIndex = 2`) and spoken option selection (`"pick option 2"`, `"slot 1 pick B"`).
+  - **Rich Proactive Briefings (`POST /api/voice/briefing`) &amp; Hands-Free Auto-Listen**: Reads multiple-choice questions with options aloud, summarizes completed tasks into 1–2 spoken sentences via your BYOK brain, and auto-opens the mic for a 5.5s reply window (silently closing and restoring music if you don't speak).
 - **Guided 3-Step Mobile Voice &amp; BYOK Configuration UX (`v0.9.13`)**:
   - Reordered the mobile Voice Copilot setup drawer into a true **`① Keys` → `② Profiles` → `③ Test`** flow with a 2×2 visual provider picker (`Google Gemini`, `DeepSeek / Ark / OpenAI`, `Volcengine ASR`, `Volcengine TTS`), auto-naming blank key labels, Volcengine API Key vs AppID+Token auth toggle, and collapsible `⚙️ Advanced` parameters so first-time setup requires pasting only 1 key.
   - Added **1-Tap Recommended Profiles** right after saving a key (e.g. *All-Gemini 1-Key Setup*, *Free Native Speech + Gemini/DeepSeek Brain*, or *Volcengine + Gemini Flagship Mix*), clear human labels &amp; quick model/voice chips for every field in custom mixing, plain-language `👂 Ear / 🧠 Brain / 🗣️ Mouth` summary pills, and inline missing-key jump buttons.

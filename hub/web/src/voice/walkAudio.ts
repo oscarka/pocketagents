@@ -1,6 +1,35 @@
-// Pure-JS cross-browser 16kHz WAV recorder + VAD + WebAudio Earcons + Progressive TTS Queue + MediaSession + WakeLock
+// Pure-JS cross-browser 16kHz WAV recorder + VAD + WebAudio Earcons + Progressive TTS Queue + Safari AudioSession Ducking + MediaSession + WakeLock
 
 export type EarconKind = 'listen' | 'done' | 'approval' | 'pin_ok' | 'alert';
+export type WalkAudioSessionMode = 'ambient' | 'transient' | 'play-and-record' | 'auto';
+
+/**
+ * Configure the W3C / iOS Safari 16.4+ Audio Session API (`navigator.audioSession`).
+ * - `'ambient'`: idle listening to Apple Music / Spotify at full stereo quality
+ * - `'transient'`: short spoken prompt that ducks background music volume and auto-restores after
+ * - `'play-and-record'`: full-duplex AirPods microphone + speaker voice interaction
+ * - `'auto'`: release explicit audio session override when closing Walk Mode
+ */
+export function setWalkAudioSessionMode(mode: WalkAudioSessionMode): boolean {
+  try {
+    const as = typeof navigator !== 'undefined' ? (navigator as any).audioSession : null;
+    if (!as) return false;
+    if (as.type !== mode) {
+      as.type = mode;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function supportsWalkAudioSession(): boolean {
+  try {
+    return typeof navigator !== 'undefined' && Boolean((navigator as any).audioSession);
+  } catch {
+    return false;
+  }
+}
 
 let sharedAudioCtx: AudioContext | null = null;
 
@@ -133,11 +162,13 @@ export interface WavRecordingResult {
   durationMs: number;
   sampleRate: number;
   hadSpeech: boolean;
+  silentTimeout?: boolean;
 }
 
 export interface WalkRecorderOptions {
   autoVad?: boolean;
   vadSilenceMs?: number;
+  noSpeechTimeoutMs?: number;
   maxDurationMs?: number;
   onLevel?: (level: number) => void;
   onAutoStop?: (result: WavRecordingResult) => void;
@@ -156,6 +187,7 @@ export class WalkWavRecorder {
   private lastVoiceAt = 0;
   private active = false;
   private maxTimer: any = null;
+  private noSpeechTimer: any = null;
   private onAutoStop: ((res: WavRecordingResult) => void) | null = null;
 
   isRecording(): boolean {
@@ -175,6 +207,8 @@ export class WalkWavRecorder {
         autoGainControl: true,
       },
     });
+    // Lock iOS Safari audio routing to AirPods / Bluetooth hands-free AFTER getUserMedia initializes the route
+    setWalkAudioSessionMode('play-and-record');
     const Ctor = (window as any).AudioContext || (window as any).webkitAudioContext;
     if (!Ctor) {
       stream.getTracks().forEach(t => t.stop());
@@ -239,6 +273,17 @@ export class WalkWavRecorder {
     this.procNode = proc;
     this.silentGain = silentGain;
 
+    const noSpeechTimeoutMs = Number(opts.noSpeechTimeoutMs) || 0;
+    if (noSpeechTimeoutMs >= 1500) {
+      this.noSpeechTimer = setTimeout(() => {
+        if (!this.active || this.hadSpeech) return;
+        const res = this.stop();
+        if (res && this.onAutoStop) {
+          this.onAutoStop({ ...res, silentTimeout: true });
+        }
+      }, noSpeechTimeoutMs);
+    }
+
     this.maxTimer = setTimeout(() => {
       if (!this.active) return;
       const res = this.stop();
@@ -254,6 +299,10 @@ export class WalkWavRecorder {
     if (this.maxTimer) {
       clearTimeout(this.maxTimer);
       this.maxTimer = null;
+    }
+    if (this.noSpeechTimer) {
+      clearTimeout(this.noSpeechTimer);
+      this.noSpeechTimer = null;
     }
     const durationMs = Math.max(0, Date.now() - this.startedAt);
     const hadSpeech = this.hadSpeech;
@@ -396,12 +445,16 @@ export class WalkSpeechPlayer {
       useCloudTts,
       fetchTts,
       speechRate = 1.0,
+      duckMusicMode = false,
+      keepAudioSessionAfter = false,
       onFirstLatency,
       onStateChange,
     }: {
       useCloudTts: boolean;
       fetchTts: (text: string, signal: AbortSignal) => Promise<{ ok: boolean; audioBase64?: string; mimeType?: string; useBrowserSpeech?: boolean; latencyMs?: number }>;
       speechRate?: number;
+      duckMusicMode?: boolean;
+      keepAudioSessionAfter?: boolean;
       onFirstLatency?: (ms: number) => void;
       onStateChange?: (playing: boolean) => void;
     },
@@ -414,6 +467,9 @@ export class WalkSpeechPlayer {
     const ctrl = new AbortController();
     this.abortCtrl = ctrl;
     this.playing = true;
+    if (duckMusicMode) {
+      setWalkAudioSessionMode('transient');
+    }
     onStateChange?.(true);
 
     try {
@@ -453,6 +509,9 @@ export class WalkSpeechPlayer {
       if (this.runId === myRun) {
         this.playing = false;
         this.abortCtrl = null;
+        if (duckMusicMode && !keepAudioSessionAfter) {
+          setWalkAudioSessionMode('ambient');
+        }
         onStateChange?.(false);
       }
     }

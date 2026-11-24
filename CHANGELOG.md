@@ -2,6 +2,15 @@
 
 本项目的重要变更都记录在这里。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [0.9.14] - 2026-11-24
+
+### Added & Improved
+
+- **随行模式 `navigator.audioSession` 听歌压低混音、多条审批防串台队列与主动播报摘要/选项（`hub/web/src/voice/walkAudio.ts` / `hub/voice-copilot.js` / `hub/voice-vault.js` / `hub/server.js` / `hub/web/src/components/VoiceCopilotSheets.tsx`）**：
+  - **iOS Safari 听歌压低混音（`duckMusicMode`）**：接入 W3C / iOS Safari 16.4+ `navigator.audioSession` API —— 随行模式空闲时保持 `'ambient'` 不干扰 Apple Music / 网易云立体声播放；播报提醒与摘要时自动切 `'transient'` 压低背景音乐音量并在播完自动恢复；耳机收音时在 `getUserMedia` 后切 `'play-and-record'` 锁定 AirPods 双向语音通路；
+  - **多条并发审批序号防串台队列与连续逐条过**：`buildDynamicVoiceContext` 为所有待审批按 FIFO 稳定编号（`1号 / 2号 / 3号`）并附带会话名；多条待审批并存且未指明编号/单号/会话名、且无 45 秒内刚播报的焦点锁定时，硬拦截严禁盲批并朗读编号列表请你指定；处理完 1 号后若队列还有下一条，自动顺嘴播报 2 号并切换焦点锁定；同时修复 2 选项浏览器弹窗拒绝时动态使用 `optionIndex = 2`；
+  - **新增 `POST /api/voice/briefing` 主动口语播报与播完自动开麦（`autoListenAfterBriefing`）**：新审批/多选题到达时主动念出编号、会话名与具体选项（如 `选项1 / 选项2 / 选项3`）；任务完成时自动调用已配 BYOK 大脑将长结论压缩成 1–2 句自然口语摘要（原生模式自动清洗 Markdown 与路径）；需要你答复时播报完自动开麦 5.5 秒等你说出决定（若 5.5 秒保持沉默则静默收麦并无缝还回背景音乐）。
+
 ## [0.9.13] - 2026-11-23
 
 ### Improved
