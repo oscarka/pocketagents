@@ -92,7 +92,206 @@ export function captureStateDigest(fullState) {
   }
 }
 
-export function buildStateDelta(prevDigest, nextState) {
+function buildMessagePatch(prevMsg, nextMsg) {
+  if (!prevMsg || typeof prevMsg !== 'object' || !nextMsg || typeof nextMsg !== 'object') {
+    return null
+  }
+  const set = {}
+  const append = {}
+  const del = []
+  let toolsAppend = null
+  let changed = false
+
+  const seen = new Set()
+  for (const [k, nextVal] of Object.entries(nextMsg)) {
+    seen.add(k)
+    if (nextVal === undefined) {
+      if (prevMsg[k] !== undefined) {
+        del.push(k)
+        changed = true
+      }
+      continue
+    }
+    const prevVal = prevMsg[k]
+    if (
+      (k === 'text' || k === 'thinking') &&
+      typeof prevVal === 'string' &&
+      typeof nextVal === 'string'
+    ) {
+      if (prevVal === nextVal) continue
+      if (prevVal.length >= 64 && nextVal.startsWith(prevVal)) {
+        append[k] = nextVal.slice(prevVal.length)
+        changed = true
+        continue
+      }
+      set[k] = nextVal
+      changed = true
+      continue
+    }
+    if (k === 'tools' && Array.isArray(prevVal) && Array.isArray(nextVal)) {
+      if (prevVal.length <= nextVal.length) {
+        let prefixSame = true
+        for (let i = 0; i < prevVal.length; i += 1) {
+          if (JSON.stringify(prevVal[i]) !== JSON.stringify(nextVal[i])) {
+            prefixSame = false
+            break
+          }
+        }
+        if (prefixSame) {
+          if (nextVal.length > prevVal.length) {
+            toolsAppend = nextVal.slice(prevVal.length)
+            changed = true
+          }
+          continue
+        }
+      }
+      set[k] = nextVal
+      changed = true
+      continue
+    }
+    if (JSON.stringify(prevVal) !== JSON.stringify(nextVal)) {
+      set[k] = nextVal
+      changed = true
+    }
+  }
+
+  for (const prevKey of Object.keys(prevMsg)) {
+    if (!seen.has(prevKey) && prevMsg[prevKey] !== undefined) {
+      del.push(prevKey)
+      changed = true
+    }
+  }
+
+  if (!changed) return null
+  const patch = {}
+  if (Object.keys(set).length > 0) patch.set = set
+  if (Object.keys(append).length > 0) patch.append = append
+  if (toolsAppend && toolsAppend.length > 0) patch.toolsAppend = toolsAppend
+  if (del.length > 0) patch.del = del
+  return patch
+}
+
+function buildTranscriptPatch(prevTr, nextTr) {
+  if (!Array.isArray(prevTr) || !Array.isArray(nextTr)) return null
+  const prevStrs = prevTr.map(m => JSON.stringify(m))
+  const nextStrs = nextTr.map(m => JSON.stringify(m))
+
+  if (prevStrs.length === nextStrs.length) {
+    let allSame = true
+    for (let i = 0; i < prevStrs.length; i += 1) {
+      if (prevStrs[i] !== nextStrs[i]) {
+        allSame = false
+        break
+      }
+    }
+    if (allSame) return { unchanged: true }
+  }
+
+  // Detect sliding window shift (e.g. `.slice(-14)` dropped 1-4 oldest messages from the front)
+  let bestShift = 0
+  let bestPrefix = 0
+  const maxShift = Math.min(4, prevStrs.length)
+  for (let shift = 0; shift <= maxShift; shift += 1) {
+    let prefix = 0
+    const avail = prevStrs.length - shift
+    const limit = Math.min(avail, nextStrs.length)
+    while (prefix < limit && prevStrs[shift + prefix] === nextStrs[prefix]) {
+      prefix += 1
+    }
+    if (prefix > bestPrefix || (shift === 0 && prefix === bestPrefix)) {
+      bestPrefix = prefix
+      bestShift = shift
+    }
+    // If shift=0 already matched at least one message, no need to probe front-shifts
+    if (shift === 0 && prefix > 0) break
+  }
+
+  const shiftedPrev = bestShift > 0 ? prevTr.slice(bestShift) : prevTr
+  let patchAtKeep = null
+  let tailStart = bestPrefix
+  if (bestPrefix < shiftedPrev.length && bestPrefix < nextTr.length) {
+    const candidate = buildMessagePatch(shiftedPrev[bestPrefix], nextTr[bestPrefix])
+    if (candidate) {
+      const candidateLen = JSON.stringify(candidate).length + 24
+      const rawLen = nextStrs[bestPrefix].length
+      if (candidateLen < rawLen) {
+        patchAtKeep = candidate
+        tailStart = bestPrefix + 1
+      }
+    }
+  }
+
+  const tail = nextTr.slice(tailStart)
+  const patch = {
+    shift: bestShift,
+    keep: bestPrefix,
+  }
+  if (patchAtKeep) patch.patchAtKeep = patchAtKeep
+  if (tail.length > 0) patch.tail = tail
+  return { unchanged: false, patch }
+}
+
+function buildTaskPatch(prevTask, nextTask) {
+  if (!prevTask || typeof prevTask !== 'object' || !nextTask || typeof nextTask !== 'object') {
+    return null
+  }
+  const set = {}
+  const del = []
+  let transcriptPatch = null
+  let hasAny = false
+
+  const seen = new Set()
+  for (const [k, nextVal] of Object.entries(nextTask)) {
+    seen.add(k)
+    if (k === 'transcript') {
+      if (Array.isArray(prevTask.transcript) && Array.isArray(nextVal)) {
+        const trRes = buildTranscriptPatch(prevTask.transcript, nextVal)
+        if (trRes && !trRes.unchanged && trRes.patch) {
+          transcriptPatch = trRes.patch
+          hasAny = true
+        }
+      } else if (JSON.stringify(prevTask.transcript) !== JSON.stringify(nextVal)) {
+        if (nextVal === undefined) {
+          if (prevTask.transcript !== undefined) {
+            del.push('transcript')
+            hasAny = true
+          }
+        } else {
+          set.transcript = nextVal
+          hasAny = true
+        }
+      }
+      continue
+    }
+    if (nextVal === undefined) {
+      if (prevTask[k] !== undefined) {
+        del.push(k)
+        hasAny = true
+      }
+      continue
+    }
+    if (JSON.stringify(prevTask[k]) !== JSON.stringify(nextVal)) {
+      set[k] = nextVal
+      hasAny = true
+    }
+  }
+
+  for (const prevKey of Object.keys(prevTask)) {
+    if (!seen.has(prevKey) && prevTask[prevKey] !== undefined) {
+      del.push(prevKey)
+      hasAny = true
+    }
+  }
+
+  if (!hasAny) return null
+  const out = { id: nextTask.id }
+  if (Object.keys(set).length > 0) out.set = set
+  if (del.length > 0) out.del = del
+  if (transcriptPatch) out.transcriptPatch = transcriptPatch
+  return out
+}
+
+export function buildStateDelta(prevDigest, nextState, { granularTasks = false } = {}) {
   const nextDigest = captureStateDigest(nextState)
   if (!prevDigest) {
     return {
@@ -167,10 +366,24 @@ export function buildStateDelta(prevDigest, nextState) {
     const taskOrderChanged = prevHost.taskOrderJson !== nextHostDigest.taskOrderJson
 
     const upsertedTasks = []
+    const taskPatches = []
     for (const t of safeTasks) {
       if (!t || !t.id) continue
       const nextTaskStr = nextHostDigest.taskStrings.get(t.id)
-      if (prevHost.taskStrings.get(t.id) !== nextTaskStr) {
+      const prevTaskStr = prevHost.taskStrings.get(t.id)
+      if (prevTaskStr !== nextTaskStr) {
+        if (granularTasks && prevTaskStr) {
+          try {
+            const prevTaskObj = JSON.parse(prevTaskStr)
+            const tPatch = buildTaskPatch(prevTaskObj, t)
+            if (tPatch && JSON.stringify(tPatch).length + 32 < nextTaskStr.length) {
+              taskPatches.push(tPatch)
+              continue
+            }
+          } catch {
+            // fall back to full task upsert
+          }
+        }
         upsertedTasks.push(t)
       }
     }
@@ -180,7 +393,8 @@ export function buildStateDelta(prevDigest, nextState) {
       bridgeMetaDiff.hasChanged ||
       removedTaskIds.length > 0 ||
       taskOrderChanged ||
-      upsertedTasks.length > 0
+      upsertedTasks.length > 0 ||
+      taskPatches.length > 0
     ) {
       const patch = { hostId: host.hostId }
       if (Object.keys(hostMetaDiff.changed).length > 0) {
@@ -200,6 +414,9 @@ export function buildStateDelta(prevDigest, nextState) {
       }
       if (upsertedTasks.length > 0) {
         patch.upsertedTasks = upsertedTasks
+      }
+      if (taskPatches.length > 0) {
+        patch.taskPatches = taskPatches
       }
       if (taskOrderChanged) {
         patch.taskOrder = nextHostDigest.taskOrder

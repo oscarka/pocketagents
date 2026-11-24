@@ -2601,7 +2601,11 @@ export function initHubController() {
     const found = foundArg && foundArg.session ? foundArg : findSessionGlobal(activeSessionId);
     if (!found) return;
     const { session: s } = found;
-    if (s._wireTruncated && !expandedTranscriptBySession.has(s.id)) {
+    if (
+      s._wireTruncated &&
+      !expandedTranscriptBySession.has(s.id) &&
+      !(hasLoadedFullState && (s.status === 'running' || s.status === 'approval'))
+    ) {
       void hydrateColdSessionTranscript(s.hostId, s.id, s.sessionRev || '');
     }
 
@@ -3313,7 +3317,7 @@ export function initHubController() {
   async function hydrateColdSessionTranscript(hostId, sessionId, sessionRev = '') {
     if (!hostId || !sessionId || hydratingWireSessionIds.has(sessionId)) return;
     const existing = hydratedWireTranscriptBySession.get(sessionId);
-    if (existing && (!sessionRev || existing.sessionRev === sessionRev || (Date.now() - (existing.fetchedAt || 0) < 8000))) return;
+    if (existing && (!sessionRev || existing.sessionRev === sessionRev || (Date.now() - (existing.fetchedAt || 0) < 20000))) return;
     hydratingWireSessionIds.add(sessionId);
     try {
       const res = await apiFetch(
@@ -10514,18 +10518,25 @@ export function initHubController() {
             pendingDeepLinkHostId = String(hostId || '').trim();
             pendingDeepLinkTaskId = String(agentId || '').trim();
           }
-          if (!sseConnected || Date.now() - lastSseEventAt > 4000) {
-            connectSSE();
-          }
-          void fetchState({ silent: true, forceFresh: true });
+          const needSse = !sseConnected || Date.now() - lastSseEventAt > 4000;
+          if (needSse) closeSSE();
+          void fetchState({ silent: true, forceFresh: true }).finally(() => {
+            if (needSse || !sseConnected) connectSSE();
+          });
         } else if (msg && msg.type === 'PUSH_RECEIVED') {
-          if (!sseConnected || Date.now() - lastSseEventAt > 4000) {
-            connectSSE();
-          }
+          const needSse = !sseConnected || Date.now() - lastSseEventAt > 4000;
+          if (needSse) closeSSE();
           if (!stateFetchInFlight) {
-            void fetchState({ silent: true, forceFresh: true });
+            void fetchState({ silent: true, forceFresh: true }).finally(() => {
+              if (needSse || !sseConnected) connectSSE();
+            });
           } else {
             inFlightNeedsFollowup = true;
+            if (needSse) {
+              void inFlightStatePromise?.finally(() => {
+                if (!sseConnected) connectSSE();
+              });
+            }
           }
         } else if (msg && msg.type === 'DSH_SW_UPDATED') {
           const nextBuild = String(msg.uiBuild || '').trim();
@@ -10860,6 +10871,10 @@ export function initHubController() {
   let sseSource = null;
   let sseConnected = false;
   let sseUsingLite = false;
+  let sseReconnectTimer = null;
+  let sseErrorCount = 0;
+  let lastSeqMismatchResyncAt = 0;
+  let seqMismatchResyncTimer = null;
   let lastSseEventAt = 0;
   let lastSseStateAt = 0;
   let sseRotatingUntil = 0;
@@ -10948,7 +10963,7 @@ export function initHubController() {
         renderAll();
         flushPendingDeepLink();
         void ensureLocalPushSubscriptionSynced();
-        if (isFullPayload && sseConnected && sseUsingLite) {
+        if (isFullPayload && sseSource && sseUsingLite) {
           connectSSE();
         } else if (!hasLoadedFullState && !fullStateUpgradeQueued) {
           // 首屏用 lite=1 实现 0.2s 秒开列表后，立即在后台静默拉取一次完整热会话状态（48,000 字无截断），
@@ -11044,6 +11059,14 @@ export function initHubController() {
   }
 
   function closeSSE() {
+    if (sseReconnectTimer) {
+      clearTimeout(sseReconnectTimer);
+      sseReconnectTimer = null;
+    }
+    if (seqMismatchResyncTimer) {
+      clearTimeout(seqMismatchResyncTimer);
+      seqMismatchResyncTimer = null;
+    }
     if (sseSource) {
       try {
         sseSource.close();
@@ -11051,6 +11074,31 @@ export function initHubController() {
       sseSource = null;
     }
     sseConnected = false;
+  }
+
+  function scheduleSeqMismatchResync() {
+    const nowMs = Date.now();
+    if (stateFetchInFlight) {
+      inFlightNeedsFollowup = true;
+      return;
+    }
+    if (nowMs - lastSeqMismatchResyncAt >= 1200) {
+      lastSeqMismatchResyncAt = nowMs;
+      void fetchState({ silent: true, forceFresh: true });
+      return;
+    }
+    if (!seqMismatchResyncTimer) {
+      const waitMs = Math.max(200, 1200 - (nowMs - lastSeqMismatchResyncAt));
+      seqMismatchResyncTimer = setTimeout(() => {
+        seqMismatchResyncTimer = null;
+        if (!stateFetchInFlight) {
+          lastSeqMismatchResyncAt = Date.now();
+          void fetchState({ silent: true, forceFresh: true });
+        } else {
+          inFlightNeedsFollowup = true;
+        }
+      }, waitMs);
+    }
   }
 
   function connectSSE() {
@@ -11063,34 +11111,57 @@ export function initHubController() {
     const knownSeq = hasLoadedInitialState ? Number(hubState?.stateSeq || 0) : 0;
     sseUsingLite = !hasLoadedFullState;
     const url =
-      '/api/events?initial=0&delta=1' +
+      '/api/events?initial=0&delta=1&tp=1&resync=1' +
       (sseUsingLite ? '&lite=1' : '') +
       (knownSeq > 0 ? '&seq=' + encodeURIComponent(String(knownSeq)) : '') +
       (tk ? '&token=' + encodeURIComponent(tk) : '');
     try {
-      sseSource = new EventSource(url);
-      sseSource.onopen = () => {
+      const thisSource = new EventSource(url);
+      sseSource = thisSource;
+      thisSource.onopen = () => {
+        if (sseSource !== thisSource) return;
         sseConnected = true;
         sseRotatingUntil = 0;
+        sseErrorCount = 0;
         lastSseEventAt = Date.now();
         consecutiveStateFetchFailures = 0;
         setConnectionBanner(false);
-        // 仅当尚未加载初始状态，或重连前曾断流超过 15s 时才补拉 /api/state；避免首次直连因 prevSseEventAt=0 重复拉取
-        if (!stateFetchInFlight && (!hasLoadedInitialState || (prevSseEventAt > 0 && Date.now() - prevSseEventAt > 15000))) {
+        // 仅当尚未加载初始状态，或重连前曾断流超过 15s 且刚未拉取过新状态时才补拉 /api/state
+        if (
+          !stateFetchInFlight &&
+          (!hasLoadedInitialState ||
+            (prevSseEventAt > 0 && Date.now() - prevSseEventAt > 15000 && Date.now() - lastStateFetchAt > 4000))
+        ) {
           void fetchState({ silent: hasLoadedInitialState });
         }
       };
-      sseSource.onerror = () => {
+      thisSource.onerror = () => {
+        if (sseSource !== thisSource) return;
         sseConnected = false;
+        // 立即关闭失效的 EventSource，禁止浏览器拿着半小时前的旧 ?seq= 死循环重连；
+        // 改由我们用最新的 hubState.stateSeq 进行可控退避重建。
+        closeSSE();
+        if (isDemoMode || (!getToken() && authLockConfirmed)) return;
+        if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+        sseErrorCount = Math.min(sseErrorCount + 1, 6);
+        const backoffMs = Math.min(12000, Math.round(1000 * Math.pow(1.6, sseErrorCount - 1)));
+        sseReconnectTimer = setTimeout(() => {
+          sseReconnectTimer = null;
+          if (!sseConnected && (typeof document === 'undefined' || document.visibilityState !== 'hidden')) {
+            connectSSE();
+          }
+        }, backoffMs);
       };
-      sseSource.addEventListener('ping', evt => {
+      thisSource.addEventListener('ping', evt => {
+        if (sseSource !== thisSource) return;
         sseConnected = true;
         sseRotatingUntil = 0;
+        sseErrorCount = 0;
         lastSseEventAt = Date.now();
         consecutiveStateFetchFailures = 0;
         setConnectionBanner(false);
         try {
-          if (evt?.data && hasLoadedInitialState && !stateFetchInFlight && Date.now() - lastStateFetchAt > 10000) {
+          if (evt?.data && hasLoadedInitialState && !stateFetchInFlight && Date.now() - lastStateFetchAt > 4000) {
             const pingData = JSON.parse(evt.data);
             const serverSeq = Number(pingData?.stateSeq || 0);
             const localSeq = Number(hubState?.stateSeq || 0);
@@ -11100,18 +11171,31 @@ export function initHubController() {
           }
         } catch { }
       });
-      sseSource.addEventListener('rotate', () => {
+      thisSource.addEventListener('resync', () => {
+        if (sseSource !== thisSource) return;
+        sseConnected = true;
+        sseRotatingUntil = 0;
+        sseErrorCount = 0;
+        lastSseEventAt = Date.now();
+        consecutiveStateFetchFailures = 0;
+        setConnectionBanner(false);
+        // 服务端已将增量基线对齐到最新 stateSeq，前端通过 gzip 压缩的 /api/state 轻量拉齐，彻底告别 1.6MB 无压缩 SSE 巨帧
+        void fetchState({ silent: true, forceFresh: true });
+      });
+      thisSource.addEventListener('rotate', () => {
+        if (sseSource !== thisSource) return;
         // 服务端在 Cloud Run 300s 超时前（240s）主动优雅轮转 SSE，前端立即平滑换新流，零报错零断档
         sseRotatingUntil = Date.now() + 5000;
         connectSSE();
       });
-      sseSource.addEventListener('state_delta', evt => {
+      thisSource.addEventListener('state_delta', evt => {
+        if (sseSource !== thisSource) return;
         try {
           sseConnected = true;
           sseRotatingUntil = 0;
+          sseErrorCount = 0;
           const nowEvt = Date.now();
           lastSseEventAt = nowEvt;
-          lastSseStateAt = nowEvt;
           consecutiveStateFetchFailures = 0;
           setConnectionBanner(false);
           if (!hasLoadedInitialState) {
@@ -11124,11 +11208,11 @@ export function initHubController() {
           const delta = JSON.parse(evt.data);
           const merged = applyStateDelta(hubState, delta);
           if (!merged.ok) {
-            if (!stateFetchInFlight && nowEvt - lastStateFetchAt > 4000) {
-              void fetchState({ silent: true, forceFresh: true });
-            }
+            // 序号断档或服务端重启：绝不静默丢包，立刻调度 /api/state 对齐
+            scheduleSeqMismatchResync();
             return;
           }
+          lastSseStateAt = nowEvt;
           if (!merged.noop) {
             lastStateFetchAt = nowEvt;
             applyHubState(merged.state, { skipCache: Boolean(merged.metaOnly) });
@@ -11139,10 +11223,12 @@ export function initHubController() {
           }
         } catch { }
       });
-      sseSource.addEventListener('state', evt => {
+      thisSource.addEventListener('state', evt => {
+        if (sseSource !== thisSource) return;
         try {
           sseConnected = true;
           sseRotatingUntil = 0;
+          sseErrorCount = 0;
           const nowEvt = Date.now();
           lastSseEventAt = nowEvt;
           lastSseStateAt = nowEvt;
@@ -11163,19 +11249,25 @@ export function initHubController() {
 
   function manualReconnectNow() {
     setConnectionBanner(true, '🔄 正在重新连接总控台…');
-    connectSSE();
-    void fetchState();
+    closeSSE();
+    void fetchState({ forceFresh: true }).finally(() => {
+      connectSSE();
+    });
   }
 
   // 网络恢复/断开时自动重连 SSE (#11)
   if (typeof window !== 'undefined') {
     window.addEventListener('online', () => {
       setConnectionBanner(false);
-      connectSSE();
-      void fetchState();
+      closeSSE();
+      void fetchState({ silent: true, forceFresh: true }).finally(() => {
+        if (typeof document === 'undefined' || document.visibilityState !== 'hidden') {
+          connectSSE();
+        }
+      });
     });
     window.addEventListener('offline', () => {
-      sseConnected = false;
+      closeSSE();
       setConnectionBanner(true, '⚠️ 当前手机网络已断开，恢复网络后将自动重连');
     });
   }
@@ -11946,10 +12038,21 @@ export function initHubController() {
     }
     if (!getToken() || authLockConfirmed) return;
     const idleMs = Date.now() - lastSseEventAt;
-    if (!stateFetchInFlight && (!sseConnected || idleMs > 1200)) {
-      void fetchState({ silent: true, forceFresh: true });
+    const needReconnect = !sseConnected || idleMs > 15000;
+    const needFetch = needReconnect || idleMs > 1500;
+    if (needReconnect) {
+      closeSSE();
     }
-    if (!sseConnected || idleMs > 6000) {
+    if (needFetch) {
+      // 先拉取最新 gzip 压缩的 /api/state 拿到最新 stateSeq，再建立 SSE 连接，
+      // 彻底消除切回前台时 /api/state 与旧 seq SSE 并发撞车及 seq_mismatch
+      void fetchState({ silent: true, forceFresh: true }).finally(() => {
+        if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+        if (needReconnect || !sseConnected) {
+          connectSSE();
+        }
+      });
+    } else if (needReconnect) {
       connectSSE();
     }
   }
@@ -12066,12 +12169,20 @@ export function initHubController() {
       }
     })();
   }
-  // 服务端每 12s 发送 event: ping；跳过 240s 优雅轮转窗口，仅当已鉴权且 SSE 断开或超过 35s 无事件时静默兜底轮询
+  // 服务端每 12s 发送 event: ping；跳过 240s 优雅轮转窗口，仅当已鉴权且 SSE 断开或超过 35s 无事件时静默兜底轮询并自愈重连
   setInterval(() => {
     if (Date.now() < sseRotatingUntil) return;
     if (!getToken() && authLockConfirmed) return;
-    if (!stateFetchInFlight && (!sseConnected || (Date.now() - lastSseEventAt > 35000))) {
-      void fetchState({ silent: true });
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+    const staleSse = !sseConnected || (Date.now() - lastSseEventAt > 35000);
+    if (!stateFetchInFlight && staleSse) {
+      void fetchState({ silent: true }).finally(() => {
+        if ((!sseConnected || Date.now() - lastSseEventAt > 35000) && !sseReconnectTimer) {
+          connectSSE();
+        }
+      });
+    } else if (!sseConnected && !sseReconnectTimer) {
+      connectSSE();
     }
   }, 5000);
 }

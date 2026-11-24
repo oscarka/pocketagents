@@ -2,6 +2,80 @@
 // Verifies monotonic `prevSeq -> stateSeq` continuity and reconstructs the
 // exact `hubState` snapshot without full-payload network transfers.
 
+function applyMessagePatch(prevMsg, mp) {
+  if (!prevMsg || typeof prevMsg !== 'object' || !mp || typeof mp !== 'object') {
+    return null;
+  }
+  const nextMsg = { ...prevMsg };
+  if (mp.set && typeof mp.set === 'object') {
+    Object.assign(nextMsg, mp.set);
+  }
+  if (mp.append && typeof mp.append === 'object') {
+    for (const [k, suffix] of Object.entries(mp.append)) {
+      if (typeof nextMsg[k] !== 'string' || typeof suffix !== 'string') {
+        return null;
+      }
+      nextMsg[k] = nextMsg[k] + suffix;
+    }
+  }
+  if (Array.isArray(mp.toolsAppend) && mp.toolsAppend.length > 0) {
+    const baseTools = Array.isArray(nextMsg.tools) ? nextMsg.tools : [];
+    nextMsg.tools = [...baseTools, ...mp.toolsAppend];
+  }
+  if (Array.isArray(mp.del)) {
+    for (const k of mp.del) {
+      delete nextMsg[k];
+    }
+  }
+  return nextMsg;
+}
+
+function applyTaskPatch(prevTask, tp) {
+  if (!prevTask || typeof prevTask !== 'object' || !tp || typeof tp !== 'object') {
+    return null;
+  }
+  const nextTask = { ...prevTask };
+  if (tp.set && typeof tp.set === 'object') {
+    Object.assign(nextTask, tp.set);
+  }
+  if (Array.isArray(tp.del)) {
+    for (const k of tp.del) {
+      delete nextTask[k];
+    }
+  }
+  if (tp.transcriptPatch && typeof tp.transcriptPatch === 'object') {
+    if (!Array.isArray(prevTask.transcript)) {
+      return null;
+    }
+    const shift = Math.max(0, Number(tp.transcriptPatch.shift) || 0);
+    const keep = Math.max(0, Number(tp.transcriptPatch.keep) || 0);
+    if (shift > prevTask.transcript.length) {
+      return null;
+    }
+    const shifted = shift > 0 ? prevTask.transcript.slice(shift) : prevTask.transcript;
+    if (keep > shifted.length) {
+      return null;
+    }
+    const nextTr = shifted.slice(0, keep);
+    if (tp.transcriptPatch.patchAtKeep) {
+      const baseMsg = shifted[keep];
+      if (!baseMsg || typeof baseMsg !== 'object') {
+        return null;
+      }
+      const patchedMsg = applyMessagePatch(baseMsg, tp.transcriptPatch.patchAtKeep);
+      if (!patchedMsg) {
+        return null;
+      }
+      nextTr.push(patchedMsg);
+    }
+    if (Array.isArray(tp.transcriptPatch.tail) && tp.transcriptPatch.tail.length > 0) {
+      nextTr.push(...tp.transcriptPatch.tail);
+    }
+    nextTask.transcript = nextTr;
+  }
+  return nextTask;
+}
+
 export function applyStateDelta(prevState, delta) {
   if (!prevState || typeof prevState !== 'object' || !Array.isArray(prevState.hosts)) {
     return { ok: false, reason: 'missing_base_state' };
@@ -19,6 +93,12 @@ export function applyStateDelta(prevState, delta) {
   }
   if (curSeq === nextSeq) {
     return { ok: true, state: prevState, noop: true };
+  }
+  if (nextSeq < curSeq) {
+    if (curSeq - nextSeq <= 16) {
+      return { ok: true, state: prevState, noop: true, stale: true };
+    }
+    return { ok: false, reason: 'seq_reset', curSeq, prevSeq, nextSeq };
   }
   if (curSeq !== prevSeq) {
     return { ok: false, reason: 'seq_mismatch', curSeq, prevSeq, nextSeq };
@@ -92,6 +172,7 @@ export function applyStateDelta(prevState, delta) {
         (Array.isArray(patch.bridgeMetaDeleted) && patch.bridgeMetaDeleted.length > 0) ||
         (Array.isArray(patch.removedTaskIds) && patch.removedTaskIds.length > 0) ||
         (Array.isArray(patch.upsertedTasks) && patch.upsertedTasks.length > 0) ||
+        (Array.isArray(patch.taskPatches) && patch.taskPatches.length > 0) ||
         Array.isArray(patch.taskOrder);
 
       if (hasBridgePatch) {
@@ -112,6 +193,7 @@ export function applyStateDelta(prevState, delta) {
         const hasTaskPatch =
           (Array.isArray(patch.removedTaskIds) && patch.removedTaskIds.length > 0) ||
           (Array.isArray(patch.upsertedTasks) && patch.upsertedTasks.length > 0) ||
+          (Array.isArray(patch.taskPatches) && patch.taskPatches.length > 0) ||
           Array.isArray(patch.taskOrder);
 
         if (hasTaskPatch) {
@@ -132,6 +214,20 @@ export function applyStateDelta(prevState, delta) {
                 curTaskOrder.push(ut.id);
               }
               taskMap.set(ut.id, ut);
+            }
+          }
+          if (Array.isArray(patch.taskPatches)) {
+            for (const tp of patch.taskPatches) {
+              if (!tp || !tp.id) continue;
+              const prevTask = taskMap.get(tp.id);
+              if (!prevTask) {
+                return { ok: false, reason: 'missing_task_for_patch', hostId: patch.hostId, taskId: tp.id };
+              }
+              const patchedTask = applyTaskPatch(prevTask, tp);
+              if (!patchedTask) {
+                return { ok: false, reason: 'invalid_task_patch', hostId: patch.hostId, taskId: tp.id };
+              }
+              taskMap.set(tp.id, patchedTask);
             }
           }
           const finalTaskOrder = Array.isArray(patch.taskOrder) ? patch.taskOrder : curTaskOrder;

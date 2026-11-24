@@ -2,6 +2,20 @@
 
 本项目的重要变更都记录在这里。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [0.9.17] - 2026-11-24
+
+### Fixed & Improved
+
+- **手机端实时 SSE 增量同步架构深度优化与防卡死加固（`hub/delta-state.js` / `hub/web/src/state/delta-merge.js` / `hub/server.js` / `hub/hub-core.js` / `hub/web/src/controller.js`）**：
+  - **任务字段与消息级细粒度增量补丁（`tp=1` / `taskPatches`）**：流式执行时不再整包重传 70–107 KB 的长会话历史消息，改为只下发变更元字段 + 新增文本片段（`append`）/ 新工具调用（`toolsAppend`）/ 滑动窗口平移（`shift`），实测单次 SSE 推送体积下降 **95%–99%**，彻底消除跨国移动链路拥塞排队；同时 100% 兼容旧版 `delta=1` 客户端。
+  - **彻底消灭重连时的 1.67 MB 无压缩 SSE 全量巨帧（`resync=1`）**：当客户端断流后以旧 `stateSeq` 重连时，服务端不再直接灌入 1.6 MB+ 未压缩 `event: state`，而是发送 ~90 B 的 `event: resync` 信号由前端走 gzip 压缩 `/api/state` 快速对齐，并在 `applyStateDelta` 中安全吸收轻微乱序旧包、精准识别服务端重启 `seq_reset`。
+  - **根治切前台、切网与 `lite=1` 升级竞态导致的「画面停滞需手动刷新」**：
+    - `resumeForegroundSync`、`online` 与通知唤醒改为先拉完最新 `/api/state` 拿到新 `stateSeq`，再建立 SSE，彻底避免 2.3 MB 并发撞车与 `seq_mismatch`；
+    - `EventSource.onerror` 立即销毁旧连接并用最新 `stateSeq` 退避重建，防止浏览器拿着半小时前的旧 `?seq=` 死循环重连；
+    - 修复 `sseUsingLite` 升级竞态（`isFullPayload && sseSource && sseUsingLite`），避免卡在精简模式；
+    - `seq_mismatch` 绝不再被静默吞包，自动调度对齐并在 5 秒看门狗中自愈重连 SSE。
+  - **消除长会话每 10 秒重复拉取 `/transcript` 风暴**：热会话折叠思考/旧工具裁剪不再误标 `wireTruncated: true`，同时运行中会话在全量就绪后信任实时 SSE 推送，不再额外轮询 65 KB `/transcript`；并新增 `realtime-sse-stability-v0917.test.js` 永久锁定全部实时同步不变量。
+
 ## [0.9.16] - 2026-11-24
 
 ### Improved

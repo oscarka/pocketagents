@@ -8016,6 +8016,43 @@ function applyLangToDom(root = typeof document !== "undefined" ? document.body :
 	}
 }
 // hub/web/src/state/delta-merge.js
+function applyMessagePatch(prevMsg, mp) {
+	if (!prevMsg || typeof prevMsg !== "object" || !mp || typeof mp !== "object") return null;
+	const nextMsg = { ...prevMsg };
+	if (mp.set && typeof mp.set === "object") Object.assign(nextMsg, mp.set);
+	if (mp.append && typeof mp.append === "object") for (const [k, suffix] of Object.entries(mp.append)) {
+		if (typeof nextMsg[k] !== "string" || typeof suffix !== "string") return null;
+		nextMsg[k] = nextMsg[k] + suffix;
+	}
+	if (Array.isArray(mp.toolsAppend) && mp.toolsAppend.length > 0) nextMsg.tools = [...Array.isArray(nextMsg.tools) ? nextMsg.tools : [], ...mp.toolsAppend];
+	if (Array.isArray(mp.del)) for (const k of mp.del) delete nextMsg[k];
+	return nextMsg;
+}
+function applyTaskPatch(prevTask, tp) {
+	if (!prevTask || typeof prevTask !== "object" || !tp || typeof tp !== "object") return null;
+	const nextTask = { ...prevTask };
+	if (tp.set && typeof tp.set === "object") Object.assign(nextTask, tp.set);
+	if (Array.isArray(tp.del)) for (const k of tp.del) delete nextTask[k];
+	if (tp.transcriptPatch && typeof tp.transcriptPatch === "object") {
+		if (!Array.isArray(prevTask.transcript)) return null;
+		const shift = Math.max(0, Number(tp.transcriptPatch.shift) || 0);
+		const keep = Math.max(0, Number(tp.transcriptPatch.keep) || 0);
+		if (shift > prevTask.transcript.length) return null;
+		const shifted = shift > 0 ? prevTask.transcript.slice(shift) : prevTask.transcript;
+		if (keep > shifted.length) return null;
+		const nextTr = shifted.slice(0, keep);
+		if (tp.transcriptPatch.patchAtKeep) {
+			const baseMsg = shifted[keep];
+			if (!baseMsg || typeof baseMsg !== "object") return null;
+			const patchedMsg = applyMessagePatch(baseMsg, tp.transcriptPatch.patchAtKeep);
+			if (!patchedMsg) return null;
+			nextTr.push(patchedMsg);
+		}
+		if (Array.isArray(tp.transcriptPatch.tail) && tp.transcriptPatch.tail.length > 0) nextTr.push(...tp.transcriptPatch.tail);
+		nextTask.transcript = nextTr;
+	}
+	return nextTask;
+}
 function applyStateDelta(prevState, delta) {
 	if (!prevState || typeof prevState !== "object" || !Array.isArray(prevState.hosts)) return {
 		ok: false,
@@ -8037,6 +8074,21 @@ function applyStateDelta(prevState, delta) {
 		state: prevState,
 		noop: true
 	};
+	if (nextSeq < curSeq) {
+		if (curSeq - nextSeq <= 16) return {
+			ok: true,
+			state: prevState,
+			noop: true,
+			stale: true
+		};
+		return {
+			ok: false,
+			reason: "seq_reset",
+			curSeq,
+			prevSeq,
+			nextSeq
+		};
+	}
 	if (curSeq !== prevSeq) return {
 		ok: false,
 		reason: "seq_mismatch",
@@ -8081,7 +8133,7 @@ function applyStateDelta(prevState, delta) {
 		const nextHost = { ...prevHost };
 		if (patch.hostMeta && typeof patch.hostMeta === "object") Object.assign(nextHost, patch.hostMeta);
 		if (Array.isArray(patch.hostMetaDeleted)) for (const k of patch.hostMetaDeleted) delete nextHost[k];
-		if (patch.bridgeMeta || Array.isArray(patch.bridgeMetaDeleted) && patch.bridgeMetaDeleted.length > 0 || Array.isArray(patch.removedTaskIds) && patch.removedTaskIds.length > 0 || Array.isArray(patch.upsertedTasks) && patch.upsertedTasks.length > 0 || Array.isArray(patch.taskOrder)) {
+		if (patch.bridgeMeta || Array.isArray(patch.bridgeMetaDeleted) && patch.bridgeMetaDeleted.length > 0 || Array.isArray(patch.removedTaskIds) && patch.removedTaskIds.length > 0 || Array.isArray(patch.upsertedTasks) && patch.upsertedTasks.length > 0 || Array.isArray(patch.taskPatches) && patch.taskPatches.length > 0 || Array.isArray(patch.taskOrder)) {
 			const prevBridge = prevHost.bridgeState && typeof prevHost.bridgeState === "object" ? prevHost.bridgeState : {
 				tasks: [],
 				approvals: [],
@@ -8090,7 +8142,7 @@ function applyStateDelta(prevState, delta) {
 			const nextBridge = { ...prevBridge };
 			if (patch.bridgeMeta && typeof patch.bridgeMeta === "object") Object.assign(nextBridge, patch.bridgeMeta);
 			if (Array.isArray(patch.bridgeMetaDeleted)) for (const k of patch.bridgeMetaDeleted) delete nextBridge[k];
-			if (Array.isArray(patch.removedTaskIds) && patch.removedTaskIds.length > 0 || Array.isArray(patch.upsertedTasks) && patch.upsertedTasks.length > 0 || Array.isArray(patch.taskOrder)) {
+			if (Array.isArray(patch.removedTaskIds) && patch.removedTaskIds.length > 0 || Array.isArray(patch.upsertedTasks) && patch.upsertedTasks.length > 0 || Array.isArray(patch.taskPatches) && patch.taskPatches.length > 0 || Array.isArray(patch.taskOrder)) {
 				const removedTaskSet = new Set(Array.isArray(patch.removedTaskIds) ? patch.removedTaskIds : []);
 				const taskMap = /* @__PURE__ */ new Map();
 				const curTaskOrder = [];
@@ -8103,6 +8155,24 @@ function applyStateDelta(prevState, delta) {
 					if (!ut || !ut.id) continue;
 					if (!taskMap.has(ut.id)) curTaskOrder.push(ut.id);
 					taskMap.set(ut.id, ut);
+				}
+				if (Array.isArray(patch.taskPatches)) for (const tp of patch.taskPatches) {
+					if (!tp || !tp.id) continue;
+					const prevTask = taskMap.get(tp.id);
+					if (!prevTask) return {
+						ok: false,
+						reason: "missing_task_for_patch",
+						hostId: patch.hostId,
+						taskId: tp.id
+					};
+					const patchedTask = applyTaskPatch(prevTask, tp);
+					if (!patchedTask) return {
+						ok: false,
+						reason: "invalid_task_patch",
+						hostId: patch.hostId,
+						taskId: tp.id
+					};
+					taskMap.set(tp.id, patchedTask);
 				}
 				const finalTaskOrder = Array.isArray(patch.taskOrder) ? patch.taskOrder : curTaskOrder;
 				const nextTasks = [];
@@ -14109,7 +14179,7 @@ function initHubController() {
 		const found = foundArg && foundArg.session ? foundArg : findSessionGlobal(activeSessionId);
 		if (!found) return;
 		const { session: s } = found;
-		if (s._wireTruncated && !expandedTranscriptBySession.has(s.id)) hydrateColdSessionTranscript(s.hostId, s.id, s.sessionRev || "");
+		if (s._wireTruncated && !expandedTranscriptBySession.has(s.id) && !(hasLoadedFullState && (s.status === "running" || s.status === "approval"))) hydrateColdSessionTranscript(s.hostId, s.id, s.sessionRev || "");
 		const chatHeaderTitle = stripRedundantProjectPrefix(s.title, s.project);
 		const chatTitleEl = document.getElementById("chatTitle");
 		if (chatTitleEl && chatTitleEl.dataset.titleKey !== `${langPref}:${chatHeaderTitle}`) {
@@ -14671,7 +14741,7 @@ function initHubController() {
 	async function hydrateColdSessionTranscript(hostId, sessionId, sessionRev = "") {
 		if (!hostId || !sessionId || hydratingWireSessionIds.has(sessionId)) return;
 		const existing = hydratedWireTranscriptBySession.get(sessionId);
-		if (existing && (!sessionRev || existing.sessionRev === sessionRev || Date.now() - (existing.fetchedAt || 0) < 8e3)) return;
+		if (existing && (!sessionRev || existing.sessionRev === sessionRev || Date.now() - (existing.fetchedAt || 0) < 2e4)) return;
 		hydratingWireSessionIds.add(sessionId);
 		try {
 			const data = await (await apiFetch(`/api/hosts/${encodeURIComponent(hostId)}/sessions/${encodeURIComponent(sessionId)}/transcript`)).json();
@@ -20681,18 +20751,29 @@ function initHubController() {
 					pendingDeepLinkHostId = String(hostId || "").trim();
 					pendingDeepLinkTaskId = String(agentId || "").trim();
 				}
-				if (!sseConnected || Date.now() - lastSseEventAt > 4e3) connectSSE();
+				const needSse = !sseConnected || Date.now() - lastSseEventAt > 4e3;
+				if (needSse) closeSSE();
 				fetchState({
 					silent: true,
 					forceFresh: true
+				}).finally(() => {
+					if (needSse || !sseConnected) connectSSE();
 				});
 			} else if (msg && msg.type === "PUSH_RECEIVED") {
-				if (!sseConnected || Date.now() - lastSseEventAt > 4e3) connectSSE();
+				const needSse = !sseConnected || Date.now() - lastSseEventAt > 4e3;
+				if (needSse) closeSSE();
 				if (!stateFetchInFlight) fetchState({
 					silent: true,
 					forceFresh: true
+				}).finally(() => {
+					if (needSse || !sseConnected) connectSSE();
 				});
-				else inFlightNeedsFollowup = true;
+				else {
+					inFlightNeedsFollowup = true;
+					if (needSse) inFlightStatePromise?.finally(() => {
+						if (!sseConnected) connectSSE();
+					});
+				}
 			} else if (msg && msg.type === "DSH_SW_UPDATED") {
 				const nextBuild = String(msg.uiBuild || "").trim();
 				if (nextBuild && nextBuild !== "dev" && initialUiBuild && nextBuild !== initialUiBuild) triggerAppShellUpgradeReload(nextBuild);
@@ -20962,6 +21043,10 @@ function initHubController() {
 	let sseSource = null;
 	let sseConnected = false;
 	let sseUsingLite = false;
+	let sseReconnectTimer = null;
+	let sseErrorCount = 0;
+	let lastSeqMismatchResyncAt = 0;
+	let seqMismatchResyncTimer = null;
 	let lastSseEventAt = 0;
 	let lastSseStateAt = 0;
 	let sseRotatingUntil = 0;
@@ -21039,7 +21124,7 @@ function initHubController() {
 				renderAll();
 				flushPendingDeepLink();
 				ensureLocalPushSubscriptionSynced();
-				if (isFullPayload && sseConnected && sseUsingLite) connectSSE();
+				if (isFullPayload && sseSource && sseUsingLite) connectSSE();
 				else if (!hasLoadedFullState && !fullStateUpgradeQueued) {
 					fullStateUpgradeQueued = true;
 					setTimeout(() => {
@@ -21140,6 +21225,14 @@ function initHubController() {
 		}, 900);
 	}
 	function closeSSE() {
+		if (sseReconnectTimer) {
+			clearTimeout(sseReconnectTimer);
+			sseReconnectTimer = null;
+		}
+		if (seqMismatchResyncTimer) {
+			clearTimeout(seqMismatchResyncTimer);
+			seqMismatchResyncTimer = null;
+		}
 		if (sseSource) {
 			try {
 				sseSource.close();
@@ -21147,6 +21240,34 @@ function initHubController() {
 			sseSource = null;
 		}
 		sseConnected = false;
+	}
+	function scheduleSeqMismatchResync() {
+		const nowMs = Date.now();
+		if (stateFetchInFlight) {
+			inFlightNeedsFollowup = true;
+			return;
+		}
+		if (nowMs - lastSeqMismatchResyncAt >= 1200) {
+			lastSeqMismatchResyncAt = nowMs;
+			fetchState({
+				silent: true,
+				forceFresh: true
+			});
+			return;
+		}
+		if (!seqMismatchResyncTimer) {
+			const waitMs = Math.max(200, 1200 - (nowMs - lastSeqMismatchResyncAt));
+			seqMismatchResyncTimer = setTimeout(() => {
+				seqMismatchResyncTimer = null;
+				if (!stateFetchInFlight) {
+					lastSeqMismatchResyncAt = Date.now();
+					fetchState({
+						silent: true,
+						forceFresh: true
+					});
+				} else inFlightNeedsFollowup = true;
+			}, waitMs);
+		}
 	}
 	function connectSSE() {
 		if (isDemoMode) return;
@@ -21157,28 +21278,43 @@ function initHubController() {
 		const tk = getToken();
 		const knownSeq = hasLoadedInitialState ? Number(hubState?.stateSeq || 0) : 0;
 		sseUsingLite = !hasLoadedFullState;
-		const url = "/api/events?initial=0&delta=1" + (sseUsingLite ? "&lite=1" : "") + (knownSeq > 0 ? "&seq=" + encodeURIComponent(String(knownSeq)) : "") + (tk ? "&token=" + encodeURIComponent(tk) : "");
+		const url = "/api/events?initial=0&delta=1&tp=1&resync=1" + (sseUsingLite ? "&lite=1" : "") + (knownSeq > 0 ? "&seq=" + encodeURIComponent(String(knownSeq)) : "") + (tk ? "&token=" + encodeURIComponent(tk) : "");
 		try {
-			sseSource = new EventSource(url);
-			sseSource.onopen = () => {
+			const thisSource = new EventSource(url);
+			sseSource = thisSource;
+			thisSource.onopen = () => {
+				if (sseSource !== thisSource) return;
 				sseConnected = true;
 				sseRotatingUntil = 0;
+				sseErrorCount = 0;
 				lastSseEventAt = Date.now();
 				consecutiveStateFetchFailures = 0;
 				setConnectionBanner(false);
-				if (!stateFetchInFlight && (!hasLoadedInitialState || prevSseEventAt > 0 && Date.now() - prevSseEventAt > 15e3)) fetchState({ silent: hasLoadedInitialState });
+				if (!stateFetchInFlight && (!hasLoadedInitialState || prevSseEventAt > 0 && Date.now() - prevSseEventAt > 15e3 && Date.now() - lastStateFetchAt > 4e3)) fetchState({ silent: hasLoadedInitialState });
 			};
-			sseSource.onerror = () => {
+			thisSource.onerror = () => {
+				if (sseSource !== thisSource) return;
 				sseConnected = false;
+				closeSSE();
+				if (isDemoMode || !getToken() && authLockConfirmed) return;
+				if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+				sseErrorCount = Math.min(sseErrorCount + 1, 6);
+				const backoffMs = Math.min(12e3, Math.round(1e3 * Math.pow(1.6, sseErrorCount - 1)));
+				sseReconnectTimer = setTimeout(() => {
+					sseReconnectTimer = null;
+					if (!sseConnected && (typeof document === "undefined" || document.visibilityState !== "hidden")) connectSSE();
+				}, backoffMs);
 			};
-			sseSource.addEventListener("ping", (evt) => {
+			thisSource.addEventListener("ping", (evt) => {
+				if (sseSource !== thisSource) return;
 				sseConnected = true;
 				sseRotatingUntil = 0;
+				sseErrorCount = 0;
 				lastSseEventAt = Date.now();
 				consecutiveStateFetchFailures = 0;
 				setConnectionBanner(false);
 				try {
-					if (evt?.data && hasLoadedInitialState && !stateFetchInFlight && Date.now() - lastStateFetchAt > 1e4) {
+					if (evt?.data && hasLoadedInitialState && !stateFetchInFlight && Date.now() - lastStateFetchAt > 4e3) {
 						const pingData = JSON.parse(evt.data);
 						const serverSeq = Number(pingData?.stateSeq || 0);
 						const localSeq = Number(hubState?.stateSeq || 0);
@@ -21189,17 +21325,32 @@ function initHubController() {
 					}
 				} catch {}
 			});
-			sseSource.addEventListener("rotate", () => {
+			thisSource.addEventListener("resync", () => {
+				if (sseSource !== thisSource) return;
+				sseConnected = true;
+				sseRotatingUntil = 0;
+				sseErrorCount = 0;
+				lastSseEventAt = Date.now();
+				consecutiveStateFetchFailures = 0;
+				setConnectionBanner(false);
+				fetchState({
+					silent: true,
+					forceFresh: true
+				});
+			});
+			thisSource.addEventListener("rotate", () => {
+				if (sseSource !== thisSource) return;
 				sseRotatingUntil = Date.now() + 5e3;
 				connectSSE();
 			});
-			sseSource.addEventListener("state_delta", (evt) => {
+			thisSource.addEventListener("state_delta", (evt) => {
+				if (sseSource !== thisSource) return;
 				try {
 					sseConnected = true;
 					sseRotatingUntil = 0;
+					sseErrorCount = 0;
 					const nowEvt = Date.now();
 					lastSseEventAt = nowEvt;
-					lastSseStateAt = nowEvt;
 					consecutiveStateFetchFailures = 0;
 					setConnectionBanner(false);
 					if (!hasLoadedInitialState) {
@@ -21213,12 +21364,10 @@ function initHubController() {
 					const delta = JSON.parse(evt.data);
 					const merged = applyStateDelta(hubState, delta);
 					if (!merged.ok) {
-						if (!stateFetchInFlight && nowEvt - lastStateFetchAt > 4e3) fetchState({
-							silent: true,
-							forceFresh: true
-						});
+						scheduleSeqMismatchResync();
 						return;
 					}
+					lastSseStateAt = nowEvt;
 					if (!merged.noop) {
 						lastStateFetchAt = nowEvt;
 						applyHubState(merged.state, { skipCache: Boolean(merged.metaOnly) });
@@ -21229,10 +21378,12 @@ function initHubController() {
 					}
 				} catch {}
 			});
-			sseSource.addEventListener("state", (evt) => {
+			thisSource.addEventListener("state", (evt) => {
+				if (sseSource !== thisSource) return;
 				try {
 					sseConnected = true;
 					sseRotatingUntil = 0;
+					sseErrorCount = 0;
 					const nowEvt = Date.now();
 					lastSseEventAt = nowEvt;
 					lastSseStateAt = nowEvt;
@@ -21252,17 +21403,24 @@ function initHubController() {
 	}
 	function manualReconnectNow() {
 		setConnectionBanner(true, "🔄 正在重新连接总控台…");
-		connectSSE();
-		fetchState();
+		closeSSE();
+		fetchState({ forceFresh: true }).finally(() => {
+			connectSSE();
+		});
 	}
 	if (typeof window !== "undefined") {
 		window.addEventListener("online", () => {
 			setConnectionBanner(false);
-			connectSSE();
-			fetchState();
+			closeSSE();
+			fetchState({
+				silent: true,
+				forceFresh: true
+			}).finally(() => {
+				if (typeof document === "undefined" || document.visibilityState !== "hidden") connectSSE();
+			});
 		});
 		window.addEventListener("offline", () => {
-			sseConnected = false;
+			closeSSE();
 			setConnectionBanner(true, "⚠️ 当前手机网络已断开，恢复网络后将自动重连");
 		});
 	}
@@ -21984,11 +22142,17 @@ function initHubController() {
 		}
 		if (!getToken() || authLockConfirmed) return;
 		const idleMs = Date.now() - lastSseEventAt;
-		if (!stateFetchInFlight && (!sseConnected || idleMs > 1200)) fetchState({
+		const needReconnect = !sseConnected || idleMs > 15e3;
+		const needFetch = needReconnect || idleMs > 1500;
+		if (needReconnect) closeSSE();
+		if (needFetch) fetchState({
 			silent: true,
 			forceFresh: true
+		}).finally(() => {
+			if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+			if (needReconnect || !sseConnected) connectSSE();
 		});
-		if (!sseConnected || idleMs > 6e3) connectSSE();
+		else if (needReconnect) connectSSE();
 	}
 	if (typeof document !== "undefined") document.addEventListener("visibilitychange", () => {
 		if (document.visibilityState === "visible") resumeForegroundSync();
@@ -22085,7 +22249,12 @@ function initHubController() {
 	setInterval(() => {
 		if (Date.now() < sseRotatingUntil) return;
 		if (!getToken() && authLockConfirmed) return;
-		if (!stateFetchInFlight && (!sseConnected || Date.now() - lastSseEventAt > 35e3)) fetchState({ silent: true });
+		if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+		const staleSse = !sseConnected || Date.now() - lastSseEventAt > 35e3;
+		if (!stateFetchInFlight && staleSse) fetchState({ silent: true }).finally(() => {
+			if ((!sseConnected || Date.now() - lastSseEventAt > 35e3) && !sseReconnectTimer) connectSSE();
+		});
+		else if (!sseConnected && !sseReconnectTimer) connectSSE();
 	}, 5e3);
 }
 // hub/web/src/main.tsx

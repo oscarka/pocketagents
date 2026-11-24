@@ -1371,21 +1371,25 @@ export class HubCore {
             return mRest
           }
           const isHotRecent = isHotSession && (mIdx >= recentCutoff || mIdx === lastAssistantIdx)
+          const isLatestAsst = mIdx === lastAssistantIdx
           const maxText = lite
-            ? (isRunningOrApproval ? (mIdx === lastAssistantIdx ? 12000 : 2400) : 280)
+            ? (isRunningOrApproval ? (isLatestAsst ? 12000 : 2400) : 280)
             : isHotRecent ? 48000 : isHotSession ? 16000 : 2400
           const maxThink = lite
             ? (isRunningOrApproval ? 600 : 0)
-            : isHotRecent ? 6000 : isHotSession ? 600 : 240
+            : isLatestAsst && isHotSession ? 6000 : isHotRecent ? 1200 : isHotSession ? 400 : 240
           const maxTools = lite
             ? (isRunningOrApproval ? 6 : 0)
-            : isHotRecent ? 20 : isHotSession ? 6 : 4
-          const maxCmd = lite ? 140 : isHotRecent ? 800 : isHotSession ? 200 : 140
+            : isLatestAsst && isHotSession ? 20 : isHotRecent ? 10 : isHotSession ? 5 : 4
+          const maxCmd = lite ? 140 : isLatestAsst && isHotSession ? 800 : isHotSession ? 180 : 140
           const rawTools = Array.isArray(m.tools) ? m.tools : Array.isArray(m.toolCalls) ? m.toolCalls : []
           const textTrunc = typeof m.text === 'string' && m.text.length > maxText
           const thinkTrunc = typeof m.thinking === 'string' && m.thinking.length > maxThink
           const toolsTrunc = rawTools.length > maxTools
-          if (textTrunc || thinkTrunc || toolsTrunc) {
+          // For full hot sessions (`!lite && isHotSession`), trimming collapsed thinking/old tool traces
+          // must NOT mark `wireTruncated: true` — otherwise the mobile client repeatedly polls 65KB `/transcript`
+          // every ~10s while the session is actively streaming over SSE.
+          if (textTrunc || ((!isHotSession || lite) && (thinkTrunc || toolsTrunc))) {
             wireTruncated = true
           }
           if (lite && !isRunningOrApproval && Array.isArray(mRest.artifacts) && mRest.artifacts.length > 0) {

@@ -2190,6 +2190,8 @@ export function createHubServer({
         }
         safeWrite('retry: 1000\n\n')
         const wantDelta = urlObj.searchParams.get('delta') === '1'
+        const wantGranularTasks = wantDelta && urlObj.searchParams.get('tp') === '1'
+        const wantResyncSignal = wantDelta && urlObj.searchParams.get('resync') === '1'
         const useLite = urlObj.searchParams.get('lite') === '1'
         const clientSeq = Number(urlObj.searchParams.get('seq') || 0)
         const getEventState = () => hub.getFullState({ lite: useLite })
@@ -2206,7 +2208,9 @@ export function createHubServer({
             sendEvent(stateData)
             return
           }
-          const { hasChanges, delta, nextDigest } = buildStateDelta(prevDigest, stateData)
+          const { hasChanges, delta, nextDigest } = buildStateDelta(prevDigest, stateData, {
+            granularTasks: wantGranularTasks,
+          })
           prevDigest = nextDigest
           if (!hasChanges || !delta) return
           lastSsePushAt = Date.now()
@@ -2216,7 +2220,16 @@ export function createHubServer({
           if (wantDelta) {
             const curState = getEventState()
             if (clientSeq > 0 && clientSeq !== curState.stateSeq) {
-              sendEvent(curState)
+              if (wantResyncSignal) {
+                // Re-anchor server digest at current stateSeq and send a ~90B resync signal so the
+                // mobile client fetches gzipped `/api/state` instead of choking on a 1.6MB raw SSE frame.
+                prevDigest = captureStateDigest(curState)
+                safeWrite(
+                  `event: resync\ndata: {"reason":"seq_gap","clientSeq":${clientSeq},"stateSeq":${Number(curState.stateSeq) || 0},"ts":${Date.now()}}\n\n`,
+                )
+              } else {
+                sendEvent(curState)
+              }
             } else {
               prevDigest = captureStateDigest(curState)
               safeWrite(
