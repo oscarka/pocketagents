@@ -1374,30 +1374,49 @@ export class HubCore {
           const isLatestAsst = mIdx === lastAssistantIdx
           const maxText = lite
             ? (isRunningOrApproval ? (isLatestAsst ? 12000 : 2400) : 280)
-            : isHotRecent ? 48000 : isHotSession ? 16000 : 2400
+            : isLatestAsst && isHotSession
+              ? 48000
+              : isHotRecent
+                ? 8000
+                : isHotSession
+                  ? 2000
+                  : isLatestAsst
+                    ? 2400
+                    : 400
           const maxThink = lite
             ? (isRunningOrApproval ? 600 : 0)
-            : isLatestAsst && isHotSession ? 6000 : isHotRecent ? 1200 : isHotSession ? 400 : 240
+            : isLatestAsst && isHotSession
+              ? 4000
+              : isHotRecent
+                ? 400
+                : 0
           const maxTools = lite
             ? (isRunningOrApproval ? 6 : 0)
-            : isLatestAsst && isHotSession ? 20 : isHotRecent ? 10 : isHotSession ? 5 : 4
-          const maxCmd = lite ? 140 : isLatestAsst && isHotSession ? 800 : isHotSession ? 180 : 140
+            : isLatestAsst && isHotSession
+              ? 16
+              : isHotRecent
+                ? 6
+                : isHotSession
+                  ? 3
+                  : 0
+          const maxCmd = lite ? 140 : isLatestAsst && isHotSession ? 500 : isHotRecent ? 120 : 80
           const rawTools = Array.isArray(m.tools) ? m.tools : Array.isArray(m.toolCalls) ? m.toolCalls : []
           const textTrunc = typeof m.text === 'string' && m.text.length > maxText
           const thinkTrunc = typeof m.thinking === 'string' && m.thinking.length > maxThink
           const toolsTrunc = rawTools.length > maxTools
-          // For full hot sessions (`!lite && isHotSession`), trimming collapsed thinking/old tool traces
-          // must NOT mark `wireTruncated: true` — otherwise the mobile client repeatedly polls 65KB `/transcript`
-          // every ~10s while the session is actively streaming over SSE.
-          if (textTrunc || ((!isHotSession || lite) && (thinkTrunc || toolsTrunc))) {
+          // For full hot sessions (`!lite && isHotSession`), only mark `wireTruncated` when the latest reply
+          // itself exceeded the 48k budget — never for collapsed older thinking/tool traces, so hot chats
+          // open immediately without flashing "全文同步中…" or polling `/transcript` repeatedly.
+          if ((isLatestAsst && textTrunc) || ((!isHotSession || lite) && (textTrunc || thinkTrunc || toolsTrunc))) {
             wireTruncated = true
           }
-          if (lite && !isRunningOrApproval && Array.isArray(mRest.artifacts) && mRest.artifacts.length > 0) {
+          const compactMetaForColdOrLite = (lite || !isHotSession) && !isRunningOrApproval
+          if (compactMetaForColdOrLite && Array.isArray(mRest.artifacts) && mRest.artifacts.length > 0) {
             wireTruncated = true
           }
           return {
             ...mRest,
-            ...(lite && !isRunningOrApproval && Array.isArray(mRest.artifacts)
+            ...(compactMetaForColdOrLite && Array.isArray(mRest.artifacts)
               ? {
                 artifacts: mRest.artifacts.slice(0, 3).map(a => ({
                   name: a?.name,
@@ -1419,7 +1438,7 @@ export class HubCore {
                 : {
                   name: tl?.name || 'tool',
                   id: tl?.id || '',
-                  summary: tl?.summary ? String(tl.summary).slice(0, 160) : '',
+                  summary: tl?.summary ? String(tl.summary).slice(0, 140) : '',
                   commandLine: tl?.commandLine ? String(tl.commandLine).slice(0, maxCmd) : '执行完毕',
                 },
             ),
@@ -1444,18 +1463,19 @@ export class HubCore {
             }
           }
         }
-        const maxLastOutput = lite && !isRunningOrApproval ? 220 : 600
+        const compactTaskMeta = (lite || !isHotSession) && !isRunningOrApproval
+        const maxLastOutput = compactTaskMeta ? 220 : 600
         const rawChangedFiles = Array.isArray(nextTask?.changedFiles) ? nextTask.changedFiles : undefined
         const rawTaskArtifacts = Array.isArray(nextTask?.artifacts) ? nextTask.artifacts : undefined
-        if (lite && !isRunningOrApproval) {
+        if (compactTaskMeta) {
           if ((rawChangedFiles && rawChangedFiles.length > 5) || (rawTaskArtifacts && rawTaskArtifacts.length > 4)) {
             wireTruncated = true
           }
         }
         return {
           ...nextTask,
-          ...(lite && !isRunningOrApproval ? { recentActivity: undefined } : {}),
-          ...(lite && !isRunningOrApproval && rawChangedFiles
+          ...(compactTaskMeta ? { recentActivity: undefined } : {}),
+          ...(compactTaskMeta && rawChangedFiles
             ? {
               changedFiles: rawChangedFiles.slice(-8).map(cf =>
                 typeof cf === 'string'
@@ -1473,7 +1493,7 @@ export class HubCore {
               ),
             }
             : {}),
-          ...(lite && !isRunningOrApproval && rawTaskArtifacts
+          ...(compactTaskMeta && rawTaskArtifacts
             ? {
               artifacts: rawTaskArtifacts.slice(0, 4).map(a => ({
                 name: a?.name,
@@ -1503,7 +1523,7 @@ export class HubCore {
     }
   }
 
-  getSessionFullTranscript(hostId, agentId) {
+  getSessionFullTranscript(hostId, agentId, { compact = false } = {}) {
     const cleanHostId = String(hostId ?? '').trim()
     const cleanAgentId = String(agentId ?? '').trim()
     if (!cleanHostId || !cleanAgentId) return null
@@ -1560,7 +1580,36 @@ export class HubCore {
       Number(cached?.totalCount) || 0,
       bestTr.length,
     )
-    const hasMore = bestTr.length < totalCount || staleCache
+    const outTranscript = compact
+      ? bestTr.slice(-14).map((m, idx, arr) => {
+        if (!m || typeof m !== 'object') return m
+        const { toolCalls: _omitTc, ...mRest } = m
+        if (m.role !== 'assistant') return mRest
+        const isLatest = idx === arr.length - 1
+        const maxThink = isLatest ? 4000 : 300
+        const maxTools = isLatest ? 16 : 4
+        const maxCmd = isLatest ? 400 : 120
+        const rawTools = Array.isArray(m.tools) ? m.tools : Array.isArray(m.toolCalls) ? m.toolCalls : []
+        return {
+          ...mRest,
+          thinking:
+            typeof m.thinking === 'string' && m.thinking.length > maxThink
+              ? `${m.thinking.slice(0, maxThink)}\n...(历史思考已折叠)...`
+              : m.thinking,
+          tools: rawTools.slice(0, maxTools).map(tl =>
+            typeof tl === 'string'
+              ? { name: tl, id: '', summary: '', commandLine: '执行完毕' }
+              : {
+                name: tl?.name || 'tool',
+                id: tl?.id || '',
+                summary: tl?.summary ? String(tl.summary).slice(0, 140) : '',
+                commandLine: tl?.commandLine ? String(tl.commandLine).slice(0, maxCmd) : '执行完毕',
+              },
+          ),
+        }
+      })
+      : bestTr
+    const hasMore = outTranscript.length < totalCount || staleCache
     return {
       ok: true,
       hostId: cleanHostId,
@@ -1569,7 +1618,7 @@ export class HubCore {
       hasMore,
       fromCache,
       sessionRev: liveTask?.sessionRev || cached?.sessionRev || '',
-      transcript: bestTr,
+      transcript: outTranscript,
     }
   }
 

@@ -12960,7 +12960,7 @@ function initHubController() {
 				const rawWireTranscript = Array.isArray(t.transcript) ? [...t.transcript] : [];
 				const hydratedWire = hydratedWireTranscriptBySession.get(t.id);
 				let wireTranscript = rawWireTranscript;
-				if (hydratedWire && Array.isArray(hydratedWire.transcript) && hydratedWire.transcript.length >= rawWireTranscript.length && (!t.sessionRev || !hydratedWire.sessionRev || hydratedWire.sessionRev === t.sessionRev)) {
+				if (Boolean(hydratedWire && Array.isArray(hydratedWire.transcript) && hydratedWire.transcript.length >= rawWireTranscript.length && (!t.sessionRev || !hydratedWire.sessionRev || hydratedWire.sessionRev === t.sessionRev || Boolean(t.wireTruncated) && t.status !== "running" && t.status !== "approval"))) {
 					if (t.status !== "running" && t.status !== "approval") wireTranscript = [...hydratedWire.transcript];
 					else if (hydratedWire.transcript.length > rawWireTranscript.length) {
 						if (rawWireTranscript.length === 0) wireTranscript = [...hydratedWire.transcript];
@@ -14744,7 +14744,24 @@ function initHubController() {
 		if (existing && (!sessionRev || existing.sessionRev === sessionRev || Date.now() - (existing.fetchedAt || 0) < 2e4)) return;
 		hydratingWireSessionIds.add(sessionId);
 		try {
-			const data = await (await apiFetch(`/api/hosts/${encodeURIComponent(hostId)}/sessions/${encodeURIComponent(sessionId)}/transcript`)).json();
+			const url = `/api/hosts/${encodeURIComponent(hostId)}/sessions/${encodeURIComponent(sessionId)}/transcript?compact=1`;
+			let data = null;
+			for (let attempt = 0; attempt < 2; attempt += 1) {
+				const ctrl = typeof AbortController === "function" ? new AbortController() : null;
+				const timer = ctrl ? setTimeout(() => {
+					try {
+						ctrl.abort();
+					} catch {}
+				}, 12e3) : null;
+				try {
+					data = await (await apiFetch(url, ctrl ? { signal: ctrl.signal } : {})).json();
+					if (data?.ok) break;
+				} catch {
+					if (attempt === 0) await new Promise((r) => setTimeout(r, 350));
+				} finally {
+					if (timer) clearTimeout(timer);
+				}
+			}
 			if (data?.ok && Array.isArray(data.transcript) && data.transcript.length > 0) hydratedWireTranscriptBySession.set(sessionId, {
 				transcript: data.transcript,
 				sessionRev: data.sessionRev || sessionRev || "",
@@ -21045,6 +21062,7 @@ function initHubController() {
 	let sseUsingLite = false;
 	let sseReconnectTimer = null;
 	let sseErrorCount = 0;
+	let lastSseConnectAttemptAt = 0;
 	let lastSeqMismatchResyncAt = 0;
 	let seqMismatchResyncTimer = null;
 	let lastSseEventAt = 0;
@@ -21280,6 +21298,7 @@ function initHubController() {
 		sseUsingLite = !hasLoadedFullState;
 		const url = "/api/events?initial=0&delta=1&tp=1&resync=1" + (sseUsingLite ? "&lite=1" : "") + (knownSeq > 0 ? "&seq=" + encodeURIComponent(String(knownSeq)) : "") + (tk ? "&token=" + encodeURIComponent(tk) : "");
 		try {
+			lastSseConnectAttemptAt = Date.now();
 			const thisSource = new EventSource(url);
 			sseSource = thisSource;
 			thisSource.onopen = () => {
@@ -22248,13 +22267,15 @@ function initHubController() {
 	}
 	setInterval(() => {
 		if (Date.now() < sseRotatingUntil) return;
+		if (!hasLoadedInitialState) return;
 		if (!getToken() && authLockConfirmed) return;
 		if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
-		const staleSse = !sseConnected || Date.now() - lastSseEventAt > 35e3;
+		if (Boolean(sseSource && sseSource.readyState === 0 && Date.now() - lastSseConnectAttemptAt < 15e3)) return;
+		const staleSse = !sseConnected || lastSseEventAt > 0 && Date.now() - lastSseEventAt > 35e3;
 		if (!stateFetchInFlight && staleSse) fetchState({ silent: true }).finally(() => {
-			if ((!sseConnected || Date.now() - lastSseEventAt > 35e3) && !sseReconnectTimer) connectSSE();
+			if (!Boolean(sseSource && sseSource.readyState === 0 && Date.now() - lastSseConnectAttemptAt < 15e3) && (!sseConnected || lastSseEventAt > 0 && Date.now() - lastSseEventAt > 35e3) && !sseReconnectTimer) connectSSE();
 		});
-		else if (!sseConnected && !sseReconnectTimer) connectSSE();
+		else if (!stateFetchInFlight && !sseSource && !sseConnected && !sseReconnectTimer) connectSSE();
 	}, 5e3);
 }
 // hub/web/src/main.tsx

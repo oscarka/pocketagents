@@ -272,8 +272,11 @@ test('v0.9.17 Frontend controller & bundle enforce SSE stability invariants', as
   assert.match(ctrlSrc, /function scheduleSeqMismatchResync\(/)
   assert.match(ctrlSrc, /if \(isFullPayload && sseSource && sseUsingLite\)/)
   assert.match(ctrlSrc, /!\(hasLoadedFullState && \(s\.status === 'running' \|\| s\.status === 'approval'\)\)/)
+  assert.match(ctrlSrc, /\/transcript\?compact=1/)
+  assert.match(ctrlSrc, /if \(!hasLoadedInitialState\) return;/)
+  assert.match(ctrlSrc, /sseSource\.readyState === 0 && Date\.now\(\) - lastSseConnectAttemptAt < 15000/)
 
-  // Verify built production bundle carries the v0.9.17 SSE stability protocol
+  // Verify built production bundle carries the v0.9.17+ SSE stability & compact hydration protocol
   const assetFiles = await readdir(join(process.cwd(), 'hub/public/assets'))
   const jsContents = await Promise.all(
     assetFiles.filter(f => f.endsWith('.js')).map(f => readFile(join(process.cwd(), 'hub/public/assets', f), 'utf8')),
@@ -282,4 +285,43 @@ test('v0.9.17 Frontend controller & bundle enforce SSE stability invariants', as
   assert.match(bundleSrc, /tp=1&resync=1/)
   assert.match(bundleSrc, /taskPatches/)
   assert.match(bundleSrc, /seq_reset/)
+  assert.match(bundleSrc, /transcript\?compact=1/)
+})
+
+test('v0.9.18 Compact transcript hydration shrinks heavy session payload dramatically while keeping full latest reply', () => {
+  const hub = new HubCore()
+  const longReply = '最终完整结论：' + '详细说明段落内容。'.repeat(180)
+  hub.handleHeartbeat({
+    hostId: 'mac-air',
+    hostName: 'cc的MacBook Air',
+    bridgeState: {
+      tasks: [
+        {
+          id: 'agy-ide:compact-tr',
+          title: '长对话极速回填测试',
+          harness: 'antigravity-ide',
+          status: 'idle',
+          turnState: 'conclusion',
+          updatedAt: Date.now(),
+          messageCount: 24,
+          transcript: buildHeavyTranscript(24, longReply, 18),
+        },
+      ],
+      approvals: [],
+      workspaces: [],
+    },
+  })
+  const full = hub.getSessionFullTranscript('mac-air', 'agy-ide:compact-tr', { compact: false })
+  const compact = hub.getSessionFullTranscript('mac-air', 'agy-ide:compact-tr', { compact: true })
+  assert.equal(full.ok, true)
+  assert.equal(compact.ok, true)
+  assert.equal(full.transcript.length, 24)
+  assert.equal(compact.transcript.length, 14)
+  assert.equal(compact.transcript.at(-1).text, longReply)
+  const fullBytes = Buffer.byteLength(JSON.stringify(full), 'utf8')
+  const compactBytes = Buffer.byteLength(JSON.stringify(compact), 'utf8')
+  assert.ok(
+    compactBytes < fullBytes * 0.45,
+    `Expected compact transcript (${compactBytes}B) < 45% of full (${fullBytes}B)`,
+  )
 })

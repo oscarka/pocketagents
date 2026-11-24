@@ -2,6 +2,15 @@
 
 本项目的重要变更都记录在这里。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [0.9.18] - 2026-11-24
+
+### Fixed & Improved
+
+- **根治手机点开会话频繁卡在「全文同步中…」与 `/api/state` 体积过大问题（`hub/hub-core.js` / `hub/server.js` / `hub/web/src/controller.js`）**：
+  - **全量 `/api/state` 再瘦身约 60%**：保持每个近期会话最新回复 48,000 字 100% 完整无截断的同时，大幅压缩更早轮次的折叠思考/旧工具命令行与冷门历史会话冗余元信息，解决手机跨国 IPv6 下 515 KB `/api/state` 下载长达十余秒到数十秒并挤占页面请求的问题；
+  - **点开会话按需回填新增极速通道 `/transcript?compact=1`**：仅传输最近 14 轮完整正文与精简折叠思考/工具，体积缩小约 70%，并加入 12 秒超时 + 自动重试，且绝不被 `lite=1` 增量心跳回退覆盖回 280 字截断态；
+  - **修复 5 秒看门狗误杀正在握手的 SSE 连接**：未完成首屏初始化或 `EventSource` 仍在 `CONNECTING`（15 秒内）时不再中断重连，避免首屏期间产生无效 `lite=1` 断流重试。
+
 ## [0.9.17] - 2026-11-24
 
 ### Fixed & Improved

@@ -1697,7 +1697,8 @@ export function createHubServer({
       if (method === 'GET' && sessTranscriptMatch) {
         const hostId = decodeURIComponent(sessTranscriptMatch[1])
         const agentId = decodeURIComponent(sessTranscriptMatch[2])
-        const full = hub.getSessionFullTranscript(hostId, agentId)
+        const compact = urlObj.searchParams.get('compact') === '1'
+        const full = hub.getSessionFullTranscript(hostId, agentId, { compact })
         if (!full) {
           return { status: 404, json: { ok: false, error: 'Session transcript not found' } }
         }

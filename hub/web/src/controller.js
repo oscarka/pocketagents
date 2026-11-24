@@ -996,12 +996,18 @@ export function initHubController() {
         const rawWireTranscript = Array.isArray(t.transcript) ? [...t.transcript] : [];
         const hydratedWire = hydratedWireTranscriptBySession.get(t.id);
         let wireTranscript = rawWireTranscript;
-        if (
+        const canKeepHydrated = Boolean(
           hydratedWire &&
           Array.isArray(hydratedWire.transcript) &&
           hydratedWire.transcript.length >= rawWireTranscript.length &&
-          (!t.sessionRev || !hydratedWire.sessionRev || hydratedWire.sessionRev === t.sessionRev)
-        ) {
+          (
+            !t.sessionRev ||
+            !hydratedWire.sessionRev ||
+            hydratedWire.sessionRev === t.sessionRev ||
+            (Boolean(t.wireTruncated) && t.status !== 'running' && t.status !== 'approval')
+          )
+        );
+        if (canKeepHydrated) {
           if (t.status !== 'running' && t.status !== 'approval') {
             wireTranscript = [...hydratedWire.transcript];
           } else if (hydratedWire.transcript.length > rawWireTranscript.length) {
@@ -3320,10 +3326,23 @@ export function initHubController() {
     if (existing && (!sessionRev || existing.sessionRev === sessionRev || (Date.now() - (existing.fetchedAt || 0) < 20000))) return;
     hydratingWireSessionIds.add(sessionId);
     try {
-      const res = await apiFetch(
-        `/api/hosts/${encodeURIComponent(hostId)}/sessions/${encodeURIComponent(sessionId)}/transcript`
-      );
-      const data = await res.json();
+      const url = `/api/hosts/${encodeURIComponent(hostId)}/sessions/${encodeURIComponent(sessionId)}/transcript?compact=1`;
+      let data = null;
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const ctrl = typeof AbortController === 'function' ? new AbortController() : null;
+        const timer = ctrl ? setTimeout(() => { try { ctrl.abort(); } catch { } }, 12000) : null;
+        try {
+          const res = await apiFetch(url, ctrl ? { signal: ctrl.signal } : {});
+          data = await res.json();
+          if (data?.ok) break;
+        } catch {
+          if (attempt === 0) {
+            await new Promise(r => setTimeout(r, 350));
+          }
+        } finally {
+          if (timer) clearTimeout(timer);
+        }
+      }
       if (data?.ok && Array.isArray(data.transcript) && data.transcript.length > 0) {
         hydratedWireTranscriptBySession.set(sessionId, {
           transcript: data.transcript,
@@ -10873,6 +10892,7 @@ export function initHubController() {
   let sseUsingLite = false;
   let sseReconnectTimer = null;
   let sseErrorCount = 0;
+  let lastSseConnectAttemptAt = 0;
   let lastSeqMismatchResyncAt = 0;
   let seqMismatchResyncTimer = null;
   let lastSseEventAt = 0;
@@ -11116,6 +11136,7 @@ export function initHubController() {
       (knownSeq > 0 ? '&seq=' + encodeURIComponent(String(knownSeq)) : '') +
       (tk ? '&token=' + encodeURIComponent(tk) : '');
     try {
+      lastSseConnectAttemptAt = Date.now();
       const thisSource = new EventSource(url);
       sseSource = thisSource;
       thisSource.onopen = () => {
@@ -12169,19 +12190,23 @@ export function initHubController() {
       }
     })();
   }
-  // 服务端每 12s 发送 event: ping；跳过 240s 优雅轮转窗口，仅当已鉴权且 SSE 断开或超过 35s 无事件时静默兜底轮询并自愈重连
+  // 服务端每 12s 发送 event: ping；跳过 240s 优雅轮转窗口，仅当已完成首屏同步且 SSE 真正断开或超过 35s 无事件时静默兜底轮询并自愈重连
   setInterval(() => {
     if (Date.now() < sseRotatingUntil) return;
+    if (!hasLoadedInitialState) return;
     if (!getToken() && authLockConfirmed) return;
     if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
-    const staleSse = !sseConnected || (Date.now() - lastSseEventAt > 35000);
+    const sseConnecting = Boolean(sseSource && sseSource.readyState === 0 && Date.now() - lastSseConnectAttemptAt < 15000);
+    if (sseConnecting) return;
+    const staleSse = !sseConnected || (lastSseEventAt > 0 && Date.now() - lastSseEventAt > 35000);
     if (!stateFetchInFlight && staleSse) {
       void fetchState({ silent: true }).finally(() => {
-        if ((!sseConnected || Date.now() - lastSseEventAt > 35000) && !sseReconnectTimer) {
+        const stillConnecting = Boolean(sseSource && sseSource.readyState === 0 && Date.now() - lastSseConnectAttemptAt < 15000);
+        if (!stillConnecting && (!sseConnected || (lastSseEventAt > 0 && Date.now() - lastSseEventAt > 35000)) && !sseReconnectTimer) {
           connectSSE();
         }
       });
-    } else if (!sseConnected && !sseReconnectTimer) {
+    } else if (!stateFetchInFlight && !sseSource && !sseConnected && !sseReconnectTimer) {
       connectSSE();
     }
   }, 5000);
