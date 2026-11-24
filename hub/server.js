@@ -14,6 +14,12 @@ import { HubCore } from './hub-core.js'
 import { captureStateDigest, buildStateDelta } from './delta-state.js'
 import { VoiceVault } from './voice-vault.js'
 import { VoiceCopilotEngine } from './voice-copilot.js'
+import {
+  buildDeviceDigest,
+  executeDeviceAction,
+  handleDeviceTtsPcm,
+  handleDeviceVoiceTurn,
+} from './device-api.js'
 
 const gzipAsync = promisify(gzip)
 const HUB_MEDIA_CACHE_MAX_ITEM_BYTES = 1.5 * 1024 * 1024
@@ -151,6 +157,9 @@ const CONNECT_SCRIPT_PATH = join(__dirname, '..', 'connect-host.sh')
 const MAX_BODY_BYTES = 50 * 1024 * 1024 // 50 MiB for snapshot uploads
 
 function getRouteMaxBodyBytes(pathname = '') {
+  if (pathname === '/api/device/voice-turn') {
+    return 4 * 1024 * 1024 // 4 MiB cap for raw 16kHz PCM / WAV push-to-talk clips
+  }
   const isLargeBodyRoute =
     pathname === '/api/heartbeat'
     || pathname === '/api/snapshots'
@@ -1871,6 +1880,55 @@ export function createHubServer({
         }
       }
 
+      // Generic Edge / Lite Device API (FoloToy AI Passport, ESP32 badges, Watch/Shortcuts, Stream Deck)
+      if (pathname.startsWith('/api/device/')) {
+        const curDevice = getAuthenticatedDevice(headers, urlObj)
+        const deviceSessionId = `device:${String(body?.sessionId || urlObj.searchParams.get('sessionId') || curDevice?.id || 'default').slice(0, 48)}`
+
+        if (method === 'GET' && pathname === '/api/device/digest') {
+          const digest = buildDeviceDigest(hub, {
+            maxApprovals: urlObj.searchParams.get('maxApprovals'),
+            maxTasks: urlObj.searchParams.get('maxTasks'),
+            since: urlObj.searchParams.get('since') || '',
+            activeHostId: urlObj.searchParams.get('hostId') || '',
+            activeSessionId: urlObj.searchParams.get('agentId') || '',
+            nowMs: hub.now ? hub.now() : Date.now(),
+          })
+          return { status: 200, json: digest }
+        }
+
+        if (method === 'POST' && pathname === '/api/device/action') {
+          await voiceVault.init()
+          return executeDeviceAction(hub, voiceCopilot, body || {}, { deviceSessionId })
+        }
+
+        if (method === 'POST' && pathname === '/api/device/voice-turn') {
+          await voiceVault.init()
+          const ct = String(headers?.['content-type'] ?? headers?.['Content-Type'] ?? '')
+          return await handleDeviceVoiceTurn(hub, voiceCopilot, {
+            rawBuffer,
+            contentType: ct,
+            body: body || {},
+            query: urlObj.searchParams,
+            deviceSessionId,
+          })
+        }
+
+        if ((method === 'GET' || method === 'POST') && pathname === '/api/device/tts-pcm') {
+          await voiceVault.init()
+          const text = method === 'POST' ? body?.text : urlObj.searchParams.get('text')
+          const briefingSlot = method === 'POST' ? body?.briefingSlot : urlObj.searchParams.get('slot')
+          const sampleRate = method === 'POST' ? body?.sampleRate : urlObj.searchParams.get('rate')
+          const profileId = method === 'POST' ? body?.profileId : urlObj.searchParams.get('profileId')
+          return await handleDeviceTtsPcm(hub, voiceCopilot, {
+            text: text || '',
+            briefingSlot: Number(briefingSlot) || 0,
+            sampleRate: Number(sampleRate) || 16000,
+            profileId: profileId || '',
+          })
+        }
+      }
+
       // Real-time Security & Intrusion Monitor endpoints (strictly behind admin HUB_TOKEN)
       if (method === 'GET' && pathname === '/api/security/events') {
         return {
@@ -2402,9 +2460,18 @@ export function createHubServer({
       res.once('close', abortOnClientClose)
       const routeMaxBodyBytes = getRouteMaxBodyBytes(urlObj.pathname)
       let body = {}
+      let rawBuffer = null
       if (req.method === 'POST') {
+        const reqContentType = String(req.headers?.['content-type'] ?? req.headers?.['Content-Type'] ?? '').toLowerCase()
+        const isBinaryVoiceTurn =
+          urlObj.pathname === '/api/device/voice-turn' &&
+          (reqContentType.startsWith('audio/') || reqContentType.startsWith('application/octet-stream'))
         try {
-          body = await readJsonBody(req, routeMaxBodyBytes)
+          if (isBinaryVoiceTurn) {
+            rawBuffer = await readRawBodyBuffer(req, routeMaxBodyBytes)
+          } else {
+            body = await readJsonBody(req, routeMaxBodyBytes)
+          }
         } catch (bodyErr) {
           res.removeListener('close', abortOnClientClose)
           const isTooLarge = /exceeds limit|too large/i.test(String(bodyErr?.message || ''))
@@ -2422,7 +2489,7 @@ export function createHubServer({
         url: req.url,
         headers: req.headers,
         body,
-        rawBuffer: null,
+        rawBuffer,
         remoteAddress: req.socket?.remoteAddress || '',
         signal: clientAbortController.signal,
       }).finally(() => {
@@ -2917,11 +2984,24 @@ self.addEventListener('notificationclick', event => {
   event.waitUntil(
     Promise.all([
       ...clearTasks,
-      self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(windowClients => {
+      self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(async windowClients => {
+        const clickId = 'nc_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
+        const msgPayload = { type: 'NOTIFICATION_CLICK', clickId, data };
         for (const client of windowClients) {
           if ('focus' in client) {
-            client.postMessage({ type: 'NOTIFICATION_CLICK', data });
-            return client.focus();
+            try {
+              await client.focus();
+            } catch {}
+            try {
+              client.postMessage(msgPayload);
+            } catch {}
+            // iOS PWA may still be thawing its JS event loop right after focus();
+            // send one deduplicated retry 350ms later so deep-link jumps never drop.
+            await new Promise(resolve => setTimeout(resolve, 350));
+            try {
+              client.postMessage(msgPayload);
+            } catch {}
+            return client;
           }
         }
         if (self.clients.openWindow) {

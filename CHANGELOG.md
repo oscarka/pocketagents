@@ -2,6 +2,14 @@
 
 本项目的重要变更都记录在这里。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [0.9.19] - 2026-11-24
+
+### Fixed
+
+- **修复 iOS 推送通知点击不自动跳转对应电脑/会话与切后台僵尸连接恢复慢问题（`hub/server.js` / `hub/web/src/controller.js`）**：
+  - **Service Worker 通知点击先唤醒再跳转**：改为先 `await client.focus()` 彻底唤醒挂起的 iOS PWA 页面，再派发带 `clickId` 去重的 `NOTIFICATION_CLICK` 消息并于 350ms 后补发一次防丢，并在拉完最新状态后二次确认定位到目标会话；
+  - **缩短切回前台重连阈值（15s → 5s）**：锁屏或切走超过 5 秒回来立即切换新网络重建 SSE，避免 IPv4/IPv6 或 Wi-Fi/5G 切换后被僵尸连接拖住数十秒。
+
 ## [0.9.18] - 2026-11-24
 
 ### Fixed & Improved

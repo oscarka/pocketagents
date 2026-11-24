@@ -20756,10 +20756,14 @@ function initHubController() {
 			pendingDeepLinkTaskId = "";
 		}
 	}
+	let lastHandledNotifClickId = "";
 	if (typeof navigator !== "undefined" && "serviceWorker" in navigator && navigator.serviceWorker) try {
 		navigator.serviceWorker.addEventListener("message", (event) => {
 			const msg = event?.data;
 			if (msg && msg.type === "NOTIFICATION_CLICK" && msg.data) {
+				const clickId = String(msg.clickId || "").trim();
+				if (clickId && clickId === lastHandledNotifClickId) return;
+				if (clickId) lastHandledNotifClickId = clickId;
 				const { hostId, agentId } = msg.data;
 				if (!tryOpenDeepLinkTarget({
 					hostId,
@@ -20774,6 +20778,10 @@ function initHubController() {
 					silent: true,
 					forceFresh: true
 				}).finally(() => {
+					if (agentId && activeSessionId !== agentId) tryOpenDeepLinkTarget({
+						hostId,
+						agentId
+					});
 					if (needSse || !sseConnected) connectSSE();
 				});
 			} else if (msg && msg.type === "PUSH_RECEIVED") {
@@ -22161,7 +22169,7 @@ function initHubController() {
 		}
 		if (!getToken() || authLockConfirmed) return;
 		const idleMs = Date.now() - lastSseEventAt;
-		const needReconnect = !sseConnected || idleMs > 15e3;
+		const needReconnect = !sseConnected || idleMs > 5e3;
 		const needFetch = needReconnect || idleMs > 1500;
 		if (needReconnect) closeSSE();
 		if (needFetch) fetchState({

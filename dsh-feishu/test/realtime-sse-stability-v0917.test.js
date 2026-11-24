@@ -275,6 +275,13 @@ test('v0.9.17 Frontend controller & bundle enforce SSE stability invariants', as
   assert.match(ctrlSrc, /\/transcript\?compact=1/)
   assert.match(ctrlSrc, /if \(!hasLoadedInitialState\) return;/)
   assert.match(ctrlSrc, /sseSource\.readyState === 0 && Date\.now\(\) - lastSseConnectAttemptAt < 15000/)
+  assert.match(ctrlSrc, /lastHandledNotifClickId/)
+  assert.match(ctrlSrc, /const needReconnect = !sseConnected \|\| idleMs > 5000;/)
+
+  const serverSrc = await readFile(join(process.cwd(), 'hub/server.js'), 'utf8')
+  const focusIdx = serverSrc.indexOf('await client.focus()')
+  const postAfterFocusIdx = serverSrc.indexOf('client.postMessage(msgPayload)', focusIdx)
+  assert.ok(focusIdx > 0 && postAfterFocusIdx > focusIdx, 'SW notificationclick must await client.focus() BEFORE client.postMessage() for iOS PWA')
 
   // Verify built production bundle carries the v0.9.17+ SSE stability & compact hydration protocol
   const assetFiles = await readdir(join(process.cwd(), 'hub/public/assets'))
