@@ -320,3 +320,73 @@ test('v0.9.14 POST /api/voice/briefing reads numbered question options, summariz
   })
   assert.match(uploadSpeech, /1号待审批.*食梦貘blender.*选项1允许，选项2拒绝/)
 })
+
+test('v0.9.16 Volcengine ASR->TTS cloneSecretFromCredId allows official openspeech reuse and blocks cross-provider/custom-host exfiltration', async () => {
+  const hub = new HubCore()
+  const { dispatchRequest } = createHubServer({
+    hub,
+    token: 'voice-v0916-token',
+    requireToken: true,
+    voiceVaultFile: '',
+  })
+  const headers = { 'x-hub-token': 'voice-v0916-token' }
+
+  const asrSave = await dispatchRequest({
+    method: 'POST',
+    url: '/api/voice/credentials',
+    headers,
+    body: {
+      provider: 'volcengine_asr',
+      label: '火山语音 ASR',
+      baseUrl: 'https://openspeech.bytedance.com/api/v3/auc/bigmodel/recognize/flash',
+      apiKey: 'volc-secret-key-9876543210',
+      resourceId: 'volc.bigasr.auc_turbo',
+    },
+  })
+  assert.equal(asrSave.status, 200)
+  const asrId = asrSave.json.credential.id
+
+  // 1. Official Volcengine TTS cloning from ASR succeeds without client ever knowing plaintext
+  const ttsClone = await dispatchRequest({
+    method: 'POST',
+    url: '/api/voice/credentials',
+    headers,
+    body: {
+      provider: 'volcengine_tts',
+      label: '火山语音 TTS',
+      baseUrl: 'https://openspeech.bytedance.com/api/v3/tts/unidirectional',
+      cloneSecretFromCredId: asrId,
+      resourceId: 'seed-tts-2.0',
+      defaultVoice: 'zh_female_vv_uranus_bigtts',
+    },
+  })
+  assert.equal(ttsClone.status, 200)
+  assert.equal(ttsClone.json.ok, true)
+  assert.equal(ttsClone.json.credential.authSummary, asrSave.json.credential.authSummary)
+
+  // 2. Attempting to clone Volcengine key to an arbitrary external host MUST fail (400)
+  const evilHostClone = await dispatchRequest({
+    method: 'POST',
+    url: '/api/voice/credentials',
+    headers,
+    body: {
+      provider: 'volcengine_tts',
+      baseUrl: 'https://attacker.example.com/steal',
+      cloneSecretFromCredId: asrId,
+    },
+  })
+  assert.equal(evilHostClone.status, 400)
+
+  // 3. Attempting cross-provider cloning to openai_compat MUST fail (400)
+  const crossProvClone = await dispatchRequest({
+    method: 'POST',
+    url: '/api/voice/credentials',
+    headers,
+    body: {
+      provider: 'openai_compat',
+      baseUrl: 'https://api.deepseek.com/v1',
+      cloneSecretFromCredId: asrId,
+    },
+  })
+  assert.equal(crossProvClone.status, 400)
+})

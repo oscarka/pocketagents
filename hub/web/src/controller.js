@@ -8620,15 +8620,15 @@ export function initHubController() {
           </div>
 
           <div>
-            <div class="settings-group-title">随行耳机语音总管</div>
+            <div class="settings-group-title">随行耳机语音总管（试用）</div>
             <div class="settings-card">
               <div class="settings-item" style="flex-direction:column;align-items:stretch;gap:10px;">
                 <div>
-                  <div class="settings-item-title">🎧 边走路边戴耳机控制所有 AI 任务</div>
-                  <div class="settings-item-desc">默认免费开箱即用；贴 1 把 API Key 自动配好智能语音，也支持二级自定义火山豆包 + DeepSeek 混搭</div>
+                  <div class="settings-item-title">🎧 边走路边戴耳机控制所有 AI 任务（试用）</div>
+                  <div class="settings-item-desc">默认免费开箱即用；贴 1 把 API Key 自动配好智能语音，也支持火山豆包 + DeepSeek 自由混搭</div>
                 </div>
                 <div style="display:flex;gap:8px;flex-wrap:wrap;">
-                  <button class="pill-action-btn primary" onclick="openWalkMode()">🎧 进入随行模式</button>
+                  <button class="pill-action-btn primary" onclick="openWalkMode()">🎧 进入随行模式（试用）</button>
                   <button class="pill-action-btn" onclick="openVoiceLab('simple')">⚙️ 语音设置</button>
                 </div>
               </div>

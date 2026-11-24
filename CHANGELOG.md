@@ -2,6 +2,15 @@
 
 本项目的重要变更都记录在这里。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [0.9.16] - 2026-11-24
+
+### Improved
+
+- **隐藏首页顶栏随行耳机入口、设置页标注「（试用）」，并将二级高级设置彻底重构为「快捷套餐 + 3 张就地填 Key 积木卡」（`hub/web/src/components/TopBar.tsx` / `hub/web/src/controller.js` / `hub/web/src/components/VoiceCopilotSheets.tsx` / `hub/voice-vault.js` / `hub/web/src/styles/app.css` / `hub/web/src/utils/i18n.js`）**：
+  - **首页顶栏减负**：隐藏首页顶栏中的随行耳机按钮（`#walkModeTopBtn`），保持对话首页更聚焦；在「设备与设置」中为随行耳机语音总管标题与入口按钮统一标注 **`（试用）`**；
+  - **二级高级页彻底取消 3 Tab 迷宫、密钥池与长篇说明书**：采用「顶部 4 套快捷组合（火山豆包+DeepSeek / 全火山全家桶 / 全 Gemini / 免费听/说+大脑）+ 下面 3 张所见即所得积木卡（`👂 1. 听我说话` / `🧠 2. 帮我思考` / `🗣️ 3. 念给我听`）」合体设计；每张卡内直接选厂商、就地贴 Key、就地测连通与挑声音，底部一键 **`💾 保存并立即生效`** 与 **`🔊 试听`**，聊天页开关/密钥清理/毫秒压测收进底部低调折叠项；
+  - **火山语音 ASR/TTS 密钥服务端安全自动复用**：`VoiceVault.upsertCredential` 新增严格限定 `openspeech.bytedance.com` 同族白名单的 `cloneSecretFromCredId`，勾选「自动复用上面耳朵的火山语音 Key」后即使不重复粘贴旧 Key 也能无缝切方案，且明文永不出库、跨厂商或外部域名自动拦截。
+
 ## [0.9.15] - 2026-11-24
 
 ### Improved

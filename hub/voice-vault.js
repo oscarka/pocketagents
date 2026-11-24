@@ -606,9 +606,22 @@ export class VoiceVault {
     const existingId = String(input?.id ?? '').trim()
     const existing = existingId ? this.state.credentials.find(c => c.id === existingId) : null
 
-    const apiKey = input?.apiKey !== undefined ? String(input.apiKey).trim() : existing?.apiKey || ''
-    const appId = input?.appId !== undefined ? String(input.appId).trim() : existing?.appId || ''
-    const accessToken = input?.accessToken !== undefined ? String(input.accessToken).trim() : existing?.accessToken || ''
+    const cloneFromId = String(input?.cloneSecretFromCredId ?? '').trim()
+    const cloneSource = cloneFromId ? this.state.credentials.find(c => c.id === cloneFromId) : null
+    const baseUrlRawPreview = input?.baseUrl !== undefined ? String(input.baseUrl).trim() : existing?.baseUrl || ''
+    const canCloneVolcSecret = Boolean(
+      cloneSource
+      && cloneSource.provider.startsWith('volcengine_')
+      && provider.startsWith('volcengine_')
+      && (!baseUrlRawPreview || /^https:\/\/openspeech\.bytedance\.com\//i.test(baseUrlRawPreview)),
+    )
+
+    const rawApiKey = input?.apiKey !== undefined ? String(input.apiKey).trim() : ''
+    const rawAppId = input?.appId !== undefined ? String(input.appId).trim() : ''
+    const rawAccessToken = input?.accessToken !== undefined ? String(input.accessToken).trim() : ''
+    const apiKey = rawApiKey || (input?.apiKey === undefined ? existing?.apiKey || '' : '') || (canCloneVolcSecret ? cloneSource.apiKey || '' : '')
+    const appId = rawAppId || (input?.appId === undefined ? existing?.appId || '' : '') || (canCloneVolcSecret ? cloneSource.appId || '' : '')
+    const accessToken = rawAccessToken || (input?.accessToken === undefined ? existing?.accessToken || '' : '') || (canCloneVolcSecret ? cloneSource.accessToken || '' : '')
 
     if (provider === 'volcengine_asr' || provider === 'volcengine_tts') {
       if (!apiKey && !(appId && accessToken)) {
