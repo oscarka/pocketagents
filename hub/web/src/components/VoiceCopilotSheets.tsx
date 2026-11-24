@@ -202,11 +202,55 @@ const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
   volcengine_tts: '火山豆包播报',
 };
 
-const PROVIDER_PICKER_CARDS: Array<{ id: string; icon: string; title: string; sub: string }> = [
-  { id: 'gemini', icon: '✨', title: 'Google Gemini', sub: '1 把 Key 全包听+想+说，最省事' },
-  { id: 'openai_compat', icon: '🤖', title: 'DeepSeek / 方舟 / OpenAI', sub: '兼容接口，做语音大脑超稳' },
-  { id: 'volcengine_asr', icon: '👂', title: '火山豆包识别', sub: 'Flash ASR 中文极速听写' },
-  { id: 'volcengine_tts', icon: '🗣️', title: '火山豆包播报', sub: 'Seed-TTS 2.0 拟人自然音色' },
+const PROVIDER_PICKER_CARDS: Array<{ id: string; icon: string; title: string; sub: string; example: string }> = [
+  {
+    id: 'volcengine_asr',
+    icon: '👂',
+    title: '火山豆包语音 (听/说)',
+    sub: '中文极速听写 + Seed-TTS 2.0 拟人播报',
+    example: '在火山引擎控制台「语音技术」创建 API Key；勾选下方选项可一次同时用于听写(ASR)与播报(TTS)，不用贴两遍。',
+  },
+  {
+    id: 'openai_compat',
+    icon: '🤖',
+    title: 'DeepSeek / 方舟 / OpenAI',
+    sub: '语音大脑（总结内容、听懂口令）',
+    example: '例：DeepSeek 官方选快捷按钮填 sk-...；火山方舟 Ark 选方舟按钮填方舟 API Key（支持豆包或 DeepSeek 模型）。',
+  },
+  {
+    id: 'gemini',
+    icon: '✨',
+    title: 'Google Gemini',
+    sub: '1 把 Key 全包听 + 想 + 说',
+    example: '例：AIzaSy... 或 AQ.Ab...，同一把 Key 可直接搞定听写、大脑和播报。',
+  },
+  {
+    id: 'volcengine_tts',
+    icon: '🗣️',
+    title: '火山豆包播报 (仅 TTS)',
+    sub: '如只开通了语音合成单独填这里',
+    example: '默认资源 ID 为 seed-tts-2.0，默认音色 vv 自然女声，无需手填参数。',
+  },
+];
+
+const SIMPLE_VENDOR_CARDS: Array<{
+  id: 'native' | 'gemini' | 'deepseek' | 'ark' | 'openai' | 'mix_volc_ds';
+  icon: string;
+  title: string;
+  sub: string;
+}> = [
+  { id: 'native', icon: '🆓', title: '免费本机', sub: '免 Key · 手机自带听写播报' },
+  { id: 'gemini', icon: '✨', title: 'Gemini（推荐）', sub: '1 把 Key 全包听+想+说' },
+  { id: 'deepseek', icon: '🤖', title: 'DeepSeek', sub: '1 把 Key 做大脑 · 免费听说' },
+  { id: 'ark', icon: '🌋', title: '火山方舟 Ark', sub: '1 把方舟 Key（豆包/DS）' },
+  { id: 'openai', icon: '🌐', title: 'OpenAI', sub: '1 把 Key 全包听+想+说' },
+  { id: 'mix_volc_ds', icon: '🔀', title: '火山+DeepSeek混搭', sub: '豆包人声 + DS大脑 ›' },
+];
+
+const ARK_MODEL_CHIPS: Array<{ label: string; value: string }> = [
+  { label: '豆包 2.0 Lite (推荐)', value: 'doubao-seed-2-0-lite-260215' },
+  { label: '方舟 DeepSeek V3', value: 'deepseek-v3-250324' },
+  { label: '方舟 DeepSeek R1', value: 'deepseek-r1-250528' },
 ];
 
 const BRAIN_MODEL_CHIPS: Record<string, Array<{ label: string; value: string }>> = {
@@ -215,11 +259,48 @@ const BRAIN_MODEL_CHIPS: Record<string, Array<{ label: string; value: string }>>
     { label: 'gemini-3.8-flash', value: 'gemini-3.8-flash' },
   ],
   openai_compat: [
-    { label: 'deepseek-chat', value: 'deepseek-chat' },
-    { label: 'gpt-4o-mini', value: 'gpt-4o-mini' },
-    { label: 'doubao-seed-2-0-lite-260215', value: 'doubao-seed-2-0-lite-260215' },
+    { label: 'deepseek-chat (DS官方)', value: 'deepseek-chat' },
+    { label: 'doubao-seed-2-0-lite-260215 (豆包)', value: 'doubao-seed-2-0-lite-260215' },
+    { label: 'deepseek-v3-250324 (方舟DS)', value: 'deepseek-v3-250324' },
+    { label: 'gpt-4o-mini (OpenAI)', value: 'gpt-4o-mini' },
   ],
 };
+
+function findSimpleVendorCred(
+  vendor: 'gemini' | 'deepseek' | 'ark' | 'openai',
+  credentials: PublicCredential[],
+): PublicCredential | undefined {
+  if (vendor === 'gemini') {
+    return credentials.find(c => c.provider === 'gemini' && c.active) || credentials.find(c => c.provider === 'gemini');
+  }
+  const oaiList = credentials.filter(c => c.provider === 'openai_compat');
+  if (vendor === 'deepseek') {
+    return oaiList.find(c => String(c.baseUrl || '').toLowerCase().includes('deepseek'));
+  }
+  if (vendor === 'ark') {
+    return oaiList.find(c => /volces\.com|ark\./i.test(String(c.baseUrl || '')));
+  }
+  return oaiList.find(c => String(c.baseUrl || '').toLowerCase().includes('openai.com'));
+}
+
+function inferSimpleVendorFromConfig(cfg: VoiceConfigState): 'native' | 'gemini' | 'deepseek' | 'ark' | 'openai' {
+  const prof = cfg.activeProfile;
+  if (!prof || prof.id === 'native') {
+    if (cfg.credentials.some(c => c.provider === 'gemini')) return 'gemini';
+    if (cfg.credentials.some(c => c.provider === 'openai_compat' && /volces\.com|ark\./i.test(c.baseUrl || ''))) return 'ark';
+    if (cfg.credentials.some(c => c.provider === 'openai_compat' && /deepseek/i.test(c.baseUrl || ''))) return 'deepseek';
+    return 'native';
+  }
+  if (prof.brain?.provider === 'gemini') return 'gemini';
+  if (prof.brain?.provider === 'openai_compat') {
+    const cred = cfg.credentials.find(c => c.id === prof.brain?.credId) || cfg.credentials.find(c => c.provider === 'openai_compat' && c.active);
+    const u = String(cred?.baseUrl || '').toLowerCase();
+    if (u.includes('volces.com') || u.includes('ark.')) return 'ark';
+    if (u.includes('deepseek')) return 'deepseek';
+    if (u.includes('openai.com')) return 'openai';
+  }
+  return 'native';
+}
 
 const TTS_VOICE_CHIPS: Record<string, Array<{ label: string; value: string }>> = {
   gemini: [
@@ -242,11 +323,22 @@ const TTS_VOICE_CHIPS: Record<string, Array<{ label: string; value: string }>> =
   ],
 };
 
-function formatStageSummary(provider: string, model: string | undefined, stage: 'stt' | 'brain' | 'tts'): string {
+function formatStageSummary(
+  provider: string,
+  model: string | undefined,
+  stage: 'stt' | 'brain' | 'tts',
+  credId?: string,
+  credentials?: PublicCredential[],
+): string {
   if (provider === 'native') {
     return stage === 'brain' ? '本地基础口令' : '系统免费原生';
   }
-  const base = PROVIDER_DISPLAY_NAMES[provider] || provider;
+  const matchedCred = credentials?.length
+    ? (credentials.find(c => credId && c.id === credId) || credentials.find(c => c.provider === provider && c.active))
+    : undefined;
+  const base = (provider === 'openai_compat' && matchedCred?.label)
+    ? matchedCred.label
+    : (PROVIDER_DISPLAY_NAMES[provider] || provider);
   const m = String(model || '').trim();
   if (!m || m === 'default' || m === 'browser-web-speech' || m === 'browser-speech-synthesis' || m === 'rule-router') {
     return base;
@@ -352,22 +444,44 @@ function buildRecommendedQuickProfiles(credentials: PublicCredential[]): QuickPr
   const asrCred = credentials.find(c => c.provider === 'volcengine_asr' && c.active) || credentials.find(c => c.provider === 'volcengine_asr');
   const ttsCred = credentials.find(c => c.provider === 'volcengine_tts' && c.active) || credentials.find(c => c.provider === 'volcengine_tts');
 
-  if (asrCred && ttsCred && (geminiCred || oaiCred)) {
-    const useGemini = Boolean(geminiCred);
-    const brainModel = useGemini ? (geminiCred?.defaultModel || 'gemini-2.5-flash') : inferOpenAiCompatModel(oaiCred);
-    const brainName = useGemini ? 'Gemini' : (oaiCred?.label || 'OpenAI 兼容');
+  if ((asrCred || ttsCred) && oaiCred) {
+    const brainModel = inferOpenAiCompatModel(oaiCred);
+    const brainName = oaiCred.label || 'DeepSeek / 方舟';
+    const hasBothVolc = Boolean(asrCred && ttsCred);
     presets.push({
-      key: 'flagship-volc-mix',
+      key: `flagship-volc-oai-${oaiCred.id}`,
+      badge: '🏆 推荐混搭',
+      title: hasBothVolc ? `豆包极速听/说 + ${brainName} 大脑` : `豆包人声 + ${brainName} 大脑`,
+      sub: `耳朵：${asrCred ? '火山 ASR' : '系统免费'} · 大脑：${brainModel} · 嘴巴：${ttsCred ? '火山 Seed-TTS' : '系统免费'}`,
+      profile: {
+        id: '',
+        name: hasBothVolc ? `豆包极速听/说 + ${brainName} 大脑` : `豆包人声 + ${brainName} 大脑`,
+        builtin: false,
+        stt: asrCred
+          ? { provider: 'volcengine_asr', credId: asrCred.id, model: asrCred.resourceId || 'volc.bigasr.auc_turbo', language: 'zh-CN', thinkingLevel: 'low', fallbackChain: geminiCred ? [{ provider: 'gemini', credId: geminiCred.id, model: 'gemini-2.5-flash', thinkingLevel: 'low' }] : [] }
+          : { provider: 'native', credId: '', model: 'browser-web-speech', language: 'zh-CN', thinkingLevel: 'default', fallbackChain: [] },
+        brain: { provider: 'openai_compat', credId: oaiCred.id, model: brainModel, thinkingLevel: 'off', maxTokens: 320 },
+        tts: ttsCred
+          ? { provider: 'volcengine_tts', credId: ttsCred.id, model: ttsCred.resourceId || 'seed-tts-2.0', voice: ttsCred.defaultVoice || 'zh_female_vv_uranus_bigtts', format: 'mp3', speed: 1.0 }
+          : { provider: 'native', credId: '', model: 'browser-speech-synthesis', voice: 'system-default', format: 'mp3', speed: 1.0 },
+      },
+    });
+  }
+
+  if (asrCred && ttsCred && geminiCred) {
+    const brainModel = geminiCred.defaultModel || 'gemini-2.5-flash';
+    presets.push({
+      key: 'flagship-volc-gemini',
       badge: '🏆 旗舰混搭',
-      title: `豆包极速听/说 + ${brainName} 大脑`,
+      title: '豆包极速听/说 + Gemini 大脑',
       sub: `耳朵：火山 ASR · 大脑：${brainModel} · 嘴巴：火山 Seed-TTS`,
       profile: {
         id: '',
-        name: `豆包极速听/说 + ${brainName} 大脑`,
+        name: '豆包极速听/说 + Gemini 大脑',
         builtin: false,
-        stt: { provider: 'volcengine_asr', credId: '', model: asrCred.resourceId || 'volc.bigasr.auc_turbo', language: 'zh-CN', thinkingLevel: 'low', fallbackChain: useGemini ? [{ provider: 'gemini', credId: '', model: 'gemini-2.5-flash', thinkingLevel: 'low' }] : [] },
-        brain: { provider: useGemini ? 'gemini' : 'openai_compat', credId: '', model: brainModel, thinkingLevel: 'off', maxTokens: 320 },
-        tts: { provider: 'volcengine_tts', credId: '', model: ttsCred.resourceId || 'seed-tts-2.0', voice: ttsCred.defaultVoice || 'zh_female_vv_uranus_bigtts', format: 'mp3', speed: 1.0 },
+        stt: { provider: 'volcengine_asr', credId: asrCred.id, model: asrCred.resourceId || 'volc.bigasr.auc_turbo', language: 'zh-CN', thinkingLevel: 'low', fallbackChain: [{ provider: 'gemini', credId: geminiCred.id, model: 'gemini-2.5-flash', thinkingLevel: 'low' }] },
+        brain: { provider: 'gemini', credId: geminiCred.id, model: brainModel, thinkingLevel: 'off', maxTokens: 320 },
+        tts: { provider: 'volcengine_tts', credId: ttsCred.id, model: ttsCred.resourceId || 'seed-tts-2.0', voice: ttsCred.defaultVoice || 'zh_female_vv_uranus_bigtts', format: 'mp3', speed: 1.0 },
       },
     });
   }
@@ -384,23 +498,9 @@ function buildRecommendedQuickProfiles(credentials: PublicCredential[]): QuickPr
         id: '',
         name: '全 Gemini 极速随行',
         builtin: false,
-        stt: { provider: 'gemini', credId: '', model, language: 'zh-CN', thinkingLevel: 'low', fallbackChain: [] },
-        brain: { provider: 'gemini', credId: '', model, thinkingLevel: 'off', maxTokens: 320 },
-        tts: { provider: 'gemini', credId: '', model: 'gemini-2.5-flash-preview-tts', voice, format: 'mp3', speed: 1.0 },
-      },
-    });
-    presets.push({
-      key: 'native-plus-gemini',
-      badge: '💸 最省额度',
-      title: '免费系统听/说 + Gemini 大脑',
-      sub: `手机自带听写播报（免费）+ Gemini 大脑（${model}）`,
-      profile: {
-        id: '',
-        name: '免费系统听/说 + Gemini 大脑',
-        builtin: false,
-        stt: { provider: 'native', credId: '', model: 'browser-web-speech', language: 'zh-CN', thinkingLevel: 'default', fallbackChain: [] },
-        brain: { provider: 'gemini', credId: '', model, thinkingLevel: 'off', maxTokens: 320 },
-        tts: { provider: 'native', credId: '', model: 'browser-speech-synthesis', voice: 'system-default', format: 'mp3', speed: 1.0 },
+        stt: { provider: 'gemini', credId: geminiCred.id, model, language: 'zh-CN', thinkingLevel: 'low', fallbackChain: [] },
+        brain: { provider: 'gemini', credId: geminiCred.id, model, thinkingLevel: 'off', maxTokens: 320 },
+        tts: { provider: 'gemini', credId: geminiCred.id, model: 'gemini-2.5-flash-preview-tts', voice, format: 'mp3', speed: 1.0 },
       },
     });
   }
@@ -424,15 +524,25 @@ function buildRecommendedQuickProfiles(credentials: PublicCredential[]): QuickPr
     });
   }
 
-  return presets.slice(0, 3);
+  return presets.slice(0, 4);
 }
 
 export function VoiceCopilotSheets() {
   const [walkOpen, setWalkOpen] = useState(false);
   const [labOpen, setLabOpen] = useState(false);
+  const [labView, setLabView] = useState<'simple' | 'advanced'>('simple');
   const [labTab, setLabTab] = useState<'keys' | 'profiles' | 'bench'>('keys');
+  const [advGuideOpen, setAdvGuideOpen] = useState(false);
   const [config, setConfig] = useState<VoiceConfigState>(DEFAULT_CONFIG);
   const [loadingCfg, setLoadingCfg] = useState(false);
+
+  // Level 1 (Simple 1-screen config) state
+  const [simpleVendor, setSimpleVendor] = useState<'native' | 'gemini' | 'deepseek' | 'ark' | 'openai'>('gemini');
+  const [simpleApiKey, setSimpleApiKey] = useState('');
+  const [simpleArkModel, setSimpleArkModel] = useState('doubao-seed-2-0-lite-260215');
+  const [simpleSaving, setSimpleSaving] = useState(false);
+  const [soundChecking, setSoundChecking] = useState(false);
+  const [soundCheckMsg, setSoundCheckMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   // Walk mode live state
   const [walkPhase, setWalkPhase] = useState<'idle' | 'listening' | 'transcribing' | 'thinking' | 'speaking'>('idle');
@@ -453,15 +563,16 @@ export function VoiceCopilotSheets() {
   const [savingProfile, setSavingProfile] = useState(false);
   const [applyingPresetKey, setApplyingPresetKey] = useState('');
 
-  // Add key form state
-  const [keyProvider, setKeyProvider] = useState('gemini');
+  // Add key form state (Level 2)
+  const [keyProvider, setKeyProvider] = useState('volcengine_asr');
   const [volcAuthMode, setVolcAuthMode] = useState<'apiKey' | 'appToken'>('apiKey');
+  const [volcSaveBoth, setVolcSaveBoth] = useState(true);
   const [keyLabel, setKeyLabel] = useState('');
-  const [keyBaseUrl, setKeyBaseUrl] = useState('https://generativelanguage.googleapis.com/v1beta');
+  const [keyBaseUrl, setKeyBaseUrl] = useState('https://openspeech.bytedance.com/api/v3/auc/bigmodel/recognize/flash');
   const [keyApiKey, setKeyApiKey] = useState('');
   const [keyAppId, setKeyAppId] = useState('');
   const [keyAccessToken, setKeyAccessToken] = useState('');
-  const [keyResourceId, setKeyResourceId] = useState('');
+  const [keyResourceId, setKeyResourceId] = useState('volc.bigasr.auc_turbo');
   const [keyDefaultModel, setKeyDefaultModel] = useState('');
   const [keyDefaultVoice, setKeyDefaultVoice] = useState('');
   const [savingKey, setSavingKey] = useState(false);
@@ -533,9 +644,15 @@ export function VoiceCopilotSheets() {
     (window as any).closeWalkMode = () => {
       setWalkOpen(false);
     };
-    (window as any).openVoiceLab = (tab?: 'profiles' | 'keys' | 'bench') => {
-      const targetTab = tab || (configRef.current.credentials.length > 0 ? 'profiles' : 'keys');
-      setLabTab(targetTab);
+    (window as any).openVoiceLab = (tab?: 'simple' | 'profiles' | 'keys' | 'bench') => {
+      if (!tab || tab === 'simple') {
+        setLabView('simple');
+        setSimpleVendor(inferSimpleVendorFromConfig(configRef.current));
+        setSoundCheckMsg(null);
+      } else {
+        setLabView('advanced');
+        setLabTab(tab);
+      }
       setLabOpen(true);
       void refreshConfig(false);
     };
@@ -1209,6 +1326,188 @@ export function VoiceCopilotSheets() {
     }
   };
 
+  const handleQuickSoundCheck = async () => {
+    const prof = configRef.current.activeProfile || DEFAULT_CONFIG.activeProfile;
+    const sampleLine = '你好，随行语音已就绪，戴上耳机随时说话。';
+    setSoundChecking(true);
+    setSoundCheckMsg(null);
+    try {
+      const useCloudTts = Boolean(prof.tts?.provider && prof.tts.provider !== 'native');
+      if (useCloudTts) {
+        const res = await apiCall('/api/voice/tts', {
+          method: 'POST',
+          body: JSON.stringify({ text: sampleLine, profileId: prof.id }),
+        });
+        const data = await res.json().catch(() => ({ ok: false, error: `HTTP ${res.status}` }));
+        if (!res.ok || !data?.ok) {
+          setSoundCheckMsg({ ok: false, text: `❌ 播报失败：${data?.error || '请检查密钥与余额'}` });
+          return;
+        }
+        if (data.audioBase64) {
+          await playerRef.current?.playAudioBase64(data.audioBase64, data.mimeType);
+        }
+        setSoundCheckMsg({ ok: true, text: `✅ 云端人声正常 (${data.latencyMs ?? 0}ms)` });
+        return;
+      }
+
+      // Native TTS playback + optional brain connectivity check if a cloud brain is active
+      void playerRef.current?.speakChunksProgressive([sampleLine], {
+        useCloudTts: false,
+        speechRate: configRef.current.prefs.speechRate || 1.0,
+      });
+
+      if (prof.brain?.provider && prof.brain.provider !== 'native') {
+        const brainCred = configRef.current.credentials.find(c => c.id === prof.brain?.credId)
+          || configRef.current.credentials.find(c => c.provider === prof.brain?.provider && c.active)
+          || configRef.current.credentials.find(c => c.provider === prof.brain?.provider);
+        if (brainCred) {
+          const testRes = await apiCall('/api/voice/test', {
+            method: 'POST',
+            body: JSON.stringify({ credId: brainCred.id }),
+          });
+          const testData = await testRes.json().catch(() => ({ ok: false, error: `HTTP ${testRes.status}` }));
+          if (testRes.ok && testData?.ok) {
+            setSoundCheckMsg({ ok: true, text: `✅ 手机播报正常 · 大脑已连通 (${testData.latencyMs ?? 0}ms)` });
+          } else {
+            setSoundCheckMsg({ ok: false, text: `⚠️ 手机已出声，但大脑密钥异常：${testData?.error || '请检查 Key'}` });
+          }
+          return;
+        }
+      }
+      setSoundCheckMsg({ ok: true, text: '✅ 免费本机播报已出声' });
+    } catch (err: any) {
+      setSoundCheckMsg({ ok: false, text: `❌ 试听异常：${err?.message || '网络失败'}` });
+    } finally {
+      setSoundChecking(false);
+    }
+  };
+
+  const handleSimpleQuickActivate = async () => {
+    if (simpleVendor === 'native') {
+      await updatePrefPatch({ activeProfileId: 'native' });
+      setSoundCheckMsg({ ok: true, text: '✅ 已切换为免费本机语音（零 Key）' });
+      return;
+    }
+
+    const existingCred = findSimpleVendorCred(simpleVendor, config.credentials);
+    const keyTrimmed = simpleApiKey.trim();
+    if (!keyTrimmed && !existingCred) {
+      toast('⚠️ 请先粘贴 API Key');
+      return;
+    }
+
+    setSimpleSaving(true);
+    setSoundCheckMsg(null);
+    try {
+      let credId = existingCred?.id || '';
+      const vendorSpec = {
+        gemini: {
+          provider: 'gemini',
+          label: 'Google Gemini',
+          baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+          model: 'gemini-2.5-flash',
+          voice: 'Kore',
+          profileName: '全 Gemini 极速随行',
+        },
+        deepseek: {
+          provider: 'openai_compat',
+          label: 'DeepSeek 官方',
+          baseUrl: 'https://api.deepseek.com/v1',
+          model: 'deepseek-chat',
+          voice: '',
+          profileName: 'DeepSeek 智能语音',
+        },
+        ark: {
+          provider: 'openai_compat',
+          label: '火山方舟 Ark',
+          baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
+          model: simpleArkModel.trim() || 'doubao-seed-2-0-lite-260215',
+          voice: '',
+          profileName: '火山方舟智能语音',
+        },
+        openai: {
+          provider: 'openai_compat',
+          label: 'OpenAI 官方',
+          baseUrl: 'https://api.openai.com/v1',
+          model: 'gpt-4o-mini',
+          voice: 'alloy',
+          profileName: '全 OpenAI 极速随行',
+        },
+      }[simpleVendor];
+
+      let latestConfig = config;
+      if (keyTrimmed) {
+        const credRes = await apiCall('/api/voice/credentials', {
+          method: 'POST',
+          body: JSON.stringify({
+            id: existingCred?.id || '',
+            provider: vendorSpec.provider,
+            label: vendorSpec.label,
+            baseUrl: vendorSpec.baseUrl,
+            apiKey: keyTrimmed,
+            defaultModel: vendorSpec.model,
+            defaultVoice: vendorSpec.voice,
+            active: true,
+          }),
+        });
+        const credData = await credRes.json().catch(() => null);
+        if (!credRes.ok || !credData?.ok) {
+          toast(`❌ ${credData?.error || '保存密钥失败'}`);
+          return;
+        }
+        credId = credData.credential?.id || credId;
+        if (credData.config) latestConfig = { ...latestConfig, ...credData.config };
+      }
+
+      const existingProf = latestConfig.profiles.find(p => !p.builtin && p.name === vendorSpec.profileName);
+      const profilePayload: VoiceProfile & { activate: boolean } = simpleVendor === 'gemini'
+        ? {
+            id: existingProf?.id || '',
+            name: vendorSpec.profileName,
+            builtin: false,
+            activate: true,
+            stt: { provider: 'gemini', credId, model: 'gemini-2.5-flash', language: 'zh-CN', thinkingLevel: 'low', fallbackChain: [] },
+            brain: { provider: 'gemini', credId, model: 'gemini-2.5-flash', thinkingLevel: 'off', maxTokens: 320 },
+            tts: { provider: 'gemini', credId, model: 'gemini-2.5-flash-preview-tts', voice: 'Kore', format: 'mp3', speed: 1.0 },
+          }
+        : simpleVendor === 'openai'
+          ? {
+              id: existingProf?.id || '',
+              name: vendorSpec.profileName,
+              builtin: false,
+              activate: true,
+              stt: { provider: 'openai_compat', credId, model: 'gpt-4o-mini-transcribe', language: 'zh-CN', thinkingLevel: 'default', fallbackChain: [] },
+              brain: { provider: 'openai_compat', credId, model: 'gpt-4o-mini', thinkingLevel: 'off', maxTokens: 320 },
+              tts: { provider: 'openai_compat', credId, model: 'gpt-4o-mini-tts', voice: 'alloy', format: 'mp3', speed: 1.0 },
+            }
+          : {
+              id: existingProf?.id || '',
+              name: vendorSpec.profileName,
+              builtin: false,
+              activate: true,
+              stt: { provider: 'native', credId: '', model: 'browser-web-speech', language: 'zh-CN', thinkingLevel: 'default', fallbackChain: [] },
+              brain: { provider: 'openai_compat', credId, model: vendorSpec.model, thinkingLevel: 'off', maxTokens: 320 },
+              tts: { provider: 'native', credId: '', model: 'browser-speech-synthesis', voice: 'system-default', format: 'mp3', speed: 1.0 },
+            };
+
+      const profRes = await apiCall('/api/voice/profiles', {
+        method: 'POST',
+        body: JSON.stringify(profilePayload),
+      });
+      const profData = await profRes.json().catch(() => null);
+      if (!profRes.ok || !profData?.ok) {
+        toast(`❌ ${profData?.error || '启用方案失败'}`);
+        return;
+      }
+      setConfig(prev => ({ ...prev, ...profData.config }));
+      setSimpleApiKey('');
+      setSoundCheckMsg({ ok: true, text: `✅ 已启用「${vendorSpec.profileName}」，点右边「🔊 试听」即可验证` });
+      toast(`✅ 已自动配好并启用「${vendorSpec.profileName}」`);
+    } finally {
+      setSimpleSaving(false);
+    }
+  };
+
   const handleSaveCredential = async () => {
     const isVolc = keyProvider === 'volcengine_asr' || keyProvider === 'volcengine_tts';
     const effectiveApiKey = isVolc && volcAuthMode === 'appToken' ? '' : keyApiKey.trim();
@@ -1241,7 +1540,42 @@ export function VoiceCopilotSheets() {
         toast(`❌ ${data?.error || '保存密钥失败'}`);
         return;
       }
-      setConfig(prev => ({ ...prev, ...data.config }));
+      let nextCfg = data.config;
+
+      // Optional 1-click dual-save for Volcengine Speech key (saves both ASR & TTS so user doesn't paste twice)
+      let savedBothOk = false;
+      if (isVolc && volcSaveBoth) {
+        const siblingProv = keyProvider === 'volcengine_asr' ? 'volcengine_tts' : 'volcengine_asr';
+        const siblingUrl = siblingProv === 'volcengine_tts'
+          ? 'https://openspeech.bytedance.com/api/v3/tts/unidirectional'
+          : 'https://openspeech.bytedance.com/api/v3/auc/bigmodel/recognize/flash';
+        const siblingResId = siblingProv === 'volcengine_tts' ? 'seed-tts-2.0' : 'volc.bigasr.auc_turbo';
+        const siblingLabel = keyLabel.trim()
+          ? `${keyLabel.trim()} (${siblingProv === 'volcengine_tts' ? 'TTS' : 'ASR'})`
+          : inferDefaultCredLabel(siblingProv, siblingUrl);
+        const sibRes = await apiCall('/api/voice/credentials', {
+          method: 'POST',
+          body: JSON.stringify({
+            provider: siblingProv,
+            label: siblingLabel,
+            baseUrl: siblingUrl,
+            apiKey: effectiveApiKey,
+            appId: effectiveAppId,
+            accessToken: effectiveAccessToken,
+            resourceId: siblingResId,
+            defaultModel: '',
+            defaultVoice: siblingProv === 'volcengine_tts' ? (keyDefaultVoice || 'zh_female_vv_uranus_bigtts') : '',
+            active: true,
+          }),
+        });
+        const sibData = await sibRes.json().catch(() => null);
+        if (sibRes.ok && sibData?.ok && sibData.config) {
+          nextCfg = sibData.config;
+          savedBothOk = true;
+        }
+      }
+
+      setConfig(prev => ({ ...prev, ...nextCfg }));
       setKeyLabel('');
       setKeyApiKey('');
       setKeyAppId('');
@@ -1250,7 +1584,11 @@ export function VoiceCopilotSheets() {
         const bodyEl = document.querySelector('#voiceLabSheet .voice-lab-body');
         if (bodyEl) bodyEl.scrollTo({ top: 0, behavior: 'smooth' });
       } catch {}
-      toast('🔐 密钥已加密保存！点「⚡ 一键启用」即可使用');
+      toast(
+        savedBothOk
+          ? '🔐 已一键同时存入火山听写 (ASR) 与播报 (TTS)！点上方「一键启用」即可混搭'
+          : '🔐 密钥已加密保存！点上方「⚡ 一键启用」即可使用',
+      );
     } finally {
       setSavingKey(false);
     }
@@ -1443,9 +1781,11 @@ export function VoiceCopilotSheets() {
   };
 
   const selectedCatalog = config.catalog.find(c => c.id === keyProvider);
+  const selectedPickerMeta = PROVIDER_PICKER_CARDS.find(c => c.id === keyProvider);
 
   const onSelectKeyProvider = (prov: string) => {
     setKeyProvider(prov);
+    setVolcSaveBoth(prov === 'volcengine_asr');
     const item = config.catalog.find(c => c.id === prov);
     const fallbackUrl = prov === 'gemini'
       ? 'https://generativelanguage.googleapis.com/v1beta'
@@ -1453,13 +1793,13 @@ export function VoiceCopilotSheets() {
         ? 'https://openspeech.bytedance.com/api/v3/auc/bigmodel/recognize/flash'
         : prov === 'volcengine_tts'
           ? 'https://openspeech.bytedance.com/api/v3/tts/unidirectional'
-          : 'https://api.openai.com/v1';
+          : 'https://api.deepseek.com/v1';
     const fallbackResId = prov === 'volcengine_asr'
       ? 'volc.bigasr.auc_turbo'
       : prov === 'volcengine_tts'
         ? 'seed-tts-2.0'
         : '';
-    setKeyBaseUrl(item?.defaultBaseUrl || fallbackUrl);
+    setKeyBaseUrl(prov === 'openai_compat' ? 'https://api.deepseek.com/v1' : (item?.defaultBaseUrl || fallbackUrl));
     setKeyResourceId(item?.defaultResourceId || fallbackResId);
     setKeyDefaultModel('');
     setKeyDefaultVoice('');
@@ -1467,7 +1807,21 @@ export function VoiceCopilotSheets() {
 
   const jumpToAddKey = (prov: string) => {
     onSelectKeyProvider(prov);
+    setLabView('advanced');
     setLabTab('keys');
+  };
+
+  const openAdvancedMixGuide = () => {
+    setLabView('advanced');
+    setAdvGuideOpen(true);
+    const hasVolc = config.credentials.some(c => c.provider === 'volcengine_asr' || c.provider === 'volcengine_tts');
+    const hasOai = config.credentials.some(c => c.provider === 'openai_compat');
+    if (hasVolc && hasOai) {
+      setLabTab('profiles');
+    } else {
+      onSelectKeyProvider(hasVolc ? 'openai_compat' : 'volcengine_asr');
+      setLabTab('keys');
+    }
   };
 
   const renderCredSelect = (provider: string, value: string, onChange: (val: string) => void) => {
@@ -1476,7 +1830,7 @@ export function VoiceCopilotSheets() {
     const provTitle = PROVIDER_DISPLAY_NAMES[provider] || provider;
     return (
       <Fragment>
-        <label class="voice-field-label">使用密钥</label>
+        <label class="voice-field-label">使用哪把密钥</label>
         {matched.length === 0 ? (
           <button
             type="button"
@@ -1503,6 +1857,7 @@ export function VoiceCopilotSheets() {
   const activeProf = config.activeProfile || DEFAULT_CONFIG.activeProfile;
   const recommendedPresets = buildRecommendedQuickProfiles(config.credentials);
   const activeMissingProviders = getMissingProvidersForProfile(activeProf, config.credentials);
+  const simpleMatchedCred = simpleVendor === 'native' ? undefined : findSimpleVendorCred(simpleVendor, config.credentials);
   const orbScale = walkPhase === 'listening' ? 1 + Math.min(0.18, micLevel * 0.22) : 1;
 
   return (
@@ -1515,8 +1870,8 @@ export function VoiceCopilotSheets() {
               <button
                 type="button"
                 class="walk-profile-pill"
-                onClick={() => { setLabTab('profiles'); setLabOpen(true); }}
-                title="点击切换语音方案与模型"
+                onClick={() => { setLabView('simple'); setSimpleVendor(inferSimpleVendorFromConfig(config)); setSoundCheckMsg(null); setLabOpen(true); }}
+                title="点击快速切换语音配置"
               >
                 <span>🎧</span>
                 <span class="walk-profile-name">{activeProf.name}</span>
@@ -1532,7 +1887,7 @@ export function VoiceCopilotSheets() {
                 type="button"
                 class="walk-top-btn"
                 id="walkOpenLabBtn"
-                onClick={() => { setLabTab(config.credentials.length > 0 ? 'profiles' : 'keys'); setLabOpen(true); }}
+                onClick={() => { setLabView('simple'); setSimpleVendor(inferSimpleVendorFromConfig(config)); setSoundCheckMsg(null); setLabOpen(true); }}
               >
                 ⚙️ 配置
               </button>
@@ -1708,7 +2063,7 @@ export function VoiceCopilotSheets() {
         </div>
       )}
 
-      {/* 2. 语音总管配置 & BYOK 调试台半屏抽屉 (#voiceLabSheet, z-index: 140) */}
+      {/* 2. 语音总管配置半屏抽屉 (#voiceLabSheet, z-index: 140) — 一层极简 + 二层高级混搭 */}
       {labOpen && (
         <div
           id="voiceLabSheet"
@@ -1720,7 +2075,23 @@ export function VoiceCopilotSheets() {
           <div class="sheet-panel voice-lab-panel">
             <div class="sheet-handle"></div>
             <div class="sheet-title" style="margin-bottom:10px;">
-              <span>🎙️ 随行语音总管 & BYOK 配置</span>
+              {labView === 'simple' ? (
+                <span>🎙️ 随行语音设置</span>
+              ) : (
+                <div style="display:flex;align-items:center;gap:8px;min-width:0;">
+                  <button
+                    type="button"
+                    class="voice-back-btn"
+                    onClick={() => {
+                      setLabView('simple');
+                      setSimpleVendor(inferSimpleVendorFromConfig(config));
+                    }}
+                  >
+                    ‹ 极简
+                  </button>
+                  <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">🎛️ 高级混搭与调试</span>
+                </div>
+              )}
               <button
                 type="button"
                 style="border:none;background:transparent;color:var(--muted);font-size:18px;cursor:pointer;padding:4px 8px;"
@@ -1730,152 +2101,85 @@ export function VoiceCopilotSheets() {
               </button>
             </div>
 
-            <div class="voice-lab-tabs">
-              <button
-                type="button"
-                class={`voice-lab-tab ${labTab === 'keys' ? 'active' : ''}`}
-                onClick={() => setLabTab('keys')}
-              >
-                ① 密钥 ({config.credentials.length})
-              </button>
-              <button
-                type="button"
-                class={`voice-lab-tab ${labTab === 'profiles' ? 'active' : ''}`}
-                onClick={() => setLabTab('profiles')}
-              >
-                ② 方案
-              </button>
-              <button
-                type="button"
-                class={`voice-lab-tab ${labTab === 'bench' ? 'active' : ''}`}
-                onClick={() => setLabTab('bench')}
-              >
-                ③ 测一测
-              </button>
-            </div>
-
-            <div class="voice-guide-strip">
-              {config.credentials.length === 0 ? (
-                <span>
-                  <strong>3 步上手：</strong>先在 ① 存 1 把密钥（推荐 Gemini 1 把全包） → ② 一键启用方案 → ③ 试跑出声
-                </span>
-              ) : activeProf.id === 'native' ? (
-                <Fragment>
-                  <span>
-                    {labTab === 'profiles'
-                      ? `✅ 已存 ${config.credentials.length} 把密钥 · 在下方直接点「一键启用」即可`
-                      : `✅ 已存 ${config.credentials.length} 把密钥 · 下一步：一键启用方案`}
-                  </span>
-                  {labTab !== 'profiles' && (
-                    <button type="button" class="voice-pill-btn primary" onClick={() => setLabTab('profiles')}>
-                      去 ② 启用 →
-                    </button>
-                  )}
-                </Fragment>
-              ) : (
-                <Fragment>
-                  <span>✅ 当前生效：<strong>{activeProf.name}</strong></span>
-                  {labTab !== 'bench' && (
-                    <button type="button" class="voice-pill-btn" onClick={() => setLabTab('bench')}>
-                      去 ③ 试跑 →
-                    </button>
-                  )}
-                </Fragment>
-              )}
-            </div>
-
-            <div class="voice-lab-body">
-              {loadingCfg && <div class="voice-muted-note">正在读取加密配置…</div>}
-
-              {/* TAB 1: ① 密钥池 (BYOK) */}
-              {labTab === 'keys' && (
+            {labView === 'simple' ? (
+              <div class="voice-lab-body">
+                {loadingCfg && <div class="voice-muted-note">正在读取加密配置…</div>}
                 <div class="voice-tab-stack">
-                  {config.credentials.length > 0 && (
-                    <div class="voice-card">
-                      <div class="voice-card-title" style="margin-bottom:8px;">已保存密钥 ({config.credentials.length})</div>
-                      {config.credentials.map(c => (
-                        <div key={c.id} class="voice-cred-item">
-                          <div style="flex:1;min-width:0;">
-                            <div class="voice-cred-title">
-                              <span class="voice-prov-tag">{PROVIDER_DISPLAY_NAMES[c.provider] || c.provider}</span>
-                              <span>{c.label}</span>
-                              {c.active && <span class="voice-active-tag">默认</span>}
-                            </div>
-                            <div class="voice-cred-sub">{c.authSummary}{c.baseUrl ? ` · ${c.baseUrl.replace(/^https?:\/\//, '').slice(0, 38)}` : ''}</div>
-                            {testResults[c.id] && (
-                              <div class={`voice-test-msg ${testResults[c.id].ok ? 'ok' : 'err'}`}>
-                                {testResults[c.id].summary}
-                              </div>
-                            )}
-                          </div>
-                          <div class="voice-cred-actions">
-                            <button
-                              type="button"
-                              class="voice-pill-btn"
-                              disabled={testingCredId === c.id}
-                              onClick={() => void handleTestCredential(c.id)}
-                            >
-                              {testingCredId === c.id ? '测速中…' : '🔌 测速'}
-                            </button>
-                            {!c.active && (
-                              <button type="button" class="voice-pill-btn" onClick={() => void handleActivateCredential(c.id)}>
-                                设为默认
-                              </button>
-                            )}
-                            <button type="button" class="voice-pill-btn danger" onClick={() => void handleDeleteCredential(c.id)}>
-                              删
-                            </button>
-                          </div>
+                  {/* 顶部：当前状态 + 一键试听 */}
+                  <div class="voice-card voice-status-hero">
+                    <div class="voice-status-hero-row">
+                      <div style="flex:1;min-width:0;">
+                        <div class="voice-status-hero-title">
+                          {activeProf.id === 'native' ? '🆓 当前：免费本机语音' : `✅ 当前：${activeProf.name}`}
                         </div>
-                      ))}
-                    </div>
-                  )}
-
-                  {recommendedPresets.length > 0 && (
-                    <div class="voice-card">
-                      <div class="voice-card-title">⚡ 下一步：一键生成并启用方案（免手填）</div>
-                      <div class="voice-muted-note">根据你已存的密钥自动配好耳朵 / 大脑 / 嘴巴，点一下直接生效：</div>
-                      <div class="voice-quick-preset-list">
-                        {recommendedPresets.map(preset => (
-                          <button
-                            key={preset.key}
-                            type="button"
-                            class="voice-quick-preset-btn"
-                            disabled={applyingPresetKey === preset.key}
-                            onClick={() => void handleApplyQuickPreset(preset)}
-                          >
-                            <div style="min-width:0;">
-                              <div class="voice-quick-preset-title">{preset.badge} · {preset.title}</div>
-                              <div class="voice-quick-preset-sub">{preset.sub}</div>
-                            </div>
-                            <span class="voice-quick-preset-go">
-                              {applyingPresetKey === preset.key ? '启用中…' : '一键启用 ›'}
-                            </span>
-                          </button>
-                        ))}
+                        <div class="voice-status-hero-sub">
+                          {activeProf.id === 'native'
+                            ? '免填 Key · 直接用手机自带听写与播报'
+                            : `听：${formatStageSummary(activeProf.stt.provider, activeProf.stt.model, 'stt', activeProf.stt.credId, config.credentials)} · 想：${formatStageSummary(activeProf.brain.provider, activeProf.brain.model, 'brain', activeProf.brain.credId, config.credentials)} · 说：${formatStageSummary(activeProf.tts.provider, activeProf.tts.model, 'tts', activeProf.tts.credId, config.credentials)}`}
+                        </div>
                       </div>
+                      <button
+                        type="button"
+                        class="voice-pill-btn primary"
+                        disabled={soundChecking}
+                        onClick={() => void handleQuickSoundCheck()}
+                      >
+                        {soundChecking ? '试音中…' : '🔊 试听'}
+                      </button>
                     </div>
-                  )}
+                    {activeMissingProviders.length > 0 && (
+                      <button
+                        type="button"
+                        class="voice-missing-key-cta"
+                        style="margin-top:8px;"
+                        onClick={() => jumpToAddKey(activeMissingProviders[0])}
+                      >
+                        <span>⚠️ 缺少 {activeMissingProviders.map(pr => PROVIDER_DISPLAY_NAMES[pr] || pr).join('、')} 密钥</span>
+                        <span>去补填 →</span>
+                      </button>
+                    )}
+                    {soundCheckMsg && (
+                      <div class={`voice-test-msg ${soundCheckMsg.ok ? 'ok' : 'err'}`} style="margin-top:8px;">
+                        {soundCheckMsg.text}
+                      </div>
+                    )}
+                  </div>
 
+                  {/* 核心区：选一家贴 1 把 Key，模型全自动选好 */}
                   <div class="voice-card">
-                    <div class="voice-card-title" style="margin-bottom:4px;">添加 API 密钥</div>
+                    <div class="voice-card-title">⚡ 1 把 Key 快速上手（模型全自动）</div>
                     <div class="voice-muted-note" style="margin-bottom:10px;">
-                      🔐 密钥在服务端 <strong>AES-256-GCM</strong> 加密落盘，保存后永不回显明文。先选你要填哪家：
+                      选一家贴 1 把密钥点保存即可生效；想做<strong>火山豆包 + DeepSeek 混搭</strong>点最后一项。
                     </div>
 
                     <div class="voice-provider-grid">
-                      {PROVIDER_PICKER_CARDS.map(card => {
-                        const cnt = config.credentials.filter(c => c.provider === card.id).length;
+                      {SIMPLE_VENDOR_CARDS.map(card => {
+                        const isMix = card.id === 'mix_volc_ds';
+                        const isSelected = !isMix && simpleVendor === card.id;
+                        const hasSaved = card.id !== 'native' && !isMix
+                          ? Boolean(findSimpleVendorCred(card.id, config.credentials))
+                          : false;
                         return (
                           <button
                             key={card.id}
                             type="button"
-                            class={`voice-provider-card ${keyProvider === card.id ? 'active' : ''}`}
-                            onClick={() => onSelectKeyProvider(card.id)}
+                            class={`voice-provider-card ${isSelected ? 'active' : ''} ${isMix ? 'voice-mix-shortcut-card' : ''}`}
+                            onClick={() => {
+                              if (isMix) {
+                                openAdvancedMixGuide();
+                                return;
+                              }
+                              setSimpleVendor(card.id);
+                              setSimpleApiKey('');
+                              if (card.id === 'ark') {
+                                const arkCred = findSimpleVendorCred('ark', config.credentials);
+                                if (arkCred?.defaultModel) setSimpleArkModel(arkCred.defaultModel);
+                              }
+                            }}
                           >
                             <div class="voice-provider-card-title">
                               <span>{card.icon} {card.title}</span>
-                              {cnt > 0 && <span class="voice-provider-badge">{cnt}把</span>}
+                              {hasSaved && <span class="voice-provider-badge">已存</span>}
                             </div>
                             <div class="voice-provider-card-sub">{card.sub}</div>
                           </button>
@@ -1883,161 +2187,493 @@ export function VoiceCopilotSheets() {
                       })}
                     </div>
 
-                    {keyProvider === 'openai_compat' && selectedCatalog?.baseUrlExamples && (
-                      <Fragment>
-                        <label class="voice-field-label">快捷选厂商（自动填接口地址）</label>
-                        <div class="voice-chip-row" style="margin-top:0;margin-bottom:4px;">
-                          {selectedCatalog.baseUrlExamples.map(ex => (
-                            <button
-                              key={ex.url}
-                              type="button"
-                              class={`voice-quick-chip ${keyBaseUrl === ex.url ? 'active' : ''}`}
-                              onClick={() => setKeyBaseUrl(ex.url)}
-                            >
-                              {ex.label}
-                            </button>
-                          ))}
+                    {simpleVendor === 'native' ? (
+                      <div class="voice-simple-box">
+                        <div class="voice-muted-note" style="margin-top:0;">
+                          直接调用 iPhone / 浏览器自带听写与朗读，无需任何 API Key，支持「1号允许」「拒绝」「汇报进度」等常用口令。
                         </div>
-                        <label class="voice-field-label">接口地址 (Base URL)</label>
-                        <input
-                          class="voice-field-input"
-                          value={keyBaseUrl}
-                          placeholder="https://api.deepseek.com/v1"
-                          onInput={(e: any) => setKeyBaseUrl(e.target.value)}
-                        />
-                      </Fragment>
-                    )}
+                        <button
+                          type="button"
+                          class="primary-block-btn"
+                          disabled={activeProf.id === 'native'}
+                          onClick={() => void handleSimpleQuickActivate()}
+                        >
+                          {activeProf.id === 'native' ? '✅ 当前已在使用免费本机语音' : '🆓 切回免费本机语音'}
+                        </button>
+                      </div>
+                    ) : (
+                      <div class="voice-simple-box">
+                        {simpleMatchedCred && (
+                          <div class="voice-saved-hint">
+                            🔐 已保存密钥：{simpleMatchedCred.label} ({simpleMatchedCred.authSummary}) · 留空可直接启用，或粘贴新 Key 覆盖
+                          </div>
+                        )}
 
-                    {(keyProvider === 'volcengine_asr' || keyProvider === 'volcengine_tts') && (
-                      <Fragment>
-                        <label class="voice-field-label">火山鉴权方式（二选一，看你控制台给的是哪种）</label>
-                        <div class="voice-subseg">
-                          <button
-                            type="button"
-                            class={`voice-subseg-btn ${volcAuthMode === 'apiKey' ? 'active' : ''}`}
-                            onClick={() => setVolcAuthMode('apiKey')}
-                          >
-                            方式 A：单把 API Key
-                          </button>
-                          <button
-                            type="button"
-                            class={`voice-subseg-btn ${volcAuthMode === 'appToken' ? 'active' : ''}`}
-                            onClick={() => setVolcAuthMode('appToken')}
-                          >
-                            方式 B：AppID + Token
-                          </button>
-                        </div>
-                      </Fragment>
-                    )}
-
-                    {(!(keyProvider === 'volcengine_asr' || keyProvider === 'volcengine_tts') || volcAuthMode === 'apiKey') ? (
-                      <Fragment>
-                        <label class="voice-field-label">API Key（必填）</label>
+                        <label class="voice-field-label" style="margin-top:2px;">
+                          {simpleVendor === 'gemini'
+                            ? 'Gemini API Key'
+                            : simpleVendor === 'deepseek'
+                              ? 'DeepSeek API Key'
+                              : simpleVendor === 'ark'
+                                ? '火山方舟 Ark API Key'
+                                : 'OpenAI API Key'}
+                        </label>
                         <input
                           type="password"
                           class="voice-field-input"
-                          value={keyApiKey}
+                          value={simpleApiKey}
                           placeholder={
-                            keyProvider === 'gemini'
-                              ? '粘贴 Gemini Key（AIza... 或 AQ.Ab...）'
-                              : keyProvider === 'openai_compat'
-                                ? '粘贴 sk-... / ark-... 密钥'
-                                : '粘贴火山语音 API Key'
+                            simpleMatchedCred
+                              ? '留空沿用已保存密钥，或粘贴新 Key 替换'
+                              : simpleVendor === 'gemini'
+                                ? '例：AIzaSy... 或 AQ.Ab...'
+                                : simpleVendor === 'deepseek'
+                                  ? '例：sk-...'
+                                  : simpleVendor === 'ark'
+                                    ? '粘贴火山方舟控制台 API Key（例：8f3a...）'
+                                    : '例：sk-proj-...'
                           }
-                          onInput={(e: any) => setKeyApiKey(e.target.value)}
+                          onInput={(e: any) => setSimpleApiKey(e.target.value)}
                         />
-                      </Fragment>
-                    ) : (
-                      <div class="voice-two-col">
-                        <div>
-                          <label class="voice-field-label">AppID（必填）</label>
-                          <input
-                            class="voice-field-input"
-                            value={keyAppId}
-                            placeholder="火山语音 AppID"
-                            onInput={(e: any) => setKeyAppId(e.target.value)}
-                          />
+
+                        {simpleVendor === 'ark' && (
+                          <Fragment>
+                            <label class="voice-field-label">模型名或接入点 ID（已填好，可点选或填 ep-xxxx）</label>
+                            <input
+                              class="voice-field-input"
+                              value={simpleArkModel}
+                              placeholder="例：doubao-seed-2-0-lite-260215 或 ep-2025xxxx"
+                              onInput={(e: any) => setSimpleArkModel(e.target.value)}
+                            />
+                            <div class="voice-chip-row" style="margin-top:5px;">
+                              {ARK_MODEL_CHIPS.map(chip => (
+                                <button
+                                  key={chip.value}
+                                  type="button"
+                                  class={`voice-quick-chip ${simpleArkModel === chip.value ? 'active' : ''}`}
+                                  onClick={() => setSimpleArkModel(chip.value)}
+                                >
+                                  {chip.label}
+                                </button>
+                              ))}
+                            </div>
+                          </Fragment>
+                        )}
+
+                        <div class="voice-auto-plan-note">
+                          {simpleVendor === 'gemini' && '自动配置：听写 + 大脑 gemini-2.5-flash · 播报 Kore 自然女声'}
+                          {simpleVendor === 'deepseek' && '自动配置：大脑 deepseek-chat · 听写与播报自动用手机免费语音'}
+                          {simpleVendor === 'ark' && `自动配置：大脑火山方舟 (${simpleArkModel.trim() || 'doubao-seed-2-0-lite-260215'}) · 听写与播报自动用手机免费语音`}
+                          {simpleVendor === 'openai' && '自动配置：听写 + 大脑 gpt-4o-mini · 播报 alloy 自然人声'}
                         </div>
-                        <div>
-                          <label class="voice-field-label">Access Token（必填）</label>
-                          <input
-                            type="password"
-                            class="voice-field-input"
-                            value={keyAccessToken}
-                            placeholder="火山 Access Token"
-                            onInput={(e: any) => setKeyAccessToken(e.target.value)}
-                          />
-                        </div>
+
+                        <button
+                          type="button"
+                          class="primary-block-btn"
+                          disabled={simpleSaving}
+                          onClick={() => void handleSimpleQuickActivate()}
+                        >
+                          {simpleSaving
+                            ? '正在自动配置…'
+                            : simpleApiKey.trim()
+                              ? '⚡ 保存并立即启用'
+                              : simpleMatchedCred
+                                ? '⚡ 直接启用已有密钥'
+                                : '⚡ 保存并立即启用'}
+                        </button>
                       </div>
                     )}
+                  </div>
 
-                    <label class="voice-field-label">备注名（可选，留空自动命名）</label>
-                    <input
-                      class="voice-field-input"
-                      value={keyLabel}
-                      placeholder={`留空自动命名为「${inferDefaultCredLabel(keyProvider, keyBaseUrl)}」`}
-                      onInput={(e: any) => setKeyLabel(e.target.value)}
-                    />
+                  {/* 只留 2 个日常必用开关 */}
+                  <div class="voice-card">
+                    <div class="voice-toggle-row">
+                      <div>
+                        <div class="voice-row-main">🛡️ 高危操作二次确认</div>
+                        <div class="voice-row-sub">删文件 / 强推 / 部署等危险指令时的保护方式</div>
+                      </div>
+                      <select
+                        class="voice-mini-select"
+                        value={config.prefs.l2Policy}
+                        onChange={(e: any) => void updatePrefPatch({ l2Policy: e.target.value })}
+                      >
+                        <option value="pin">🔢 念 3 位确认码</option>
+                        <option value="screen_only">📱 仅点手机屏幕</option>
+                      </select>
+                    </div>
 
-                    <details class="voice-adv-details">
-                      <summary>⚙️ 高级参数（接口 / 模型 / 音色 · 已填好）</summary>
-                      <div class="voice-adv-body">
-                        {keyProvider !== 'openai_compat' && (
+                    <div class="voice-toggle-row">
+                      <div>
+                        <div class="voice-row-main">🎙️ 播报完自动开麦听我回答</div>
+                        <div class="voice-row-sub">念完选项后自动听 5.5 秒；边听歌时自动压低背景音乐</div>
+                      </div>
+                      <input
+                        type="checkbox"
+                        class="voice-switch"
+                        checked={config.prefs.autoListenAfterBriefing}
+                        onChange={(e: any) => void updatePrefPatch({ autoListenAfterBriefing: e.target.checked })}
+                      />
+                    </div>
+                  </div>
+
+                  {/* 清晰进入二级高级混搭模式 */}
+                  <button
+                    type="button"
+                    class="voice-adv-entry-btn"
+                    onClick={() => {
+                      setLabView('advanced');
+                      setLabTab(config.credentials.length > 0 ? 'profiles' : 'keys');
+                    }}
+                  >
+                    <div style="min-width:0;">
+                      <div class="voice-adv-entry-title">🎛️ 二级高级配置（自定义耳朵 / 大脑 / 嘴巴混搭）</div>
+                      <div class="voice-adv-entry-sub">
+                        例：火山豆包语音(听/说) + DeepSeek 大脑混搭、换模型/音色、中转站与压测
+                      </div>
+                    </div>
+                    <span class="voice-adv-entry-go">进入 ›</span>
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <Fragment>
+                <div class="voice-lab-tabs">
+                  <button
+                    type="button"
+                    class={`voice-lab-tab ${labTab === 'keys' ? 'active' : ''}`}
+                    onClick={() => setLabTab('keys')}
+                  >
+                    ① 密钥 ({config.credentials.length})
+                  </button>
+                  <button
+                    type="button"
+                    class={`voice-lab-tab ${labTab === 'profiles' ? 'active' : ''}`}
+                    onClick={() => setLabTab('profiles')}
+                  >
+                    ② 混搭方案
+                  </button>
+                  <button
+                    type="button"
+                    class={`voice-lab-tab ${labTab === 'bench' ? 'active' : ''}`}
+                    onClick={() => setLabTab('bench')}
+                  >
+                    ③ 压测排障
+                  </button>
+                </div>
+
+                <div class="voice-lab-body">
+                  {loadingCfg && <div class="voice-muted-note">正在读取加密配置…</div>}
+
+                  {/* 二级顶部简要示例指南（默认在点击「火山+DeepSeek混搭」时展开，随时可折叠） */}
+                  <details
+                    class="voice-mix-cheatbox"
+                    open={advGuideOpen}
+                    onToggle={(e: any) => setAdvGuideOpen(Boolean(e.currentTarget?.open))}
+                  >
+                    <summary>💡 混搭指南与例子（例：火山豆包听/说 + DeepSeek 大脑）</summary>
+                    <div class="voice-mix-cheatbody">
+                      <div>
+                        <strong>核心概念：</strong>语音助手由 3 部分拼装——<strong>👂 耳朵</strong>（听懂你说的话）、<strong>🧠 大脑</strong>（总结消息与决策）、<strong>🗣️ 嘴巴</strong>（把回复念进耳机）。
+                      </div>
+                      <div style="margin-top:6px;">
+                        <strong>🌋 你的火山 + DeepSeek 混搭示例（共需 2 步）：</strong>
+                      </div>
+                      <ol class="voice-mix-steps">
+                        <li>
+                          <strong>在 ① 密钥存 2 把 Key</strong>：
+                          <br />• <strong>火山豆包语音 Key</strong>（火山控制台「语音技术」获取；勾上「同时存入听写与播报」只贴 1 遍！）
+                          <br />• <strong>大脑 Key</strong>：选 <code>DeepSeek / 方舟</code>，可填 DeepSeek 官方（<code>sk-...</code>）<strong>或</strong>火山方舟 Ark Key（可同时调豆包和方舟版 DeepSeek）
+                        </li>
+                        <li>
+                          <strong>去 ② 混搭方案点「一键启用」或手动微调</strong>：
+                          <br />• 👂 耳朵：<code>火山豆包识别</code>（模型 <code>volc.bigasr.auc_turbo</code>）
+                          <br />• 🧠 大脑：<code>DeepSeek 官方</code>填 <code>deepseek-chat</code>；或<code>火山方舟</code>填 <code>doubao-seed-2-0-lite-260215</code> / <code>ep-2025xxxx</code>
+                          <br />• 🗣️ 嘴巴：<code>火山豆包播报</code>（模型 <code>seed-tts-2.0</code>，音色选 <code>vv 自然女声</code>）
+                        </li>
+                      </ol>
+                    </div>
+                  </details>
+
+                  {/* TAB 1: ① 密钥管理 (BYOK) */}
+                  {labTab === 'keys' && (
+                    <div class="voice-tab-stack">
+                      {config.credentials.length > 0 && (
+                        <div class="voice-card">
+                          <div class="voice-card-title" style="margin-bottom:8px;">已保存密钥 ({config.credentials.length})</div>
+                          {config.credentials.map(c => (
+                            <div key={c.id} class="voice-cred-item">
+                              <div style="flex:1;min-width:0;">
+                                <div class="voice-cred-title">
+                                  <span class="voice-prov-tag">{PROVIDER_DISPLAY_NAMES[c.provider] || c.provider}</span>
+                                  <span>{c.label}</span>
+                                  {c.active && <span class="voice-active-tag">默认</span>}
+                                </div>
+                                <div class="voice-cred-sub">{c.authSummary}{c.baseUrl ? ` · ${c.baseUrl.replace(/^https?:\/\//, '').slice(0, 38)}` : ''}</div>
+                                {testResults[c.id] && (
+                                  <div class={`voice-test-msg ${testResults[c.id].ok ? 'ok' : 'err'}`}>
+                                    {testResults[c.id].summary}
+                                  </div>
+                                )}
+                              </div>
+                              <div class="voice-cred-actions">
+                                <button
+                                  type="button"
+                                  class="voice-pill-btn"
+                                  disabled={testingCredId === c.id}
+                                  onClick={() => void handleTestCredential(c.id)}
+                                >
+                                  {testingCredId === c.id ? '测速中…' : '🔌 测速'}
+                                </button>
+                                {!c.active && (
+                                  <button type="button" class="voice-pill-btn" onClick={() => void handleActivateCredential(c.id)}>
+                                    设为默认
+                                  </button>
+                                )}
+                                <button type="button" class="voice-pill-btn danger" onClick={() => void handleDeleteCredential(c.id)}>
+                                  删
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {recommendedPresets.length > 0 && (
+                        <div class="voice-card">
+                          <div class="voice-card-title">⚡ 下一步：一键生成并启用混搭方案</div>
+                          <div class="voice-muted-note">根据你已存的密钥自动拼好耳朵 / 大脑 / 嘴巴，点一下立刻生效：</div>
+                          <div class="voice-quick-preset-list">
+                            {recommendedPresets.map(preset => (
+                              <button
+                                key={preset.key}
+                                type="button"
+                                class="voice-quick-preset-btn"
+                                disabled={applyingPresetKey === preset.key}
+                                onClick={() => void handleApplyQuickPreset(preset)}
+                              >
+                                <div style="min-width:0;">
+                                  <div class="voice-quick-preset-title">{preset.badge} · {preset.title}</div>
+                                  <div class="voice-quick-preset-sub">{preset.sub}</div>
+                                </div>
+                                <span class="voice-quick-preset-go">
+                                  {applyingPresetKey === preset.key ? '启用中…' : '一键启用 ›'}
+                                </span>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      <div class="voice-card">
+                        <div class="voice-card-title" style="margin-bottom:4px;">添加 API 密钥</div>
+                        <div class="voice-muted-note" style="margin-bottom:10px;">
+                          🔐 服务端 <strong>AES-256-GCM</strong> 加密落盘，永不回显明文。先点选你要添加哪一类：
+                        </div>
+
+                        <div class="voice-provider-grid">
+                          {PROVIDER_PICKER_CARDS.map(card => {
+                            const cnt = config.credentials.filter(c => c.provider === card.id).length;
+                            return (
+                              <button
+                                key={card.id}
+                                type="button"
+                                class={`voice-provider-card ${keyProvider === card.id ? 'active' : ''}`}
+                                onClick={() => onSelectKeyProvider(card.id)}
+                              >
+                                <div class="voice-provider-card-title">
+                                  <span>{card.icon} {card.title}</span>
+                                  {cnt > 0 && <span class="voice-provider-badge">{cnt}把</span>}
+                                </div>
+                                <div class="voice-provider-card-sub">{card.sub}</div>
+                              </button>
+                            );
+                          })}
+                        </div>
+
+                        {selectedPickerMeta?.example && (
+                          <div class="voice-example-callout">
+                            💡 {selectedPickerMeta.example}
+                          </div>
+                        )}
+
+                        {keyProvider === 'openai_compat' && (
                           <Fragment>
-                            <label class="voice-field-label">接口 Base URL（默认官方地址）</label>
+                            <label class="voice-field-label">快捷选厂商（自动填好接口地址）</label>
+                            <div class="voice-chip-row" style="margin-top:0;margin-bottom:4px;">
+                              {(selectedCatalog?.baseUrlExamples?.length
+                                ? selectedCatalog.baseUrlExamples
+                                : [
+                                    { label: 'DeepSeek 官方', url: 'https://api.deepseek.com/v1' },
+                                    { label: '火山方舟 Ark', url: 'https://ark.cn-beijing.volces.com/api/v3' },
+                                    { label: 'OpenAI 官方', url: 'https://api.openai.com/v1' },
+                                  ]
+                              ).map(ex => (
+                                <button
+                                  key={ex.url}
+                                  type="button"
+                                  class={`voice-quick-chip ${keyBaseUrl === ex.url ? 'active' : ''}`}
+                                  onClick={() => setKeyBaseUrl(ex.url)}
+                                >
+                                  {ex.label}
+                                </button>
+                              ))}
+                            </div>
+                            <label class="voice-field-label">接口地址 (Base URL)</label>
                             <input
                               class="voice-field-input"
                               value={keyBaseUrl}
-                              placeholder="https://..."
+                              placeholder="例：https://api.deepseek.com/v1 或 https://ark.cn-beijing.volces.com/api/v3"
                               onInput={(e: any) => setKeyBaseUrl(e.target.value)}
                             />
                           </Fragment>
                         )}
+
                         {(keyProvider === 'volcengine_asr' || keyProvider === 'volcengine_tts') && (
                           <Fragment>
-                            <label class="voice-field-label">火山 Resource ID（一般保持默认）</label>
-                            <input
-                              class="voice-field-input"
-                              value={keyResourceId}
-                              placeholder={keyProvider === 'volcengine_asr' ? 'volc.bigasr.auc_turbo' : 'seed-tts-2.0'}
-                              onInput={(e: any) => setKeyResourceId(e.target.value)}
-                            />
+                            <label class="voice-dual-check">
+                              <input
+                                type="checkbox"
+                                checked={volcSaveBoth}
+                                onChange={(e: any) => setVolcSaveBoth(Boolean(e.target.checked))}
+                              />
+                              <span>
+                                <strong>同一把火山语音 Key 同时用于「听写(ASR) + 播报(TTS)」</strong>
+                                <span class="voice-dual-check-sub">勾选后点一次保存同时录入两处，免贴两遍</span>
+                              </span>
+                            </label>
+
+                            <label class="voice-field-label">火山语音鉴权方式（一般选方式 A）</label>
+                            <div class="voice-subseg">
+                              <button
+                                type="button"
+                                class={`voice-subseg-btn ${volcAuthMode === 'apiKey' ? 'active' : ''}`}
+                                onClick={() => setVolcAuthMode('apiKey')}
+                              >
+                                方式 A：单把 API Key（推荐）
+                              </button>
+                              <button
+                                type="button"
+                                class={`voice-subseg-btn ${volcAuthMode === 'appToken' ? 'active' : ''}`}
+                                onClick={() => setVolcAuthMode('appToken')}
+                              >
+                                方式 B：AppID + Token
+                              </button>
+                            </div>
                           </Fragment>
                         )}
-                        <div class="voice-two-col">
-                          <div>
-                            <label class="voice-field-label">默认模型（可留空）</label>
-                            <input
-                              class="voice-field-input"
-                              value={keyDefaultModel}
-                              placeholder="留空按方案自动选"
-                              onInput={(e: any) => setKeyDefaultModel(e.target.value)}
-                            />
-                          </div>
-                          <div>
-                            <label class="voice-field-label">默认音色（可留空）</label>
-                            <input
-                              class="voice-field-input"
-                              value={keyDefaultVoice}
-                              placeholder="如 Kore / alloy / vv"
-                              onInput={(e: any) => setKeyDefaultVoice(e.target.value)}
-                            />
-                          </div>
-                        </div>
-                      </div>
-                    </details>
 
-                    <button
-                      type="button"
-                      class="primary-block-btn"
-                      disabled={savingKey}
-                      onClick={() => void handleSaveCredential()}
-                    >
-                      {savingKey ? '正在加密保存…' : '🔐 加密存入密钥池'}
-                    </button>
-                  </div>
-                </div>
-              )}
+                        {(!(keyProvider === 'volcengine_asr' || keyProvider === 'volcengine_tts') || volcAuthMode === 'apiKey') ? (
+                          <Fragment>
+                            <label class="voice-field-label">API Key（必填）</label>
+                            <input
+                              type="password"
+                              class="voice-field-input"
+                              value={keyApiKey}
+                              placeholder={
+                                keyProvider === 'gemini'
+                                  ? '例：AIzaSy... 或 AQ.Ab...'
+                                  : keyProvider === 'openai_compat'
+                                    ? '例：DeepSeek 填 sk-...；火山方舟填方舟控制台 Key'
+                                    : '粘贴火山引擎「语音技术」API Key'
+                              }
+                              onInput={(e: any) => setKeyApiKey(e.target.value)}
+                            />
+                          </Fragment>
+                        ) : (
+                          <div class="voice-two-col">
+                            <div>
+                              <label class="voice-field-label">AppID（必填）</label>
+                              <input
+                                class="voice-field-input"
+                                value={keyAppId}
+                                placeholder="例：1234567890"
+                                onInput={(e: any) => setKeyAppId(e.target.value)}
+                              />
+                            </div>
+                            <div>
+                              <label class="voice-field-label">Access Token（必填）</label>
+                              <input
+                                type="password"
+                                class="voice-field-input"
+                                value={keyAccessToken}
+                                placeholder="控制台生成的 Access Token"
+                                onInput={(e: any) => setKeyAccessToken(e.target.value)}
+                              />
+                            </div>
+                          </div>
+                        )}
+
+                        <label class="voice-field-label">备注名（可选，留空自动命名）</label>
+                        <input
+                          class="voice-field-input"
+                          value={keyLabel}
+                          placeholder={`留空自动命名为「${inferDefaultCredLabel(keyProvider, keyBaseUrl)}」`}
+                          onInput={(e: any) => setKeyLabel(e.target.value)}
+                        />
+
+                        <details class="voice-adv-details">
+                          <summary>⚙️ 更多参数（默认模型 / 音色 / Resource ID · 一般不用改）</summary>
+                          <div class="voice-adv-body">
+                            {keyProvider !== 'openai_compat' && (
+                              <Fragment>
+                                <label class="voice-field-label">接口 Base URL（默认官方地址）</label>
+                                <input
+                                  class="voice-field-input"
+                                  value={keyBaseUrl}
+                                  placeholder="https://..."
+                                  onInput={(e: any) => setKeyBaseUrl(e.target.value)}
+                                />
+                              </Fragment>
+                            )}
+                            {(keyProvider === 'volcengine_asr' || keyProvider === 'volcengine_tts') && (
+                              <Fragment>
+                                <label class="voice-field-label">火山 Resource ID（例：听写 volc.bigasr.auc_turbo / 播报 seed-tts-2.0）</label>
+                                <input
+                                  class="voice-field-input"
+                                  value={keyResourceId}
+                                  placeholder={keyProvider === 'volcengine_asr' ? 'volc.bigasr.auc_turbo' : 'seed-tts-2.0'}
+                                  onInput={(e: any) => setKeyResourceId(e.target.value)}
+                                />
+                              </Fragment>
+                            )}
+                            <div class="voice-two-col">
+                              <div>
+                                <label class="voice-field-label">默认模型（例：deepseek-chat / ep-xxxx）</label>
+                                <input
+                                  class="voice-field-input"
+                                  value={keyDefaultModel}
+                                  placeholder="留空按方案自动选"
+                                  onInput={(e: any) => setKeyDefaultModel(e.target.value)}
+                                />
+                              </div>
+                              <div>
+                                <label class="voice-field-label">默认音色（例：zh_female_vv_uranus_bigtts）</label>
+                                <input
+                                  class="voice-field-input"
+                                  value={keyDefaultVoice}
+                                  placeholder="如 vv / Kore / alloy"
+                                  onInput={(e: any) => setKeyDefaultVoice(e.target.value)}
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        </details>
+
+                        <button
+                          type="button"
+                          class="primary-block-btn"
+                          disabled={savingKey}
+                          onClick={() => void handleSaveCredential()}
+                        >
+                          {savingKey
+                            ? '正在加密保存…'
+                            : (keyProvider === 'volcengine_asr' || keyProvider === 'volcengine_tts') && volcSaveBoth
+                              ? '🔐 一次存入火山听写 + 播报'
+                              : '🔐 加密存入密钥池'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
 
               {/* TAB 2: ② 方案与开关 */}
               {labTab === 'profiles' && (
@@ -2093,9 +2729,9 @@ export function VoiceCopilotSheets() {
                                   <span>{isActive ? '✅ ' : '⚪ '}{p.name}</span>
                                 </div>
                                 <div class="voice-summary-pills">
-                                  <span class="voice-summary-pill">👂 耳朵：{formatStageSummary(p.stt.provider, p.stt.model, 'stt')}</span>
-                                  <span class="voice-summary-pill">🧠 大脑：{formatStageSummary(p.brain.provider, p.brain.model, 'brain')}</span>
-                                  <span class="voice-summary-pill">🗣️ 嘴巴：{formatStageSummary(p.tts.provider, p.tts.model, 'tts')}</span>
+                                  <span class="voice-summary-pill">👂 耳朵：{formatStageSummary(p.stt.provider, p.stt.model, 'stt', p.stt.credId, config.credentials)}</span>
+                                  <span class="voice-summary-pill">🧠 大脑：{formatStageSummary(p.brain.provider, p.brain.model, 'brain', p.brain.credId, config.credentials)}</span>
+                                  <span class="voice-summary-pill">🗣️ 嘴巴：{formatStageSummary(p.tts.provider, p.tts.model, 'tts', p.tts.credId, config.credentials)}</span>
                                 </div>
                               </div>
                               {!p.builtin && (
@@ -2152,7 +2788,10 @@ export function VoiceCopilotSheets() {
                       {/* STT */}
                       <div class="voice-stage-box">
                         <div class="voice-stage-title">👂 1. 语音识别（耳朵）</div>
-                        <div class="voice-stage-sub">负责把你说的话转成文字；省事可选「系统免费原生」</div>
+                        <div class="voice-stage-sub">负责把你对耳机说的话转成文字。</div>
+                        <div class="voice-stage-example">
+                          💡 例子：中文最准最快选<strong>火山豆包识别</strong>（默认模型 <code>volc.bigasr.auc_turbo</code>）；省钱免配直接选<strong>系统免费原生</strong>。
+                        </div>
 
                         <label class="voice-field-label">用哪家服务商听写</label>
                         <select
@@ -2165,8 +2804,8 @@ export function VoiceCopilotSheets() {
                           }}
                         >
                           <option value="native">系统免费原生（免 Key，直接用手机听写）</option>
+                          <option value="volcengine_asr">火山豆包 Flash ASR（极速中文·推荐）</option>
                           <option value="gemini">Google Gemini（1 把 Key 通用）</option>
-                          <option value="volcengine_asr">火山豆包 Flash ASR（极速中文听写）</option>
                           <option value="openai_compat">OpenAI 兼容接口（Whisper）</option>
                         </select>
 
@@ -2176,13 +2815,13 @@ export function VoiceCopilotSheets() {
 
                         {editingProfile.stt.provider !== 'native' && (
                           <details class="voice-adv-details">
-                            <summary>⚙️ 高级参数（识别模型 / 备用兜底 · 已填好）</summary>
+                            <summary>⚙️ 高级参数（识别模型 / 备用兜底 · 已填好默认值）</summary>
                             <div class="voice-adv-body">
                               <label class="voice-field-label">识别模型名 / 火山资源 ID</label>
                               <input
                                 class="voice-field-input"
                                 value={editingProfile.stt.model}
-                                placeholder="如 gemini-2.5-flash / volc.bigasr.auc_turbo"
+                                placeholder="例：火山填 volc.bigasr.auc_turbo；Gemini 填 gemini-2.5-flash"
                                 onInput={(e: any) => setEditingProfile({ ...editingProfile, stt: { ...editingProfile.stt, model: e.target.value } })}
                               />
                               {editingProfile.stt.provider === 'gemini' && (
@@ -2199,7 +2838,7 @@ export function VoiceCopilotSheets() {
                                   </select>
                                 </Fragment>
                               )}
-                              <label class="voice-field-label">主引擎失败时的备用听写</label>
+                              <label class="voice-field-label">主引擎失败时的备用听写（可选）</label>
                               <select
                                 class="voice-field-input"
                                 value={editingProfile.stt.fallbackChain?.[0]?.provider || ''}
@@ -2228,7 +2867,10 @@ export function VoiceCopilotSheets() {
                       {/* Brain */}
                       <div class="voice-stage-box">
                         <div class="voice-stage-title">🧠 2. 语音大脑（核心）</div>
-                        <div class="voice-stage-sub">负责听懂你想干嘛、决定查进度 / 批准 / 遥控哪台电脑</div>
+                        <div class="voice-stage-sub">负责总结电脑发来的长消息、念出选项，并听懂你的指令（如「1号允许」「选第二个」）。</div>
+                        <div class="voice-stage-example">
+                          💡 例子：<strong>DeepSeek 官方</strong>填 <code>deepseek-chat</code>；<strong>火山方舟 Ark</strong>填 <code>doubao-seed-2-0-lite-260215</code>、<code>deepseek-v3-250324</code> 或自定义接入点 <code>ep-2025xxxx</code>。
+                        </div>
 
                         <label class="voice-field-label">用哪家大模型思考</label>
                         <select
@@ -2241,26 +2883,35 @@ export function VoiceCopilotSheets() {
                             setEditingProfile({ ...editingProfile, brain: { ...editingProfile.brain, provider: prov, credId: '', model: defModel } });
                           }}
                         >
+                          <option value="openai_compat">DeepSeek / 火山方舟 / OpenAI（推荐）</option>
                           <option value="gemini">Google Gemini（速度快、工具调度准）</option>
-                          <option value="openai_compat">OpenAI 兼容接口（DeepSeek / 方舟 Ark / OpenAI）</option>
                           <option value="native">本地基础口令（免 Key，仅支持固定口令）</option>
                         </select>
 
-                        {renderCredSelect(editingProfile.brain.provider, editingProfile.brain.credId, v =>
-                          setEditingProfile({ ...editingProfile, brain: { ...editingProfile.brain, credId: v } }),
-                        )}
+                        {renderCredSelect(editingProfile.brain.provider, editingProfile.brain.credId, v => {
+                          const picked = config.credentials.find(c => c.id === v);
+                          const nextModel = picked ? inferOpenAiCompatModel(picked) : editingProfile.brain.model;
+                          setEditingProfile({
+                            ...editingProfile,
+                            brain: {
+                              ...editingProfile.brain,
+                              credId: v,
+                              model: editingProfile.brain.provider === 'openai_compat' && picked ? nextModel : editingProfile.brain.model,
+                            },
+                          });
+                        })}
 
                         {editingProfile.brain.provider !== 'native' && (
                           <Fragment>
-                            <label class="voice-field-label">大模型名称（点下方标签可快填）</label>
+                            <label class="voice-field-label">大模型名称 / 方舟接入点 ID（点下方标签可快填）</label>
                             <input
                               class="voice-field-input"
                               value={editingProfile.brain.model}
-                              placeholder="如 gemini-2.5-flash / deepseek-chat"
+                              placeholder="例：deepseek-chat / doubao-seed-2-0-lite-260215 / ep-2025xxxx"
                               onInput={(e: any) => setEditingProfile({ ...editingProfile, brain: { ...editingProfile.brain, model: e.target.value } })}
                             />
                             {BRAIN_MODEL_CHIPS[editingProfile.brain.provider] && (
-                              <div class="voice-chip-row" style="margin-top:2px;">
+                              <div class="voice-chip-row" style="margin-top:4px;">
                                 {BRAIN_MODEL_CHIPS[editingProfile.brain.provider].map(chip => (
                                   <button
                                     key={chip.value}
@@ -2274,9 +2925,9 @@ export function VoiceCopilotSheets() {
                               </div>
                             )}
                             <details class="voice-adv-details">
-                              <summary>⚙️ 高级参数（思考档位 · 默认极速 ~1 秒）</summary>
+                              <summary>⚙️ 高级参数（思考档位 · 默认关闭思考，响应 ~1 秒）</summary>
                               <div class="voice-adv-body">
-                                <label class="voice-field-label">思考深度（越低说话响应越快）</label>
+                                <label class="voice-field-label">思考深度（走路语音强烈建议选「关闭思考」，开口最快）</label>
                                 <select
                                   class="voice-field-input"
                                   value={editingProfile.brain.thinkingLevel || 'off'}
@@ -2296,7 +2947,10 @@ export function VoiceCopilotSheets() {
                       {/* TTS */}
                       <div class="voice-stage-box">
                         <div class="voice-stage-title">🗣️ 3. 语音播报（嘴巴）</div>
-                        <div class="voice-stage-sub">负责把回复念到耳机里；省钱选「系统免费原生」，自然人声选云端</div>
+                        <div class="voice-stage-sub">负责把总结和回复念进耳机里。</div>
+                        <div class="voice-stage-example">
+                          💡 例子：最像真人中文选<strong>火山豆包播报</strong>（默认 <code>seed-tts-2.0</code> + <code>vv 自然女声</code>）；省钱零延迟选<strong>系统免费原生</strong>。
+                        </div>
 
                         <label class="voice-field-label">用哪家语音播报</label>
                         <select
@@ -2310,8 +2964,8 @@ export function VoiceCopilotSheets() {
                           }}
                         >
                           <option value="native">系统免费原生（免 Key，零延迟）</option>
+                          <option value="volcengine_tts">火山豆包 Seed-TTS 2.0（自然中文·推荐）</option>
                           <option value="gemini">Google Gemini 语音（1 把 Key 通用）</option>
-                          <option value="volcengine_tts">火山豆包 Seed-TTS 2.0（超自然中文）</option>
                           <option value="openai_compat">OpenAI 兼容接口（/audio/speech）</option>
                         </select>
 
@@ -2320,39 +2974,42 @@ export function VoiceCopilotSheets() {
                         )}
 
                         {editingProfile.tts.provider !== 'native' && (
-                          <details class="voice-adv-details">
-                            <summary>⚙️ 高级参数（播报模型 / 音色选择 · 已填好）</summary>
-                            <div class="voice-adv-body">
-                              <label class="voice-field-label">声音音色（点标签快速切换）</label>
-                              <input
-                                class="voice-field-input"
-                                value={editingProfile.tts.voice || ''}
-                                placeholder="如 Kore / alloy / zh_female_vv_uranus_bigtts"
-                                onInput={(e: any) => setEditingProfile({ ...editingProfile, tts: { ...editingProfile.tts, voice: e.target.value } })}
-                              />
-                              {TTS_VOICE_CHIPS[editingProfile.tts.provider] && (
-                                <div class="voice-chip-row" style="margin-top:4px;margin-bottom:4px;">
-                                  {TTS_VOICE_CHIPS[editingProfile.tts.provider].map(v => (
-                                    <button
-                                      key={v.value}
-                                      type="button"
-                                      class={`voice-quick-chip ${editingProfile.tts.voice === v.value ? 'active' : ''}`}
-                                      onClick={() => setEditingProfile({ ...editingProfile, tts: { ...editingProfile.tts, voice: v.value } })}
-                                    >
-                                      {v.label}
-                                    </button>
-                                  ))}
-                                </div>
-                              )}
-                              <label class="voice-field-label">播报模型 / 火山资源 ID（一般不用改）</label>
-                              <input
-                                class="voice-field-input"
-                                value={editingProfile.tts.model}
-                                placeholder="如 gemini-2.5-flash-preview-tts / seed-tts-2.0"
-                                onInput={(e: any) => setEditingProfile({ ...editingProfile, tts: { ...editingProfile.tts, model: e.target.value } })}
-                              />
-                            </div>
-                          </details>
+                          <Fragment>
+                            <label class="voice-field-label">播报音色（点标签一键切换）</label>
+                            {TTS_VOICE_CHIPS[editingProfile.tts.provider] && (
+                              <div class="voice-chip-row" style="margin-top:0;margin-bottom:4px;">
+                                {TTS_VOICE_CHIPS[editingProfile.tts.provider].map(v => (
+                                  <button
+                                    key={v.value}
+                                    type="button"
+                                    class={`voice-quick-chip ${editingProfile.tts.voice === v.value ? 'active' : ''}`}
+                                    onClick={() => setEditingProfile({ ...editingProfile, tts: { ...editingProfile.tts, voice: v.value } })}
+                                  >
+                                    {v.label}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                            <details class="voice-adv-details">
+                              <summary>⚙️ 高级参数（自定义音色代码 / 播报模型 · 已填好）</summary>
+                              <div class="voice-adv-body">
+                                <label class="voice-field-label">音色代码（例：火山填 zh_female_vv_uranus_bigtts）</label>
+                                <input
+                                  class="voice-field-input"
+                                  value={editingProfile.tts.voice || ''}
+                                  placeholder="如 zh_female_vv_uranus_bigtts / Kore / alloy"
+                                  onInput={(e: any) => setEditingProfile({ ...editingProfile, tts: { ...editingProfile.tts, voice: e.target.value } })}
+                                />
+                                <label class="voice-field-label">播报模型 / 火山资源 ID（一般保持默认）</label>
+                                <input
+                                  class="voice-field-input"
+                                  value={editingProfile.tts.model}
+                                  placeholder="例：seed-tts-2.0 / gemini-2.5-flash-preview-tts"
+                                  onInput={(e: any) => setEditingProfile({ ...editingProfile, tts: { ...editingProfile.tts, model: e.target.value } })}
+                                />
+                              </div>
+                            </details>
+                          </Fragment>
                         )}
                       </div>
 
@@ -2441,7 +3098,7 @@ export function VoiceCopilotSheets() {
                 </div>
               )}
 
-              {/* TAB 3: ③ 测一测 (Voice Lab Dry-Run) */}
+              {/* TAB 3: ③ 压测排障 (Voice Lab Dry-Run) */}
               {labTab === 'bench' && (
                 <div class="voice-tab-stack">
                   <div class="voice-card">
@@ -2451,10 +3108,13 @@ export function VoiceCopilotSheets() {
                         换方案
                       </button>
                     </div>
+                    <div class="voice-muted-note" style="margin-top:0;margin-bottom:6px;">
+                      用于排查哪一步（听写 / 大脑 / 播报）变慢或报错；勾选安全试跑绝不会真的操作电脑。
+                    </div>
                     <div class="voice-summary-pills">
-                      <span class="voice-summary-pill">👂 耳朵：{formatStageSummary(activeProf.stt.provider, activeProf.stt.model, 'stt')}</span>
-                      <span class="voice-summary-pill">🧠 大脑：{formatStageSummary(activeProf.brain.provider, activeProf.brain.model, 'brain')}</span>
-                      <span class="voice-summary-pill">🗣️ 嘴巴：{formatStageSummary(activeProf.tts.provider, activeProf.tts.model, 'tts')}</span>
+                      <span class="voice-summary-pill">👂 耳朵：{formatStageSummary(activeProf.stt.provider, activeProf.stt.model, 'stt', activeProf.stt.credId, config.credentials)}</span>
+                      <span class="voice-summary-pill">🧠 大脑：{formatStageSummary(activeProf.brain.provider, activeProf.brain.model, 'brain', activeProf.brain.credId, config.credentials)}</span>
+                      <span class="voice-summary-pill">🗣️ 嘴巴：{formatStageSummary(activeProf.tts.provider, activeProf.tts.model, 'tts', activeProf.tts.credId, config.credentials)}</span>
                     </div>
                     {activeMissingProviders.length > 0 && (
                       <button
@@ -2590,6 +3250,8 @@ export function VoiceCopilotSheets() {
                 </div>
               )}
             </div>
+              </Fragment>
+            )}
           </div>
         </div>
       )}

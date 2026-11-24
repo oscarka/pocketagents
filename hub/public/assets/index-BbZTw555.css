@@ -6047,6 +6047,207 @@
   border-color: var(--primary);
   color: var(--primary);
 }
+.voice-back-btn {
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--subtle);
+  color: var(--primary);
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.voice-status-hero {
+  background: var(--primary-soft);
+  border-color: rgba(37, 99, 235, 0.25);
+}
+.voice-status-hero-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.voice-status-hero-title {
+  font-size: 13.5px;
+  font-weight: 800;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.voice-status-hero-sub {
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  margin-top: 3px;
+  line-height: 1.4;
+}
+.voice-mix-shortcut-card {
+  border-style: dashed;
+  border-color: rgba(37, 99, 235, 0.45);
+}
+.voice-simple-box {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+.voice-saved-hint {
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--green);
+  background: var(--green-soft);
+  border-radius: 9px;
+  padding: 6px 9px;
+  margin-bottom: 8px;
+  font-weight: 600;
+}
+.voice-auto-plan-note {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+  margin: 8px 0 10px;
+  padding: 6px 9px;
+  border-radius: 8px;
+  background: var(--subtle);
+}
+.voice-adv-entry-btn {
+  width: 100%;
+  text-align: left;
+  padding: 11px 13px;
+  border-radius: 13px;
+  border: 1px dashed var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.voice-adv-entry-title {
+  font-size: 12.5px;
+  font-weight: 800;
+  color: var(--text);
+}
+.voice-adv-entry-sub {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 2px;
+  line-height: 1.35;
+}
+.voice-adv-entry-go {
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--primary);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.voice-mix-cheatbox {
+  margin-bottom: 10px;
+  padding: 9px 11px;
+  border-radius: 12px;
+  background: var(--primary-soft);
+  border: 1px solid rgba(37, 99, 235, 0.25);
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+.voice-mix-cheatbox > summary {
+  cursor: pointer;
+  font-weight: 800;
+  color: var(--text);
+  list-style: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.voice-mix-cheatbox > summary::-webkit-details-marker {
+  display: none;
+}
+.voice-mix-cheatbox > summary::after {
+  content: '展开 ▾';
+  font-size: 10.5px;
+  color: var(--primary);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.voice-mix-cheatbox[open] > summary::after {
+  content: '收起 ▴';
+}
+.voice-mix-cheatbody {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(37, 99, 235, 0.18);
+}
+.voice-mix-cheatbody code,
+.voice-stage-example code {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: rgba(15, 23, 42, 0.08);
+  color: var(--text);
+}
+[data-theme="dark"] .voice-mix-cheatbody code,
+[data-theme="dark"] .voice-stage-example code {
+  background: rgba(255, 255, 255, 0.12);
+}
+.voice-mix-steps {
+  margin: 5px 0 0;
+  padding-left: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.voice-example-callout {
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+  background: var(--subtle);
+  border-left: 3px solid var(--primary);
+  border-radius: 6px;
+  padding: 7px 9px;
+  margin-bottom: 8px;
+}
+.voice-dual-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--green-soft);
+  border: 1px solid rgba(22, 163, 74, 0.25);
+  margin: 6px 0 8px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text);
+  cursor: pointer;
+}
+.voice-dual-check input {
+  margin-top: 2px;
+  width: 16px;
+  height: 16px;
+  accent-color: var(--primary);
+  flex-shrink: 0;
+}
+.voice-dual-check-sub {
+  display: block;
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+.voice-stage-example {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 8px;
+  margin: 2px 0 4px;
+}
 /* ==================== DSH 滑卡批阅模式 (Triage Swipe Deck) — 独立命名空间样式 ==================== */
 
 /* 列表筛选栏最左侧：低调正方形 4 格小方块入口按钮 */

@@ -2,6 +2,14 @@
 
 本项目的重要变更都记录在这里。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [0.9.15] - 2026-11-24
+
+### Improved
+
+- **随行语音设置重做为「一层极简 1 把 Key 全自动 + 二层火山/DeepSeek 混搭带实例说明」（`hub/web/src/components/VoiceCopilotSheets.tsx` / `hub/web/src/controller.js` / `hub/web/src/styles/app.css`）**：
+  - **一层极简 1 屏搞定**：彻底移除默认 3 Tab 迷宫与设置页 4 入口按钮（主设置收口为「🎧 进入随行模式」+「⚙️ 语音设置」）；打开即见顶部「当前生效 + 一键 `🔊 试听`」，下方 6 张直觉卡片（免费本机 / Gemini / DeepSeek / 火山方舟 Ark / OpenAI / 火山+DeepSeek混搭），贴 1 把 Key 点保存即自动配好最优模型与音色并立即启用，底部只留「高危操作确认」与「播报完自动开麦」2 个常用开关；
+  - **二层高级混搭补全简要说明、真实例子与火山语音一键双存**：点进二级高级模式自带可折叠「💡 火山豆包听/说 + DeepSeek/方舟大脑混搭指南与例子」；录入火山豆包语音 Key 默认勾选「同一把 Key 同时存入听写 (ASR) 与播报 (TTS)」（免贴两遍）；自动为「火山语音 + DeepSeek/方舟」生成一键推荐混搭方案；自定义编辑器中 `👂 耳朵` / `🧠 大脑` / `🗣️ 嘴巴` 每一段均补齐白话作用说明与具体模型/接入点（`volc.bigasr.auc_turbo`、`deepseek-chat`、`doubao-seed-2-0-lite-260215`、`ep-2025xxxx`、`seed-tts-2.0`、`vv 自然女声`）实例，并将播报音色标签前置方便一键切换。
+
 ## [0.9.14] - 2026-11-24
 
 ### Added & Improved
