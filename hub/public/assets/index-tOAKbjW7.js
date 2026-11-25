@@ -2255,6 +2255,7 @@ function VoiceProviderSheet(props) {
 					provider: draft.provider,
 					label: draft.label.trim(),
 					baseUrl: draft.baseUrl.trim(),
+					authMode: isVolc ? draft.volcAuthMode : "apiKey",
 					apiKey: isVolc && draft.volcAuthMode === "appToken" ? "" : draft.apiKey.trim(),
 					appId: isVolc && draft.volcAuthMode === "appToken" ? draft.appId.trim() : "",
 					accessToken: isVolc && draft.volcAuthMode === "appToken" ? draft.accessToken.trim() : "",
@@ -2365,8 +2366,15 @@ function VoiceProviderSheet(props) {
 				active: true
 			};
 			if (isVolc && draft.volcAuthMode === "appToken") {
+				payload.apiKey = "";
 				if (draft.appId.trim()) payload.appId = draft.appId.trim();
 				if (draft.accessToken.trim()) payload.accessToken = draft.accessToken.trim();
+			} else if (isVolc) {
+				if (draft.apiKey.trim()) {
+					payload.apiKey = draft.apiKey.trim();
+					payload.appId = "";
+					payload.accessToken = "";
+				}
 			} else if (draft.apiKey.trim()) payload.apiKey = draft.apiKey.trim();
 			const res = await apiCall("/api/voice/credentials", {
 				method: "POST",

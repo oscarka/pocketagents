@@ -500,4 +500,57 @@ test('v0.9.23 VoiceCopilot testCredential supports unsaved draft testing, SSRF &
   assert.equal(volcDual.ttsOk, false);
   assert.match(volcDual.summary, /听写连通/);
   assert.match(volcDual.summary, /Seed-TTS 2\.0/);
+
+  // 6. v0.9.24 Switching saved Volcengine cred from apiKey -> appToken NEVER falls back to stale apiKey & uses exact ASR/TTS headers
+  const volcSaved = await vault.upsertCredential({
+    provider: 'volcengine_asr',
+    label: '火山听写',
+    apiKey: 'stale-wrong-api-key',
+  });
+  assert.equal(volcSaved.ok, true);
+  let capturedHeaders = null;
+  const headerProbeCopilot = new VoiceCopilotEngine({
+    vault,
+    hub: null,
+    fetchImpl: async (_url, init) => {
+      capturedHeaders = init?.headers || {};
+      return {
+        ok: true,
+        status: 200,
+        headers: { get: k => (k.toLowerCase() === 'x-api-status-code' ? '20000003' : 'audio/mpeg') },
+        arrayBuffer: async () => Buffer.from('mp3bytes'),
+        json: async () => ({}),
+        text: async () => '',
+      };
+    },
+  });
+  const switched = await headerProbeCopilot.testCredential({
+    draft: {
+      id: volcSaved.credential.id,
+      provider: 'volcengine_asr',
+      authMode: 'appToken',
+      appId: '99887766',
+      accessToken: 'real-volc-token',
+    },
+  });
+  assert.equal(switched.ok, true);
+  assert.equal(capturedHeaders['X-Api-Key'], undefined, 'Stale apiKey must NOT be sent in appToken mode');
+  assert.equal(capturedHeaders['X-Api-App-Key'], '99887766');
+  assert.equal(capturedHeaders['X-Api-App-Id'], undefined, 'ASR uses X-Api-App-Key, not X-Api-App-Id');
+  assert.equal(capturedHeaders['X-Api-Access-Key'], 'real-volc-token');
+
+  // Verify TTS uses X-Api-App-Id + X-Api-Access-Key (no X-Api-App-Key)
+  const ttsSwitched = await headerProbeCopilot.testCredential({
+    draft: {
+      provider: 'volcengine_tts',
+      authMode: 'appToken',
+      appId: '99887766',
+      accessToken: 'real-volc-token',
+    },
+  });
+  assert.equal(ttsSwitched.ok, true);
+  assert.equal(capturedHeaders['X-Api-Key'], undefined);
+  assert.equal(capturedHeaders['X-Api-App-Id'], '99887766');
+  assert.equal(capturedHeaders['X-Api-App-Key'], undefined, 'TTS uses X-Api-App-Id, not X-Api-App-Key');
+  assert.equal(capturedHeaders['X-Api-Access-Key'], 'real-volc-token');
 });

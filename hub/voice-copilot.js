@@ -795,7 +795,7 @@ async function fetchWithTimeout(fetchImpl, url, options = {}, timeoutMs = DEFAUL
   }
 }
 
-function buildVolcHeaders(cred, resourceId) {
+function buildVolcHeaders(cred, resourceId, provider = '') {
   const headers = {
     'Content-Type': 'application/json',
     'X-Api-Resource-Id': resourceId,
@@ -804,8 +804,14 @@ function buildVolcHeaders(cred, resourceId) {
   if (cred.apiKey) {
     headers['X-Api-Key'] = cred.apiKey
   } else {
-    headers['X-Api-App-Id'] = cred.appId
-    headers['X-Api-App-Key'] = cred.appId
+    if (provider === 'volcengine_asr') {
+      headers['X-Api-App-Key'] = cred.appId
+    } else if (provider === 'volcengine_tts') {
+      headers['X-Api-App-Id'] = cred.appId
+    } else {
+      headers['X-Api-App-Id'] = cred.appId
+      headers['X-Api-App-Key'] = cred.appId
+    }
     headers['X-Api-Access-Key'] = cred.accessToken
   }
   return headers
@@ -1186,7 +1192,7 @@ export class VoiceCopilotEngine {
       const url = cred.baseUrl || 'https://openspeech.bytedance.com/api/v3/auc/bigmodel/recognize/flash'
       const resourceId = stageCfg?.model || cred.resourceId || 'volc.bigasr.auc_turbo'
       const headers = {
-        ...buildVolcHeaders(cred, resourceId),
+        ...buildVolcHeaders(cred, resourceId, 'volcengine_asr'),
         'X-Api-Sequence': '-1',
       }
       const reqBody = {
@@ -1214,13 +1220,15 @@ export class VoiceCopilotEngine {
       }
       const data = await resp.json().catch(() => ({}))
       if (!resp.ok || (statusCode && statusCode !== '20000000')) {
+        const hdrCode = data?.header?.code ? ` (${data.header.code})` : ''
+        const hdrMsg = data?.header?.message ? `${data.header.message}${hdrCode}` : ''
         return {
           ok: false,
           provider,
           model: resourceId,
           credId: cred.id,
           latencyMs,
-          error: statusMsg || data?.message || data?.error || `Volcengine ASR HTTP ${resp.status} (${statusCode || 'err'})`,
+          error: statusMsg || hdrMsg || data?.message || data?.error || `Volcengine ASR HTTP ${resp.status} (${statusCode || 'err'})`,
         }
       }
       const text = String(data?.result?.text || data?.text || '').trim()
@@ -2094,7 +2102,7 @@ export class VoiceCopilotEngine {
       const url = cred.baseUrl || 'https://openspeech.bytedance.com/api/v3/tts/unidirectional'
       const resourceId = stageCfg.model || cred.resourceId || 'seed-tts-2.0'
       const speaker = voice || stageCfg.voice || cred.defaultVoice || 'zh_female_vv_uranus_bigtts'
-      const headers = buildVolcHeaders(cred, resourceId)
+      const headers = buildVolcHeaders(cred, resourceId, 'volcengine_tts')
       const speechRate = Math.max(-50, Math.min(100, Math.round((effectiveSpeed - 1) * 50)))
       const reqBody = {
         user: { uid: 'pocketagents-walk' },
@@ -2117,7 +2125,16 @@ export class VoiceCopilotEngine {
       const contentType = String(resp.headers?.get?.('content-type') || '').toLowerCase()
       if (!resp.ok) {
         const errText = await resp.text().catch(() => '')
-        const rawErr = errText.slice(0, 200) || `Volcengine TTS HTTP ${resp.status}`
+        let cleanErr = ''
+        try {
+          const parsed = JSON.parse(errText)
+          const pMsg = parsed?.header?.message || parsed?.message || parsed?.error || ''
+          const pCode = parsed?.header?.code || parsed?.code || ''
+          if (pMsg) cleanErr = pCode ? `${pMsg} (${pCode})` : String(pMsg)
+        } catch {
+          // non-json error body
+        }
+        const rawErr = cleanErr || errText.slice(0, 180) || `Volcengine TTS HTTP ${resp.status}`
         return {
           ok: false,
           provider,
@@ -2396,10 +2413,23 @@ export class VoiceCopilotEngine {
     const rawApiKey = String(draft?.apiKey || '').trim()
     const rawAppId = String(draft?.appId || '').trim()
     const rawAccessToken = String(draft?.accessToken || '').trim()
+    const volcAuthMode = String(draft?.authMode || '').trim().toLowerCase()
+    const isVolc = provider === 'volcengine_asr' || provider === 'volcengine_tts'
 
-    const apiKey = rawApiKey || (canReuseStoredSecret ? existing.apiKey : '')
-    const appId = rawAppId || (canReuseStoredSecret ? existing.appId : '')
-    const accessToken = rawAccessToken || (canReuseStoredSecret ? existing.accessToken : '')
+    let apiKey = ''
+    let appId = ''
+    let accessToken = ''
+    if (isVolc && volcAuthMode === 'apptoken') {
+      // Explicit AppID + Access Token mode: NEVER fall back to stale stored apiKey!
+      appId = rawAppId || (canReuseStoredSecret ? existing.appId : '')
+      accessToken = rawAccessToken || (canReuseStoredSecret ? existing.accessToken : '')
+    } else if (isVolc && volcAuthMode === 'apikey') {
+      apiKey = rawApiKey || (canReuseStoredSecret ? existing.apiKey : '')
+    } else {
+      apiKey = rawApiKey || (canReuseStoredSecret ? existing.apiKey : '')
+      appId = rawAppId || (canReuseStoredSecret ? existing.appId : '')
+      accessToken = rawAccessToken || (canReuseStoredSecret ? existing.accessToken : '')
+    }
 
     if (provider === 'volcengine_asr' || provider === 'volcengine_tts') {
       if (!apiKey && !(appId && accessToken)) {

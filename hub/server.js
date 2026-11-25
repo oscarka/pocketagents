@@ -1842,21 +1842,42 @@ export function createHubServer({
 
         if (method === 'POST' && pathname === '/api/voice/test') {
           const outcome = await voiceCopilot.testCredential(body || {})
+          if (!outcome.ok) {
+            const authHint = body?.draft?.authMode || (body?.draft?.appId ? 'appToken' : body?.credId ? 'saved' : 'apiKey')
+            logger?.warn?.(
+              `[voice] test failed provider=${outcome.provider || body?.draft?.provider || '?'} model=${outcome.model || ''} auth=${authHint} latency=${outcome.latencyMs ?? 0}ms err=${String(outcome.error || outcome.summary || '').slice(0, 260)}`,
+            )
+          }
           return { status: outcome.ok ? 200 : 502, json: outcome }
         }
 
         if (method === 'POST' && pathname === '/api/voice/stt') {
           const outcome = await voiceCopilot.runStt(body || {})
+          if (!outcome.ok) {
+            logger?.warn?.(
+              `[voice] stt failed provider=${outcome.provider || '?'} model=${outcome.model || ''} latency=${outcome.latencyMs ?? 0}ms err=${String(outcome.error || '').slice(0, 260)}`,
+            )
+          }
           return { status: outcome.ok ? 200 : 502, json: outcome }
         }
 
         if (method === 'POST' && pathname === '/api/voice/turn') {
           const outcome = await voiceCopilot.runBrainTurn(body || {})
+          if (!outcome.ok) {
+            logger?.warn?.(
+              `[voice] turn failed provider=${outcome.provider || '?'} model=${outcome.model || ''} latency=${outcome.latencyMs ?? 0}ms err=${String(outcome.error || '').slice(0, 260)}`,
+            )
+          }
           return { status: outcome.ok ? 200 : 502, json: outcome }
         }
 
         if (method === 'POST' && pathname === '/api/voice/tts') {
           const outcome = await voiceCopilot.runTts(body || {})
+          if (!outcome.ok) {
+            logger?.warn?.(
+              `[voice] tts failed provider=${outcome.provider || '?'} model=${outcome.model || ''} latency=${outcome.latencyMs ?? 0}ms err=${String(outcome.error || '').slice(0, 260)}`,
+            )
+          }
           return { status: outcome.ok ? 200 : 502, json: outcome }
         }
 
