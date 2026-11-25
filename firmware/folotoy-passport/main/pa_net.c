@@ -109,8 +109,10 @@ bool pa_net_save_wifi_config(pa_net_config_t *cfg, const char *ssid, const char 
     ESP_LOGI(TAG, "[PA] Wi-Fi config updated: ssid=%s (reconnecting)", cfg->wifi_ssid);
     wifi_config_t wcfg;
     memset(&wcfg, 0, sizeof(wcfg));
-    snprintf((char *)wcfg.sta.ssid, sizeof(wcfg.sta.ssid), "%s", cfg->wifi_ssid);
-    snprintf((char *)wcfg.sta.password, sizeof(wcfg.sta.password), "%s", cfg->wifi_pass);
+    size_t ssid_len = strnlen(cfg->wifi_ssid, sizeof(wcfg.sta.ssid) - 1);
+    memcpy(wcfg.sta.ssid, cfg->wifi_ssid, ssid_len);
+    size_t pass_len = strnlen(cfg->wifi_pass, sizeof(wcfg.sta.password) - 1);
+    memcpy(wcfg.sta.password, cfg->wifi_pass, pass_len);
     wcfg.sta.threshold.authmode = cfg->wifi_pass[0] ? WIFI_AUTH_WPA2_PSK : WIFI_AUTH_OPEN;
     (void)esp_wifi_disconnect();
     (void)esp_wifi_set_config(WIFI_IF_STA, &wcfg);
@@ -164,8 +166,10 @@ bool pa_net_wifi_start(const pa_net_config_t *cfg)
 
     wifi_config_t wcfg;
     memset(&wcfg, 0, sizeof(wcfg));
-    snprintf((char *)wcfg.sta.ssid, sizeof(wcfg.sta.ssid), "%s", cfg->wifi_ssid);
-    snprintf((char *)wcfg.sta.password, sizeof(wcfg.sta.password), "%s", cfg->wifi_pass);
+    size_t ssid_len = strnlen(cfg->wifi_ssid, sizeof(wcfg.sta.ssid) - 1);
+    memcpy(wcfg.sta.ssid, cfg->wifi_ssid, ssid_len);
+    size_t pass_len = strnlen(cfg->wifi_pass, sizeof(wcfg.sta.password) - 1);
+    memcpy(wcfg.sta.password, cfg->wifi_pass, pass_len);
     wcfg.sta.threshold.authmode = cfg->wifi_pass[0] ? WIFI_AUTH_WPA2_PSK : WIFI_AUTH_OPEN;
 
     if (esp_wifi_set_storage(WIFI_STORAGE_RAM) != ESP_OK) return false;
