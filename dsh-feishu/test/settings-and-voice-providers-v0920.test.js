@@ -333,19 +333,19 @@ test('v0.9.20 settings-panel: renders 4 grouped sections ("模型与偏好") and
     refreshPushStatus: () => { pushRefreshCalls += 1; },
   });
 
-  // 1. Render Settings Home
+  // 1. Render Settings Home (Apple Native Minimalist Design A)
   panel.render(mockViewport);
   assert.equal(panel.getActiveSubpage(), 'home');
-  assert.match(mockViewport.innerHTML, /电脑与连接/);
+  assert.match(mockViewport.innerHTML, /设置/);
+  assert.match(mockViewport.innerHTML, /添加电脑/);
   assert.match(mockViewport.innerHTML, /模型与偏好/);
   assert.match(mockViewport.innerHTML, /安全与隐私/);
-  assert.match(mockViewport.innerHTML, /关于与工具/);
-  // Compact host rows & live summaries on Home
+  assert.match(mockViewport.innerHTML, /更多/);
+  // Compact host strip & crisp single-line values on Home
   assert.match(mockViewport.innerHTML, /mac-mini/);
   assert.match(mockViewport.innerHTML, /macbook-air/);
-  assert.match(mockViewport.innerHTML, /听：豆包听 · 想：DeepSeek · 说：豆包说/);
-  assert.match(mockViewport.innerHTML, /✅ 已开启/);
-  assert.match(mockViewport.innerHTML, /🛡️ 已保护/);
+  assert.match(mockViewport.innerHTML, /豆包 · DeepSeek/);
+  assert.match(mockViewport.innerHTML, /已开启/);
   assert.match(mockViewport.innerHTML, /1 条/);
   // Heavy capability matrix table is NOT flattened onto Settings Home
   assert.doesNotMatch(mockViewport.innerHTML, /<table/);
@@ -357,12 +357,12 @@ test('v0.9.20 settings-panel: renders 4 grouped sections ("模型与偏好") and
   assert.equal(mockViewport.innerHTML, 'SENTINEL_UNTOUCHED settings-wrap');
   mockViewport.innerHTML = firstHtml;
 
-  // 3. Drill down into every single sub-page
+  // 3. Drill down into every single sub-page (including hosts_list)
   for (const page of Object.keys(SETTINGS_SUBPAGE_TITLES)) {
     panel.openSubpage(page, page === 'host_detail' ? 'mac-mini' : '');
     assert.equal(panel.getActiveSubpage(), page);
     assert.equal(mockViewport.scrollTop, 0);
-    assert.match(mockViewport.innerHTML, /‹ 设置/);
+    assert.match(mockViewport.innerHTML, /id="settingsSubBackBtn"/);
     assert.match(mockViewport.innerHTML, new RegExp(`data-settings-subpage="${page}"`));
   }
 
@@ -386,9 +386,9 @@ test('v0.9.20 settings-panel: renders 4 grouped sections ("模型与偏好") and
 });
 
 test('v0.9.20 computePushBadgeMeta maps all local push statuses accurately', () => {
-  assert.deepEqual(computePushBadgeMeta(''), { text: '检测中…', tone: 'muted' });
-  assert.deepEqual(computePushBadgeMeta('本机：✅ 已开启锁屏推送'), { text: '✅ 已开启', tone: 'green' });
+  assert.deepEqual(computePushBadgeMeta(''), { text: '检测中', tone: 'muted' });
+  assert.deepEqual(computePushBadgeMeta('本机：✅ 已开启锁屏推送'), { text: '已开启', tone: 'green' });
   assert.deepEqual(computePushBadgeMeta('本机：未开启（点下方「开启推送」）'), { text: '未开启', tone: 'amber' });
-  assert.deepEqual(computePushBadgeMeta('本机：通知权限被拒绝'), { text: '🚫 权限被拒', tone: 'red' });
+  assert.deepEqual(computePushBadgeMeta('本机：通知权限被拒绝'), { text: '权限被拒', tone: 'red' });
   assert.deepEqual(computePushBadgeMeta('本机：当前浏览器不支持锁屏推送'), { text: '需主屏幕', tone: 'amber' });
 });

@@ -547,14 +547,27 @@ export function VoiceProviderSheet(props: VoiceProviderSheetProps) {
                     </div>
                     <div class="voice-status-hero-sub">{summaryLine}</div>
                   </div>
-                  <button
-                    type="button"
-                    class="voice-pill-btn primary"
-                    disabled={soundChecking}
-                    onClick={() => void onSoundCheck()}
-                  >
-                    {soundChecking ? '试音中…' : '🔊 试听'}
-                  </button>
+                  <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
+                    <button
+                      type="button"
+                      class="voice-pill-btn primary"
+                      id="vpOpenWalkModeBtn"
+                      onClick={() => {
+                        onClose();
+                        (window as any).openWalkMode?.();
+                      }}
+                    >
+                      🎧 进入随行
+                    </button>
+                    <button
+                      type="button"
+                      class="voice-pill-btn"
+                      disabled={soundChecking}
+                      onClick={() => void onSoundCheck()}
+                    >
+                      {soundChecking ? '试音中…' : '🔊 试听'}
+                    </button>
+                  </div>
                 </div>
 
                 {missingStages.length > 0 && (

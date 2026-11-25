@@ -519,3 +519,40 @@ export function formatVoiceSummaryForSettings(voiceCfg) {
   const mouth = shortStageLabel(prof.tts, creds);
   return `听：${ear} · 想：${brain} · 说：${mouth}`;
 }
+
+/**
+ * Ultra-concise right-side value for Apple-native single-line Settings row ("边走边听").
+ */
+export function formatVoiceCompactValue(voiceCfg) {
+  if (!voiceCfg || !voiceCfg.activeProfile) {
+    return '免费本机';
+  }
+  const prof = voiceCfg.activeProfile;
+  const creds = Array.isArray(voiceCfg.credentials) ? voiceCfg.credentials : [];
+  if (
+    prof.id === 'native'
+    || (prof.stt?.provider === 'native' && prof.brain?.provider === 'native' && prof.tts?.provider === 'native')
+  ) {
+    return creds.length > 0 ? `免费本机 · ${creds.length} 个` : '免费本机';
+  }
+  const compactName = label => {
+    const raw = String(label || '').trim();
+    if (!raw) return '自定义';
+    if (/火山|豆包/i.test(raw)) return '豆包';
+    return raw.replace(/\s*\((ASR|TTS)\)\s*/gi, '').replace(/官方$/g, '').trim() || raw;
+  };
+  const sttCred = resolveStageCred(prof.stt, creds);
+  const brainCred = resolveStageCred(prof.brain, creds);
+  const ttsCred = resolveStageCred(prof.tts, creds);
+  if (sttCred && brainCred && ttsCred && sttCred.id === brainCred.id && brainCred.id === ttsCred.id) {
+    return compactName(sttCred.label);
+  }
+  const parts = [];
+  if (sttCred || ttsCred) {
+    parts.push(compactName((sttCred || ttsCred).label));
+  }
+  if (brainCred && (!parts.length || compactName(brainCred.label) !== parts[0])) {
+    parts.push(compactName(brainCred.label));
+  }
+  return parts.join(' · ') || '已配置';
+}
