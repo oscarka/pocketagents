@@ -607,4 +607,47 @@ test('v0.9.23 VoiceCopilot testCredential supports unsaved draft testing, SSRF &
   assert.ok(asyncCalls[2].url.endsWith('/api/v3/auc/bigmodel/query'));
   assert.equal(asyncCalls[0].reqId, asyncCalls[1].reqId, 'query must reuse exact submit X-Api-Request-Id');
   assert.equal(asyncCalls[0].rid, 'volc.seedasr.auc');
+
+  // 8. v0.9.26 Network fetch errors never crash with 500; full /chat/completions Base URL suffix is normalized cleanly
+  let seenBrainUrl = '';
+  const netErrCopilot = new VoiceCopilotEngine({
+    vault,
+    hub: null,
+    fetchImpl: async (url) => {
+      seenBrainUrl = String(url);
+      if (seenBrainUrl.includes('timeout.example')) {
+        const inner = Object.assign(new Error('connect ETIMEDOUT 101.126.13.31:443'), { code: 'ETIMEDOUT' });
+        const agg = new AggregateError([inner], '');
+        throw Object.assign(new TypeError('fetch failed'), { cause: agg });
+      }
+      return {
+        ok: true,
+        status: 200,
+        headers: { get: () => 'application/json' },
+        json: async () => ({ choices: [{ message: { content: '{"ok":true}' } }] }),
+      };
+    },
+  });
+  const timeoutRes = await netErrCopilot.testCredential({
+    draft: {
+      provider: 'openai_compat',
+      baseUrl: 'https://timeout.example/api/v3',
+      apiKey: 'sk-test',
+      defaultModel: 'deepseek-v3-250324',
+    },
+  });
+  assert.equal(timeoutRes.ok, false);
+  assert.match(timeoutRes.summary, /连接超时或地址不可达/);
+  assert.match(timeoutRes.summary, /ETIMEDOUT/);
+
+  const normRes = await netErrCopilot.testCredential({
+    draft: {
+      provider: 'openai_compat',
+      baseUrl: 'https://ark.cn-beijing.volces.com/api/v3/chat/completions/',
+      apiKey: 'sk-test',
+      defaultModel: 'deepseek-v3-250324',
+    },
+  });
+  assert.equal(normRes.ok, true);
+  assert.equal(seenBrainUrl, 'https://ark.cn-beijing.volces.com/api/v3/chat/completions');
 });

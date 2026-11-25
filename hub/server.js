@@ -1,8 +1,14 @@
 import { createServer } from 'node:http'
 import { timingSafeEqual } from 'node:crypto'
+import { setDefaultResultOrder } from 'node:dns'
 import { accessSync, constants, existsSync, readFileSync } from 'node:fs'
 import { readdir, readFile, stat } from 'node:fs/promises'
-import { isIP } from 'node:net'
+import { isIP, setDefaultAutoSelectFamilyAttemptTimeout } from 'node:net'
+
+// Prevent Node 20 Happy Eyeballs 250ms IPv4->IPv6 fallback from dropping cross-region HTTPS
+// (e.g. US cloud VMs calling China Ark/Volcengine APIs whose IPv4 RTT is 260-400ms on IPv4-only VMs).
+try { setDefaultResultOrder?.('ipv4first') } catch { }
+try { setDefaultAutoSelectFamilyAttemptTimeout?.(3000) } catch { }
 import { homedir, networkInterfaces } from 'node:os'
 import { dirname, join, posix as posixPath } from 'node:path'
 import { Readable, Transform } from 'node:stream'

@@ -784,6 +784,26 @@ export function buildGeminiThinkingConfig(model = '', thinkingLevel = 'default',
   return undefined
 }
 
+function normalizeOpenAiCompatBaseUrl(raw = '') {
+  return String(raw || '')
+    .trim()
+    .replace(/\/+$/, '')
+    .replace(/\/(chat\/completions|audio\/transcriptions|audio\/speech)$/i, '')
+}
+
+function formatFetchError(err) {
+  if (!err) return 'fetch failed'
+  if (err?.name === 'AbortError') return '请求超时（timeout）'
+  const cause = err?.cause
+  const nestedErr = Array.isArray(cause?.errors) && cause.errors.length > 0 ? cause.errors[0] : null
+  const code = nestedErr?.code || cause?.code || err?.code || ''
+  const detail = nestedErr?.message || cause?.message || err?.message || 'fetch failed'
+  if (code && !String(detail).includes(String(code))) {
+    return `${detail} (${code})`
+  }
+  return String(detail)
+}
+
 async function fetchWithTimeout(fetchImpl, url, options = {}, timeoutMs = DEFAULT_HTTP_TIMEOUT_MS) {
   await assertSafeVoiceTargetUrl(url, { resolveDns: fetchImpl === globalThis.fetch })
   const ctrl = new AbortController()
@@ -1528,7 +1548,7 @@ export class VoiceCopilotEngine {
 
     if (provider === 'openai_compat') {
       const model = stageCfg?.model || cred.defaultModel || 'gpt-4o-mini'
-      const base = cred.baseUrl || 'https://api.openai.com/v1'
+      const base = normalizeOpenAiCompatBaseUrl(cred.baseUrl) || 'https://api.openai.com/v1'
       const url = `${base}/chat/completions`
       const messages = [
         { role: 'system', content: systemPrompt },
@@ -1549,26 +1569,49 @@ export class VoiceCopilotEngine {
         max_tokens: Number(stageCfg?.maxTokens) || 320,
       }
       const firstBody = wantDisableThinking ? { ...baseBody, thinking: { type: 'disabled' } } : baseBody
-      let resp = await fetchWithTimeout(this.fetch, url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${cred.apiKey}`,
-        },
-        body: JSON.stringify(firstBody),
-      })
-      let data = await resp.json().catch(() => ({}))
-      // Graceful retry without `thinking` field if an OpenAI-compat gateway rejects unknown params
-      if (!resp.ok && resp.status === 400 && wantDisableThinking) {
+      let resp
+      try {
         resp = await fetchWithTimeout(this.fetch, url, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${cred.apiKey}`,
           },
-          body: JSON.stringify(baseBody),
+          body: JSON.stringify(firstBody),
         })
-        data = await resp.json().catch(() => ({}))
+      } catch (err) {
+        return {
+          ok: false,
+          provider,
+          model,
+          credId: cred.id,
+          latencyMs: this.now() - t0,
+          error: formatFetchError(err),
+        }
+      }
+      let data = await resp.json().catch(() => ({}))
+      // Graceful retry without `thinking` field if an OpenAI-compat gateway rejects unknown params
+      if (!resp.ok && (resp.status === 400 || resp.status === 422 || resp.status === 500) && wantDisableThinking) {
+        try {
+          resp = await fetchWithTimeout(this.fetch, url, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${cred.apiKey}`,
+            },
+            body: JSON.stringify(baseBody),
+          })
+          data = await resp.json().catch(() => ({}))
+        } catch (err) {
+          return {
+            ok: false,
+            provider,
+            model,
+            credId: cred.id,
+            latencyMs: this.now() - t0,
+            error: formatFetchError(err),
+          }
+        }
       }
       const latencyMs = this.now() - t0
       if (!resp.ok) {
@@ -2462,8 +2505,8 @@ export class VoiceCopilotEngine {
     if (/429|rate limit|quota|insufficient|balance/i.test(lower)) {
       return `额度不足或触发限流：请检查账户余额（${msg}）`
     }
-    if (/timeout|aborted|econnrefused|enotfound|fetch failed/i.test(lower)) {
-      return `连接超时或地址不可达：请检查 Base URL 是否正确（${msg}）`
+    if (/timeout|etimedout|aborted|econnrefused|econnreset|enetunreach|enotfound|err_invalid_url|redirect|fetch failed/i.test(lower)) {
+      return `连接超时或地址不可达：请检查接口地址（Base URL）是否以 https:// 开头且拼写正确（${msg}）`
     }
     return msg
   }
@@ -2573,6 +2616,24 @@ export class VoiceCopilotEngine {
     if (!cred) {
       return { ok: false, error: '未找到要测试的密钥', summary: '未找到要测试的密钥' }
     }
+    const provider = cred.provider
+    try {
+      return await this._runTestCredentialInner(cred, { stage, draft })
+    } catch (err) {
+      const detail = formatFetchError(err)
+      const niceErr = this._explainVoiceError(detail, provider)
+      return {
+        ok: false,
+        provider,
+        model: cred.defaultModel || cred.resourceId || '',
+        latencyMs: 0,
+        error: niceErr,
+        summary: niceErr,
+      }
+    }
+  }
+
+  async _runTestCredentialInner(cred, { stage = '', draft = null } = {}) {
     const provider = cred.provider
 
     if (provider === 'volcengine_asr') {
