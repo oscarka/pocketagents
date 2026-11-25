@@ -1,0 +1,394 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {
+  VOICE_PROVIDER_PRESETS,
+  buildRoutingProfilePayload,
+  computeSelectionAfterDelete,
+  computeSmartDefaultSelection,
+  formatVoiceSummaryForSettings,
+  getCredentialActiveRoles,
+  getStageSelectValue,
+  inferStageModelForCred,
+  resolveStageCred,
+} from '../../hub/web/src/voice/provider-routing.js';
+import {
+  SETTINGS_SUBPAGE_TITLES,
+  computePushBadgeMeta,
+  createSettingsPanel,
+} from '../../hub/web/src/settings/settings-panel.js';
+import { VoiceVault } from '../../hub/voice-vault.js';
+
+test('v0.9.20 provider-routing: multiple arbitrary OpenAI-compatible providers route independently by credId', () => {
+  const creds = [
+    {
+      id: 'cred_oai_ds',
+      provider: 'openai_compat',
+      label: 'DeepSeek 官方',
+      baseUrl: 'https://api.deepseek.com/v1',
+      defaultModel: 'deepseek-chat',
+      defaultVoice: '',
+      resourceId: '',
+      enabled: true,
+      active: false,
+    },
+    {
+      id: 'cred_oai_relay',
+      provider: 'openai_compat',
+      label: '我的中转站',
+      baseUrl: 'https://relay.myteam.example/v1',
+      defaultModel: 'claude-3-7-sonnet',
+      defaultVoice: '',
+      resourceId: '',
+      enabled: true,
+      active: true,
+    },
+    {
+      id: 'cred_volc_asr',
+      provider: 'volcengine_asr',
+      label: '火山豆包识别 (ASR)',
+      baseUrl: 'https://openspeech.bytedance.com/api/v3/auc/bigmodel/recognize/flash',
+      defaultModel: '',
+      defaultVoice: '',
+      resourceId: 'volc.bigasr.auc_turbo',
+      enabled: true,
+      active: true,
+    },
+    {
+      id: 'cred_volc_tts',
+      provider: 'volcengine_tts',
+      label: '火山豆包播报 (TTS)',
+      baseUrl: 'https://openspeech.bytedance.com/api/v3/tts/unidirectional',
+      defaultModel: '',
+      defaultVoice: 'zh_female_vv_uranus_bigtts',
+      resourceId: 'seed-tts-2.0',
+      enabled: true,
+      active: true,
+    },
+  ];
+
+  // Bind Volc ASR + custom relay Brain + Volc TTS
+  const plan = buildRoutingProfilePayload({
+    sttVal: 'cred:cred_volc_asr',
+    brainVal: 'cred:cred_oai_relay',
+    ttsVal: 'cred:cred_volc_tts',
+    credentials: creds,
+    existingProfiles: [],
+    activeProfile: null,
+  });
+
+  assert.equal(plan.isNativeOnly, false);
+  assert.equal(plan.profilePayload.stt.credId, 'cred_volc_asr');
+  assert.equal(plan.profilePayload.stt.model, 'volc.bigasr.auc_turbo');
+  assert.equal(plan.profilePayload.brain.credId, 'cred_oai_relay');
+  assert.equal(plan.profilePayload.brain.model, 'claude-3-7-sonnet');
+  assert.equal(plan.profilePayload.tts.credId, 'cred_volc_tts');
+  assert.equal(plan.profilePayload.tts.voice, 'zh_female_vv_uranus_bigtts');
+  assert.equal(plan.profilePayload.activate, true);
+
+  // Roles reflect exact bound credIds (DeepSeek cred is NOT marked active when relay is selected)
+  const activeProf = { id: 'prof_1', ...plan.profilePayload };
+  assert.deepEqual(getCredentialActiveRoles('cred_oai_relay', activeProf, creds), ['brain']);
+  assert.deepEqual(getCredentialActiveRoles('cred_oai_ds', activeProf, creds), []);
+  assert.deepEqual(getCredentialActiveRoles('cred_volc_asr', activeProf, creds), ['stt']);
+  assert.deepEqual(getCredentialActiveRoles('cred_volc_tts', activeProf, creds), ['tts']);
+
+  // Settings summary reflects custom provider labels cleanly
+  const summary = formatVoiceSummaryForSettings({ activeProfile: activeProf, credentials: creds });
+  assert.match(summary, /火山豆包识别/);
+  assert.match(summary, /我的中转站/);
+  assert.match(summary, /火山豆包播报/);
+});
+
+test('v0.9.20 provider-routing: smart defaults & stage model inference behave safely across vendors', () => {
+  const dsCred = {
+    id: 'cred_ds',
+    provider: 'openai_compat',
+    label: 'DeepSeek',
+    baseUrl: 'https://api.deepseek.com/v1',
+    defaultModel: 'deepseek-chat',
+  };
+  const openaiCred = {
+    id: 'cred_oai',
+    provider: 'openai_compat',
+    label: 'OpenAI 官方',
+    baseUrl: 'https://api.openai.com/v1',
+    defaultModel: 'gpt-4o-mini',
+  };
+  const geminiCred = {
+    id: 'cred_gem',
+    provider: 'gemini',
+    label: 'Gemini',
+    baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+    defaultModel: 'gemini-2.5-flash',
+    defaultVoice: 'Kore',
+  };
+
+  // DeepSeek default only replaces Brain, keeping Ear/Mouth untouched
+  const dsSel = computeSmartDefaultSelection(dsCred, {
+    sttVal: 'cred:cred_volc_asr',
+    brainVal: 'native',
+    ttsVal: 'cred:cred_volc_tts',
+  });
+  assert.equal(dsSel.sttVal, 'cred:cred_volc_asr');
+  assert.equal(dsSel.brainVal, 'cred:cred_ds');
+  assert.equal(dsSel.ttsVal, 'cred:cred_volc_tts');
+
+  // Gemini default sets all 3 stages
+  const gemSel = computeSmartDefaultSelection(geminiCred, {
+    sttVal: 'native',
+    brainVal: 'native',
+    ttsVal: 'native',
+  });
+  assert.deepEqual(gemSel, {
+    sttVal: 'cred:cred_gem',
+    brainVal: 'cred:cred_gem',
+    ttsVal: 'cred:cred_gem',
+  });
+
+  // OpenAI official maps chat model to transcribe/tts models automatically for STT/TTS
+  assert.equal(inferStageModelForCred(openaiCred, 'brain'), 'gpt-4o-mini');
+  assert.equal(inferStageModelForCred(openaiCred, 'stt'), 'gpt-4o-mini-transcribe');
+  assert.equal(inferStageModelForCred(openaiCred, 'tts'), 'gpt-4o-mini-tts');
+
+  // Custom Whisper model on OpenAI-compat is honored verbatim
+  assert.equal(
+    inferStageModelForCred({ ...dsCred, defaultModel: 'whisper-large-v3-turbo' }, 'stt'),
+    'whisper-large-v3-turbo',
+  );
+
+  // Presets include custom free-form option
+  assert.ok(VOICE_PROVIDER_PRESETS.some(p => p.key === 'custom'));
+});
+
+test('v0.9.20 provider-routing: deleting active credential safely falls back without dangling broken state', () => {
+  const remaining = [
+    { id: 'cred_ds_backup', provider: 'openai_compat', label: '备用 DS', enabled: true, active: true },
+  ];
+  const activeProfile = {
+    id: 'prof_custom',
+    stt: { provider: 'volcengine_asr', credId: 'cred_asr_deleted', model: 'volc.bigasr.auc_turbo' },
+    brain: { provider: 'openai_compat', credId: 'cred_oai_deleted', model: 'gpt-4o-mini' },
+    tts: { provider: 'native', credId: '', model: 'browser-speech-synthesis' },
+  };
+
+  // Before fallback, getStageSelectValue reports missing for deleted ASR cred
+  assert.equal(getStageSelectValue(activeProfile.stt, remaining), 'missing:volcengine_asr');
+  assert.equal(resolveStageCred(activeProfile.brain, remaining)?.id, 'cred_ds_backup');
+
+  const res = computeSelectionAfterDelete('cred_oai_deleted', activeProfile, remaining);
+  assert.equal(res.affected, true);
+  assert.equal(res.nextSelection.sttVal, 'native'); // no ASR cred left -> native
+  assert.equal(res.nextSelection.brainVal, 'cred:cred_ds_backup'); // remaining openai_compat cred -> backup
+  assert.equal(res.nextSelection.ttsVal, 'native');
+
+  // All-native selection produces isNativeOnly: true
+  const nativePlan = buildRoutingProfilePayload({
+    sttVal: 'native',
+    brainVal: 'native',
+    ttsVal: 'native',
+    credentials: remaining,
+  });
+  assert.equal(nativePlan.isNativeOnly, true);
+});
+
+test('v0.9.20 VoiceVault backend supports multiple arbitrary custom OpenAI-compat providers & key preservation on edit', async () => {
+  const vault = new VoiceVault({ vaultFile: '' });
+  await vault.init();
+
+  const r1 = await vault.upsertCredential({
+    provider: 'openai_compat',
+    label: '中转站 A',
+    baseUrl: 'https://relay-a.example.com/v1',
+    apiKey: 'sk-relay-a-secret-1234',
+    defaultModel: 'deepseek-v3',
+  });
+  assert.equal(r1.ok, true);
+
+  const r2 = await vault.upsertCredential({
+    provider: 'openai_compat',
+    label: '中转站 B',
+    baseUrl: 'https://relay-b.example.com/v1',
+    apiKey: 'sk-relay-b-secret-5678',
+    defaultModel: 'qwen-max',
+  });
+  assert.equal(r2.ok, true);
+  assert.equal(vault.toPublicState().credentials.length, 2);
+
+  // Edit label & model of r1 without resending apiKey -> preserves existing encrypted apiKey
+  const r1Edit = await vault.upsertCredential({
+    id: r1.credential.id,
+    provider: 'openai_compat',
+    label: '中转站 A (新版)',
+    baseUrl: 'https://relay-a.example.com/v1',
+    defaultModel: 'deepseek-r1',
+  });
+  assert.equal(r1Edit.ok, true);
+  const resolved = vault.resolveCredential({ credId: r1.credential.id });
+  assert.equal(resolved.label, '中转站 A (新版)');
+  assert.equal(resolved.defaultModel, 'deepseek-r1');
+  assert.equal(resolved.apiKey, 'sk-relay-a-secret-1234');
+});
+
+test('v0.9.20 settings-panel: renders 4 grouped sections ("模型与偏好") and drills cleanly into all 7 sub-pages', () => {
+  const mockViewport = {
+    innerHTML: '',
+    scrollTop: 120,
+    querySelector(sel) {
+      return sel === '.settings-wrap' && this.innerHTML.includes('settings-wrap') ? {} : null;
+    },
+  };
+
+  const mockHubState = {
+    build: { version: '0.9.20', uiBuild: 'TEST920', startedAt: Date.now() },
+    enrollment: { code: 'AB12CD', expiresAt: Date.now() + 600000, joinedCount: 2 },
+    hosts: [
+      {
+        hostId: 'mac-mini',
+        hostName: 'mac-mini',
+        online: true,
+        isFeishuActive: true,
+        remoteActive: true,
+        runningCount: 1,
+        totalBytes: 204800,
+        platform: 'macOS',
+        arch: 'arm64',
+        fingerprint: 'fp1234567890abcd',
+        hasDedicatedToken: true,
+        hostTokenPreview: 'hst_ab...cd',
+        bridgeState: {
+          agentVersion: '0.9.20',
+          turbo: { enabled: true, engineLabel: 'Rust' },
+          tasks: [{ id: 't1', status: 'running' }],
+          harnesses: [{ id: 'codex', label: 'Codex', installed: true, hasBinary: true, capabilities: { canApprove: true } }],
+        },
+      },
+      {
+        hostId: 'macbook-air',
+        hostName: 'macbook-air',
+        online: true,
+        runningCount: 0,
+        bridgeState: { agentVersion: '0.9.18', tasks: [] },
+      },
+    ],
+    shares: [{ id: 'sh_1', title: '回放 1', hostName: 'mac-mini', createdAt: Date.now(), sizeBytes: 4096 }],
+    securitySummary: { total24h: 0, high24h: 0, uniqueIps24h: 0, recentEvents: [] },
+    accessControl: {
+      deviceApprovalEnabled: true,
+      trustedDevices: [{ id: 'dev_1', name: 'iPhone 16 Pro', ip: '1.2.3.4', isCurrent: true, lastSeen: Date.now() }],
+      pendingDeviceLogins: [],
+      pendingHosts: [],
+    },
+    pushSubscriptions: [{ deviceName: 'iPhone 主屏幕 App', endpointHost: 'web.push.apple.com' }],
+  };
+
+  let voiceCfg = {
+    activeProfile: {
+      id: 'prof_1',
+      name: '豆包 + DeepSeek',
+      stt: { provider: 'volcengine_asr', credId: 'c1', model: 'volc.bigasr.auc_turbo' },
+      brain: { provider: 'openai_compat', credId: 'c2', model: 'deepseek-chat' },
+      tts: { provider: 'volcengine_tts', credId: 'c3', model: 'seed-tts-2.0' },
+    },
+    credentials: [
+      { id: 'c1', provider: 'volcengine_asr', label: '豆包听' },
+      { id: 'c2', provider: 'openai_compat', label: 'DeepSeek' },
+      { id: 'c3', provider: 'volcengine_tts', label: '豆包说' },
+    ],
+  };
+
+  let pushRefreshCalls = 0;
+  const panel = createSettingsPanel({
+    getState: () => ({
+      hubState: mockHubState,
+      themePref: 'system',
+      langPref: 'zh',
+      cachedPushStatusText: '本机：✅ 已开启锁屏推送',
+      cachedPushStatusColor: '#059669',
+      cachedPushDeviceListText: '已在服务端登记 1 台设备',
+      upgradingHostMap: {},
+      currentDeviceId: 'dev_1',
+      tokenTail: '9999',
+    }),
+    getViewport: () => mockViewport,
+    getVoiceConfig: () => voiceCfg,
+    isHostLiveOnline: h => Boolean(h.online),
+    formatHostTelemetry: () => ({
+      powerIcon: '🔋',
+      powerShort: '88%',
+      powerDetail: '88% 充电中',
+      netIcon: '📶',
+      netShort: '14ms',
+      netDetail: 'Wi-Fi · 14ms',
+      lowBattery: false,
+    }),
+    compareSemver: (a, b) => a.localeCompare(b, undefined, { numeric: true }),
+    formatTime: () => '刚刚',
+    formatBytes: n => `${n}B`,
+    renderHarnessBadgeHtml: id => `[${id}]`,
+    renderCapabilityMatrixRowsHtml: () => '<tr><td>Codex</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td></tr>',
+    renderAddHostPanelHtml: ({ forceExpanded }) => `<div id="mockAddHost" data-expanded="${forceExpanded ? '1' : '0'}">ADD HOST CMD</div>`,
+    esc: s => String(s ?? ''),
+    escJsStr: s => String(s ?? ''),
+    escUriJsStr: s => String(s ?? ''),
+    refreshPushStatus: () => { pushRefreshCalls += 1; },
+  });
+
+  // 1. Render Settings Home
+  panel.render(mockViewport);
+  assert.equal(panel.getActiveSubpage(), 'home');
+  assert.match(mockViewport.innerHTML, /电脑与连接/);
+  assert.match(mockViewport.innerHTML, /模型与偏好/);
+  assert.match(mockViewport.innerHTML, /安全与隐私/);
+  assert.match(mockViewport.innerHTML, /关于与工具/);
+  // Compact host rows & live summaries on Home
+  assert.match(mockViewport.innerHTML, /mac-mini/);
+  assert.match(mockViewport.innerHTML, /macbook-air/);
+  assert.match(mockViewport.innerHTML, /听：豆包听 · 想：DeepSeek · 说：豆包说/);
+  assert.match(mockViewport.innerHTML, /✅ 已开启/);
+  assert.match(mockViewport.innerHTML, /🛡️ 已保护/);
+  assert.match(mockViewport.innerHTML, /1 条/);
+  // Heavy capability matrix table is NOT flattened onto Settings Home
+  assert.doesNotMatch(mockViewport.innerHTML, /<table/);
+
+  // 2. Signature deduplication avoids unnecessary DOM rewrite
+  const firstHtml = mockViewport.innerHTML;
+  mockViewport.innerHTML = 'SENTINEL_UNTOUCHED settings-wrap';
+  panel.render(mockViewport);
+  assert.equal(mockViewport.innerHTML, 'SENTINEL_UNTOUCHED settings-wrap');
+  mockViewport.innerHTML = firstHtml;
+
+  // 3. Drill down into every single sub-page
+  for (const page of Object.keys(SETTINGS_SUBPAGE_TITLES)) {
+    panel.openSubpage(page, page === 'host_detail' ? 'mac-mini' : '');
+    assert.equal(panel.getActiveSubpage(), page);
+    assert.equal(mockViewport.scrollTop, 0);
+    assert.match(mockViewport.innerHTML, /‹ 设置/);
+    assert.match(mockViewport.innerHTML, new RegExp(`data-settings-subpage="${page}"`));
+  }
+
+  // Verify capabilities subpage DOES render the full matrix table
+  assert.match(mockViewport.innerHTML, /<table/);
+
+  // Verify add_host subpage forces expanded view
+  panel.openSubpage('add_host');
+  assert.match(mockViewport.innerHTML, /data-expanded="1"/);
+
+  // Verify host_detail renders full controls
+  panel.openSubpage('host_detail', 'mac-mini');
+  assert.match(mockViewport.innerHTML, /飞书主控电脑/);
+  assert.match(mockViewport.innerHTML, /吊销凭证/);
+
+  // 4. Close subpage restores home & scroll position
+  panel.closeSubpage();
+  assert.equal(panel.getActiveSubpage(), 'home');
+  assert.equal(mockViewport.scrollTop, 120);
+  assert.ok(pushRefreshCalls >= 2);
+});
+
+test('v0.9.20 computePushBadgeMeta maps all local push statuses accurately', () => {
+  assert.deepEqual(computePushBadgeMeta(''), { text: '检测中…', tone: 'muted' });
+  assert.deepEqual(computePushBadgeMeta('本机：✅ 已开启锁屏推送'), { text: '✅ 已开启', tone: 'green' });
+  assert.deepEqual(computePushBadgeMeta('本机：未开启（点下方「开启推送」）'), { text: '未开启', tone: 'amber' });
+  assert.deepEqual(computePushBadgeMeta('本机：通知权限被拒绝'), { text: '🚫 权限被拒', tone: 'red' });
+  assert.deepEqual(computePushBadgeMeta('本机：当前浏览器不支持锁屏推送'), { text: '需主屏幕', tone: 'amber' });
+});

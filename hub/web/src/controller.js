@@ -13,6 +13,7 @@ import {
   isStandaloneForHint,
   shouldShowInstallHint,
 } from './utils/format';
+import { createSettingsPanel } from './settings/settings-panel.js';
 import {
   renderInlineMarkdown,
   renderMarkdownBlocks,
@@ -8208,7 +8209,7 @@ export function initHubController() {
     renderSettingsTab();
   }
 
-  function renderAddHostPanelHtml({ isEmptyState = false } = {}) {
+  function renderAddHostPanelHtml({ isEmptyState = false, forceExpanded = false } = {}) {
     const enrollment = hubState.enrollment || {};
     const code = enrollment.code || '正在生成...';
     const expiresAt = Number(enrollment.expiresAt || 0);
@@ -8218,7 +8219,7 @@ export function initHubController() {
     const oneLineCmd = `curl -fsSL ${originUrl}/install.sh | bash -s -- --code ${code}`;
     const localRepoCmd = `./connect-host.sh --url ${originUrl} --code ${code}`;
     const hasHosts = (hubState.hosts || []).length > 0;
-    const isExpanded = isEmptyState || !hasHosts || addHostPanelExpanded;
+    const isExpanded = forceExpanded || isEmptyState || !hasHosts || addHostPanelExpanded;
 
     if (!isExpanded) {
       return `
@@ -8276,7 +8277,7 @@ export function initHubController() {
               <button class="pill-action-btn" style="font-size:11.5px;padding:4px 9px;" onclick="refreshEnrollmentCode()">
                 🔄 换码
               </button>
-              ${!isEmptyState && hasHosts ? `
+              ${!forceExpanded && !isEmptyState && hasHosts ? `
                 <button class="pill-action-btn" style="font-size:11.5px;padding:4px 9px;" onclick="toggleAddHostPanel()">
                   ▴ 收起
                 </button>
@@ -8382,498 +8383,56 @@ export function initHubController() {
     }
   }
 
-  function renderSettingsTab() {
-    const hosts = hubState.hosts || [];
-    const shares = hubState.shares || [];
-    const buildInfo = hubState.build || {};
-    const secSum = hubState.securitySummary || { total24h: 0, high24h: 0, uniqueIps24h: 0, recentEvents: [] };
-    const ac = hubState.accessControl || { deviceApprovalEnabled: false, trustedDevices: [], pendingDeviceLogins: [], pendingHosts: [] };
-    const currentTk = getToken();
-    const enrollmentCode = hubState.enrollment?.code || '';
-    const onboardingCmd = `curl -fsSL ${location.origin}/install.sh | bash -s -- --code ${enrollmentCode}`;
-
-    // 内容签名去抖 (#4)：当设置页数据未发生变化时跳过整页 innerHTML 重建，并保留滚动位置
-    const settingsSignature = JSON.stringify({
+  const settingsPanel = createSettingsPanel({
+    getState: () => ({
+      hubState,
       themePref,
       langPref,
-      addHostPanelExpanded,
-      expandedHostCardIds,
-      tokenTail: currentTk.slice(-4),
-      enrollmentCode,
-      joinedCount: hubState.enrollment?.joinedCount || 0,
-      pushCount: (hubState.pushSubscriptions || []).length,
-      secSig: `${secSum.total24h}:${secSum.high24h}:${secSum.recentEvents?.[0]?.id || ''}`,
-      acSig: `${ac.deviceApprovalEnabled ? 1 : 0}:${(ac.trustedDevices || []).length}:${(ac.pendingDeviceLogins || []).map(x => x.id).join(',')}:${(ac.pendingHosts || []).map(x => x.hostId).join(',')}`,
-      build: buildInfo.uiBuild || buildInfo.version || '',
-      hosts: hosts.map(h => ({
-        id: h.hostId,
-        name: h.hostName,
-        online: isHostLiveOnline(h),
-        trustStatus: h.trustStatus || h.trust?.status || '',
-        hasDedicatedToken: Boolean(h.hasDedicatedToken),
-        isFeishuActive: h.isFeishuActive,
-        remoteActive: h.remoteActive,
-        taskCount: (h.bridgeState?.tasks || []).length,
-        runningCount: h.runningCount || 0,
-        totalBytesBucket: expandedHostCardIds[h.hostId] ? Math.round((h.totalBytes || 0) / 10240) : 0,
-        agentVersion: h.bridgeState?.agentVersion || '',
-        upgrading: Boolean(upgradingHostMap[h.hostId] && Date.now() - upgradingHostMap[h.hostId] < 45000),
-        turbo: h.bridgeState?.turbo?.engineLabel || '',
-        power: h.bridgeState?.systemTelemetry?.power?.shortLabel || '',
-        net: h.bridgeState?.systemTelemetry?.network?.kindLabel || '',
-        shareUrl: h.lastShareResult?.shareUrl || '',
-      })),
-      shares: shares.map(s => ({ id: s.id || s.shareId, at: s.createdAt })),
-    });
-    const viewport = document.getElementById('mainViewport');
-    if (!viewport) return;
-    if (settingsSignature === lastRenderedSettingsKey && viewport.querySelector('.settings-wrap')) {
-      void refreshPushStatus();
-      return;
+      cachedPushStatusText,
+      cachedPushStatusColor,
+      cachedPushDeviceListText,
+      upgradingHostMap,
+      currentDeviceId: getOrCreateClientDeviceId(),
+      tokenTail: getToken().slice(-4),
+    }),
+    getViewport: () => document.getElementById('mainViewport'),
+    isHostLiveOnline,
+    formatHostTelemetry,
+    compareSemver,
+    formatTime,
+    formatBytes,
+    renderHarnessBadgeHtml,
+    renderCapabilityMatrixRowsHtml,
+    renderAddHostPanelHtml,
+    esc,
+    escJsStr,
+    escUriJsStr,
+    refreshPushStatus,
+    applyLangToDom,
+  });
+
+  window.addEventListener('dsh:voice-config', () => {
+    lastRenderedSettingsKey = '';
+    settingsPanel.invalidate();
+    if (currentTab === 'settings') {
+      renderSettingsTab();
     }
-    const prevScrollTop = viewport.scrollTop;
-    lastRenderedSettingsKey = settingsSignature;
+  });
 
-    // 收集各台电脑最近一次生成的含 #key= 的完整分享链接
-    const latestShareResults = hosts
-      .filter(h => h.lastShareResult && h.lastShareResult.shareUrl)
-      .map(h => {
-        const rawUrl = h.lastShareResult.shareUrl;
-        const fullUrl = rawUrl.startsWith('http') ? rawUrl : location.origin + rawUrl;
-        return {
-          hostName: h.hostName,
-          shareId: h.lastShareResult.shareId || '',
-          fullUrl,
-          at: h.lastShareResult.at || 0,
-        };
-      });
+  function openSettingsSubpage(page, param = '') {
+    settingsPanel.openSubpage(page, param);
+  }
 
-    viewport.innerHTML = `
-        <div class="settings-wrap">
-          <div>
-            <div class="settings-group-title">添加电脑与手机扫码登录</div>
-            ${renderAddHostPanelHtml({ isEmptyState: false })}
-          </div>
+  function closeSettingsSubpage() {
+    settingsPanel.closeSubpage();
+  }
 
-          <div>
-            <div class="settings-group-title">已接入电脑 (${hosts.length} 台 · 点击卡片展开详情)</div>
-            <div class="host-visual-grid">
-              ${hosts.map(h => {
-      const isRevoked = (h.trustStatus || h.trust?.status) === 'revoked';
-      const isCardExpanded = Boolean(expandedHostCardIds[h.hostId]);
-      const tm = formatHostTelemetry(h);
-      const sessCount = (h.bridgeState?.tasks || []).length;
-      const runCount = h.runningCount || 0;
-      const turboShort = h.bridgeState?.turbo?.enabled ? '⚡ 极速' : '🐢 轮询';
-      const shortFp = (h.fingerprint || '已锁定').slice(0, 14);
-      const hubVer = String(buildInfo.version || '0.5.1');
-      const hostVer = String(h.bridgeState?.agentVersion || '');
-      const isHostLive = isHostLiveOnline(h);
-      const isUpgradingHost = Boolean(upgradingHostMap[h.hostId] && Date.now() - upgradingHostMap[h.hostId] < 45000);
-      const isHostOutdated = Boolean(isHostLive && !isRevoked && (!hostVer || compareSemver(hostVer, hubVer) < 0));
-      const versionBadgeHtml = isUpgradingHost
-        ? `<span style="font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:999px;background:var(--amber-soft);color:#d97706;">⏳ 正在升级重启...</span>`
-        : isHostOutdated
-          ? `<span style="font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:999px;background:var(--amber-soft);color:#d97706;">⬆️ 可升 v${esc(hubVer)} (${hostVer ? '当前 v' + esc(hostVer) : '旧版'})</span>`
-          : hostVer
-            ? `<span style="font-size:10.5px;font-weight:600;padding:2px 7px;border-radius:999px;background:var(--green-soft);color:var(--green);">v${esc(hostVer)} 最新</span>`
-            : '';
-
-      return `
-                <div class="host-visual-card ${h.isFeishuActive ? 'active-feishu' : ''}" style="padding:12px 14px;${isHostLive ? '' : 'opacity:0.78;'}">
-                  <div
-                    style="display:flex;align-items:center;justify-content:space-between;gap:8px;cursor:pointer;user-select:none;"
-                    onclick="toggleHostSettingsCard('${escJsStr(h.hostId)}')"
-                  >
-                    <div style="min-width:0;flex:1;">
-                      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
-                        <span class="status-dot ${isHostLive && !isRevoked ? '' : 'offline'}"></span>
-                        <span style="font-size:14.5px;font-weight:700;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:170px;">${esc(h.hostName)}</span>
-                        ${h.isFeishuActive ? `<span style="font-size:10.5px;font-weight:700;padding:2px 6px;border-radius:999px;background:var(--primary-soft);color:var(--primary);">🎯 主控</span>` : ''}
-                        ${isRevoked ? `<span style="font-size:10.5px;font-weight:700;padding:2px 6px;border-radius:999px;background:var(--red-soft);color:var(--red);">🚫 已吊销</span>` : ''}
-                        ${versionBadgeHtml}
-                      </div>
-                      <div style="font-size:11.5px;color:var(--muted);margin-top:4px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
-                        <span>${isHostLive ? `${tm.powerIcon} ${esc(tm.powerShort)}` : `⚪ 已离线 (${formatTime(h.lastSeen)})`}</span>
-                        <span>·</span>
-                        <span>${tm.netIcon} ${esc(tm.netShort)}</span>
-                        <span>·</span>
-                        <span>💬 ${sessCount} 会话${isHostLive && runCount > 0 ? ` (<strong style="color:var(--green);">${runCount} 运行中</strong>)` : ''}</span>
-                        <span>·</span>
-                        <span>${turboShort}</span>
-                      </div>
-                    </div>
-                    <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
-                      ${isHostOutdated && !isUpgradingHost ? `
-                        <button
-                          class="pill-action-btn primary"
-                          style="padding:4px 9px;font-size:11.5px;"
-                          onclick="event.stopPropagation(); upgradeHostTurbo('${escJsStr(h.hostId)}', '${escJsStr(h.hostName)}')"
-                        >🔄 一键升级</button>
-                      ` : ''}
-                      <span style="font-size:11.5px;font-weight:600;color:var(--text-secondary);padding:4px 8px;border-radius:999px;background:var(--subtle);">
-                        ${isCardExpanded ? '▴ 收起' : '▾ 详情'}
-                      </span>
-                    </div>
-                  </div>
-
-                  ${isCardExpanded ? `
-                    <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--hairline);display:flex;flex-direction:column;gap:10px;">
-                      <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;font-size:12px;">
-                        <div style="padding:8px 10px;border-radius:10px;background:${tm.lowBattery ? 'var(--amber-soft)' : 'var(--subtle)'};border:1px solid ${tm.lowBattery ? '#fde68a' : 'var(--border)'};">
-                          <div style="font-size:11px;color:var(--muted);">供电与电量</div>
-                          <div style="font-weight:700;color:var(--text);margin-top:2px;">${tm.powerIcon} ${esc(tm.powerDetail)}${tm.lowBattery ? ' ⚠️' : ''}</div>
-                        </div>
-                        <div style="padding:8px 10px;border-radius:10px;background:var(--subtle);border:1px solid var(--border);">
-                          <div style="font-size:11px;color:var(--muted);">网络与延迟</div>
-                          <div style="font-weight:700;color:var(--text);margin-top:2px;">${tm.netIcon} ${esc(tm.netDetail)}</div>
-                        </div>
-                        <div style="padding:8px 10px;border-radius:10px;background:var(--subtle);border:1px solid var(--border);">
-                          <div style="font-size:11px;color:var(--muted);">会话与存储</div>
-                          <div style="font-weight:700;color:var(--text);margin-top:2px;">${sessCount} 条 · ${runCount} 运行 · ${formatBytes(h.totalBytes)}</div>
-                        </div>
-                        <div style="padding:8px 10px;border-radius:10px;background:var(--subtle);border:1px solid var(--border);">
-                          <div style="font-size:11px;color:var(--muted);">同步与系统</div>
-                          <div style="font-weight:700;color:var(--text);margin-top:2px;">${esc(h.platform || 'macOS')} ${esc(h.arch || '')} · ${turboShort}</div>
-                        </div>
-                      </div>
-
-                      <div style="display:flex;flex-wrap:wrap;gap:6px;font-size:11.5px;">
-                        <span style="display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border-radius:999px;background:var(--subtle);color:var(--text);">${renderHarnessBadgeHtml('dsh', 'inline')} DSH · ✅ 远控+审批</span>
-                        <span style="display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border-radius:999px;background:var(--subtle);color:var(--text);">${renderHarnessBadgeHtml('antigravity-ide', 'inline')} Antigravity · ✅ 远控+审批</span>
-                        ${(h.bridgeState?.harnesses || []).map(ad => {
-        const canApproveNow = Boolean(ad.capabilities?.canApprove || ad.id === 'codex' || ad.id === 'workbuddy');
-        const isObserveAdapter = ad.capabilities?.canPrompt === false || ad.id === 'doubao';
-        const statusTag = !ad.installed && !ad.hasBinary
-          ? '⚪ 未安装'
-          : isObserveAdapter
-            ? '👀 仅观测'
-            : ad.hasBinary
-              ? (canApproveNow ? '✅ 远控+审批' : '🔵 看会话/发指令')
-              : '👀 观察模式';
-        return `
-                          <span style="display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border-radius:999px;background:var(--subtle);color:var(--text);">
-                            ${renderHarnessBadgeHtml(ad.id, 'inline')} ${esc(ad.label || ad.id)} · ${statusTag}
-                          </span>
-                        `;
-      }).join('')}
-                      </div>
-
-                      <div style="font-size:11.5px;color:var(--muted);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px;">
-                        <span>🔒 指纹 <code>${esc(shortFp)}</code> · ${h.hasDedicatedToken ? `🔑 独立凭证 (${esc(h.hostTokenPreview)})` : '🔑 管理员凭证'}</span>
-                        <span>${h.syncMeta?.seq ? `同步序号 #${h.syncMeta.seq}` : ''}</span>
-                      </div>
-
-                      <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;flex-wrap:wrap;padding-top:4px;">
-                        <div style="display:flex;gap:6px;flex-wrap:wrap;">
-                          <button class="pill-action-btn ${h.isFeishuActive ? 'primary' : ''}" style="padding:5px 10px;font-size:11.5px;" onclick="activateFeishuHost('${escJsStr(h.hostId)}')">
-                            ${h.isFeishuActive ? '🎯 飞书当前主控' : '切飞书到这台'}
-                          </button>
-                          <button class="pill-action-btn ${h.remoteActive ? 'primary' : ''}" style="padding:5px 10px;font-size:11.5px;" onclick="toggleHostRemoteMode('${escJsStr(h.hostId)}', ${!h.remoteActive})">
-                            ${h.remoteActive ? '🔔 飞书通知: 开' : '🔕 飞书通知: 关'}
-                          </button>
-                          <button class="pill-action-btn" style="padding:5px 10px;font-size:11.5px;" onclick="openTurboGuideSheet()">
-                            ${h.bridgeState?.turbo?.enabled ? '⚡ 极速详情' : '🚀 一键提速'}
-                          </button>
-                          <button class="pill-action-btn ${isHostOutdated ? 'primary' : ''}" style="padding:5px 10px;font-size:11.5px;" onclick="upgradeHostTurbo('${escJsStr(h.hostId)}', '${escJsStr(h.hostName)}')" ${isUpgradingHost ? 'disabled' : ''}>
-                            ${isUpgradingHost ? '⏳ 正在升级重启...' : (isHostOutdated ? `🔄 一键升级 (v${esc(hubVer)})` : '🔄 检查/重装更新')}
-                          </button>
-                        </div>
-                        <div>
-                          ${isRevoked ? `
-                            <button class="pill-action-btn" style="padding:5px 10px;font-size:11.5px;" onclick="unrevokeHostCredential('${escJsStr(h.hostId)}', '${escJsStr(h.hostName)}')">恢复接入</button>
-                          ` : `
-                            <button class="pill-action-btn" style="padding:5px 10px;font-size:11.5px;color:var(--red);" onclick="revokeHostCredential('${escJsStr(h.hostId)}', '${escJsStr(h.hostName)}')">🚫 吊销凭证</button>
-                          `}
-                        </div>
-                      </div>
-                    </div>
-                  ` : ''}
-                </div>
-              `}).join('') || `<div style="padding:24px;text-align:center;color:var(--muted);">暂未检测到在线电脑，请复制上方「添加电脑」命令在终端执行</div>`}
-            </div>
-          </div>
-
-          <div>
-            <div class="settings-group-title">各后端功能边界（诚实矩阵）</div>
-            <div class="settings-card" style="padding:12px 14px;overflow-x:auto;">
-              <table style="width:100%;border-collapse:collapse;font-size:12px;text-align:center;">
-                <thead>
-                  <tr style="border-bottom:1px solid var(--border);color:var(--muted);">
-                    <th style="text-align:left;padding:6px 4px;">后端</th>
-                    <th style="padding:6px 3px;">看会话</th>
-                    <th style="padding:6px 3px;">发指令</th>
-                    <th style="padding:6px 3px;">停止</th>
-                    <th style="padding:6px 3px;">手机审批</th>
-                    <th style="padding:6px 3px;">实时插话</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${renderCapabilityMatrixRowsHtml()}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          <div>
-            <div class="settings-group-title">外观与显示模式</div>
-            <div class="settings-card">
-              <div class="settings-item" style="gap:8px;">
-                <div style="min-width:0;flex:1;">
-                  <div class="settings-item-title" style="white-space:nowrap;">界面语言 / Language</div>
-                  <div class="settings-item-desc" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">自动识别浏览器语言或手动切换</div>
-                </div>
-                <div class="theme-seg-group">
-                  <button class="theme-seg-btn ${langPref === 'zh' ? 'active' : ''}" onclick="setLangPreference('zh')">🇨🇳 中文</button>
-                  <button class="theme-seg-btn ${langPref === 'en' ? 'active' : ''}" onclick="setLangPreference('en')">🇺🇸 English</button>
-                </div>
-              </div>
-              <div class="settings-item" style="gap:8px;">
-                <div style="min-width:0;flex:1;">
-                  <div class="settings-item-title" style="white-space:nowrap;">深色 / 浅色主题</div>
-                  <div class="settings-item-desc" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">自动或手动切换外观</div>
-                </div>
-                <div class="theme-seg-group">
-                  <button class="theme-seg-btn ${themePref === 'system' ? 'active' : ''}" onclick="setThemePreference('system')">跟随系统</button>
-                  <button class="theme-seg-btn ${themePref === 'light' ? 'active' : ''}" onclick="setThemePreference('light')">☀️ 浅色</button>
-                  <button class="theme-seg-btn ${themePref === 'dark' ? 'active' : ''}" onclick="setThemePreference('dark')">🌙 深色</button>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div>
-            <div class="settings-group-title">随行耳机语音总管（试用）</div>
-            <div class="settings-card">
-              <div class="settings-item" style="flex-direction:column;align-items:stretch;gap:10px;">
-                <div>
-                  <div class="settings-item-title">🎧 边走路边戴耳机控制所有 AI 任务（试用）</div>
-                  <div class="settings-item-desc">默认免费开箱即用；贴 1 把 API Key 自动配好智能语音，也支持火山豆包 + DeepSeek 自由混搭</div>
-                </div>
-                <div style="display:flex;gap:8px;flex-wrap:wrap;">
-                  <button class="pill-action-btn primary" onclick="openWalkMode()">🎧 进入随行模式（试用）</button>
-                  <button class="pill-action-btn" onclick="openVoiceLab('simple')">⚙️ 语音设置</button>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div>
-            <div class="settings-group-title">多电脑协同与一键迁移</div>
-            <div class="settings-card">
-              <div class="settings-item">
-                <div>
-                  <div class="settings-item-title">跨电脑一键迁移会话</div>
-                  <div class="settings-item-desc">将源电脑 ~/.dsh 会话打包同步至目标电脑并可选清理源机</div>
-                </div>
-                <button class="pill-action-btn primary" onclick="openMigrateWizard()">📦 打开迁移向导</button>
-              </div>
-            </div>
-          </div>
-
-          <div>
-            <div class="settings-group-title">端到端加密分享记录 (${shares.length})</div>
-            <div class="settings-card">
-              ${latestShareResults.map(item => `
-                <div class="settings-item" style="flex-direction:column;align-items:stretch;gap:8px;">
-                  <div style="display:flex;justify-content:space-between;align-items:center;">
-                    <div class="settings-item-title">🔐 最近生成（来自 ${esc(item.hostName)}）</div>
-                    <span style="font-size:11.5px;color:var(--muted);">${formatTime(item.at)}</span>
-                  </div>
-                  <div style="font-size:11.5px;color:var(--muted);font-family:var(--mono);word-break:break-all;background:var(--subtle);padding:6px 8px;border-radius:8px;">
-                    ${esc(item.fullUrl)}
-                  </div>
-                  <div style="display:flex;gap:8px;">
-                    <button class="pill-action-btn primary" onclick="copyCodeText('${escUriJsStr(item.fullUrl)}', '🔗 加密分享链接已复制')">📋 复制完整解密链接</button>
-                    <a href="${esc(item.fullUrl)}" target="_blank" rel="noopener" class="pill-action-btn" style="text-decoration:none;display:inline-flex;align-items:center;">🌐 打开</a>
-                  </div>
-                </div>
-              `).join('')}
-              ${shares.length ? shares.slice(0, 8).map(s => `
-                <div class="settings-item">
-                  <div>
-                    <div class="settings-item-title">${esc(s.title || '加密会话回放')}</div>
-                    <div class="settings-item-desc">来自 ${esc(s.hostName || s.hostId || '远端电脑')} · ${formatTime(s.createdAt)} · ${formatBytes(s.sizeBytes || 0)}</div>
-                  </div>
-                  <button class="pill-action-btn" style="color:var(--red);" onclick="deleteShareRecord('${escJsStr(s.id || s.shareId)}')">🗑️ 销毁</button>
-                </div>
-              `).join('') : `
-                <div class="settings-item">
-                  <div class="settings-item-desc">暂无加密分享记录。可在任意会话右上角「⋯ → 生成 AES-256 端到端加密回放链接」创建。</div>
-                </div>
-              `}
-            </div>
-          </div>
-
-          <div>
-            <div class="settings-group-title">🛡️ 接入审批保护与入侵告警</div>
-            <div class="settings-card">
-              <div class="settings-item">
-                <div>
-                  <div class="settings-item-title">
-                    🔐 新设备 / 新电脑接入需我手机审批
-                    <span style="margin-left:6px;font-size:10.5px;padding:2px 7px;border-radius:999px;background:${ac.deviceApprovalEnabled ? 'var(--green-soft)' : 'var(--amber-soft)'};color:${ac.deviceApprovalEnabled ? 'var(--green)' : '#d97706'};">
-                      ${ac.deviceApprovalEnabled ? '已开启保护' : '未开启'}
-                    </span>
-                  </div>
-                  <div class="settings-item-desc">
-                    开启后，即使有人拿到管理员密码，新浏览器登录或新电脑接入都必须先经你这台手机点击「允许」，否则一律拦截，看不到任何对话与文件。
-                  </div>
-                </div>
-                <button
-                  class="pill-action-btn ${ac.deviceApprovalEnabled ? '' : 'primary'}"
-                  onclick="toggleDeviceApprovalGuard(${ac.deviceApprovalEnabled ? 'false' : 'true'})"
-                >
-                  ${ac.deviceApprovalEnabled ? '关闭保护' : '立即开启'}
-                </button>
-              </div>
-
-              ${(ac.trustedDevices || []).length > 0 ? `
-                <div class="settings-item" style="display:block;">
-                  <div class="settings-item-title">📱 已信任的手机 / 浏览器 (${(ac.trustedDevices || []).length})</div>
-                  <div style="margin-top:8px;display:flex;flex-direction:column;gap:6px;">
-                    ${(ac.trustedDevices || []).map(dev => `
-                      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;border-radius:10px;background:var(--subtle);border:1px solid var(--border);font-size:12px;">
-                        <div style="min-width:0;flex:1;">
-                          <div style="font-weight:700;color:var(--text);">
-                            ${esc(dev.name || '已信任设备')}
-                            ${(dev.isCurrent || dev.id === hubState.currentDeviceId || dev.id === getOrCreateClientDeviceId())
-      ? `<span style="margin-left:4px;font-size:10.5px;padding:1px 6px;border-radius:999px;background:var(--primary-soft);color:var(--primary);">本机</span>`
-      : ''}
-                          </div>
-                          <div style="font-size:11px;color:var(--muted);margin-top:2px;">
-                            IP: <code>${esc(dev.ip || '-')}</code> · 最近活跃 ${formatTime(dev.lastSeen || dev.approvedAt)}
-                          </div>
-                        </div>
-                        <button class="pill-action-btn" style="color:var(--red);padding:4px 8px;font-size:11px;" onclick="revokeTrustedDeviceById('${escJsStr(dev.id)}')">🚫 踢出</button>
-                      </div>
-                    `).join('')}
-                  </div>
-                </div>
-              ` : ''}
-
-              <div class="settings-item" style="display:block;">
-                <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
-                  <div class="settings-item-title">
-                    ${secSum.total24h > 0
-      ? `<span style="color:var(--red);">🚨 近 24 小时已拦截 ${secSum.total24h} 次异常探测（${secSum.uniqueIps24h} 个来源 IP）</span>`
-      : `<span style="color:var(--green);">🟢 运行安全 · 近 24 小时 0 次攻击探测</span>`}
-                  </div>
-                </div>
-                <div class="settings-item-desc" style="margin-top:4px;">
-                  监测伪造 <code>hst_</code> 令牌、敏感路径探测（403）、密码爆破（429）与未审批设备直连，命中后立即推送到你的 iPhone 锁屏。
-                </div>
-                <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
-                  <button class="pill-action-btn" onclick="sendTestSecurityAlert()">🚨 演练告警</button>
-                  ${(secSum.recentEvents || []).length > 0
-      ? `<button class="pill-action-btn" onclick="clearSecurityAlerts()">🧹 清空日志</button>`
-      : ''}
-                </div>
-                ${(secSum.recentEvents || []).length > 0 ? `
-                  <div style="margin-top:10px;display:flex;flex-direction:column;gap:6px;max-height:220px;overflow-y:auto;">
-                    ${(secSum.recentEvents || []).slice(0, 12).map(ev => {
-        const kindLabelMap = {
-          forged_host_token: '伪造令牌',
-          sensitive_path_probe: '敏感路径',
-          auth_bruteforce: '密码爆破',
-          unauth_api_scan: '异常直连',
-        };
-        const badge = kindLabelMap[ev.kind] || ev.kind || '异常';
-        return `
-                        <div style="padding:8px 10px;border-radius:10px;background:var(--subtle);border:1px solid var(--border);font-size:11.5px;line-height:1.45;">
-                          <div style="display:flex;justify-content:space-between;gap:6px;align-items:center;flex-wrap:wrap;">
-                            <span>
-                              <strong style="color:${ev.severity === 'high' ? 'var(--red)' : '#d97706'};">[${esc(badge)} · ${esc(String(ev.status || 401))}]</strong>
-                              <code style="margin-left:4px;">${esc(ev.ip || 'unknown')}</code>
-                            </span>
-                            <span style="color:var(--muted);">${formatTime(ev.at)}</span>
-                          </div>
-                          <div style="color:var(--text-secondary);font-family:var(--mono);font-size:11px;margin-top:3px;word-break:break-all;">
-                            ${esc(ev.method || 'GET')} ${esc(ev.path || '')}
-                          </div>
-                          ${ev.detail ? `<div style="color:var(--muted);margin-top:2px;">${esc(ev.detail)}</div>` : ''}
-                        </div>
-                      `;
-      }).join('')}
-                  </div>
-                ` : ''}
-              </div>
-            </div>
-          </div>
-
-          <div>
-            <div class="settings-group-title">手机锁屏通知 (iOS 16.4+ Web Push)</div>
-            <div class="settings-card">
-              <div class="settings-item" style="display:block;">
-                <div class="settings-item-title">启用 iPhone 锁屏实时推送</div>
-                <div class="settings-item-desc">当任意电脑有待审批、任务完成或异常时直接弹窗</div>
-                <div id="pushLocalStatus" style="margin-top:9px;font-size:12.5px;font-weight:600;color:${esc(cachedPushStatusColor || 'var(--primary)')};">
-                  ${esc(cachedPushStatusText || '正在检测本机推送状态…')}
-                </div>
-                <div id="pushDeviceList" style="margin-top:4px;font-size:12px;color:var(--muted);line-height:1.55;">${esc(cachedPushDeviceListText || '')}</div>
-                <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
-                  <button class="pill-action-btn primary" onclick="subscribeIphonePush()">📲 开启推送</button>
-                  <button class="pill-action-btn" onclick="sendTestPush()">🔔 测试</button>
-                  <button class="pill-action-btn" style="color:var(--red);" onclick="disableIphonePush()">关闭本机推送</button>
-                </div>
-                <div class="settings-item-desc" style="margin-top:8px;">
-                  iPhone 需先在 Safari「分享 → 添加到主屏幕」，再从桌面图标打开本页开启，才能收到锁屏通知
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div>
-            <div class="settings-group-title">隐私与访问密码保护</div>
-            <div class="settings-card">
-              <div class="settings-item">
-                <div>
-                  <div class="settings-item-title">添加新手机（6 位免密配对码）</div>
-                  <div class="settings-item-desc">生成 3 分钟有效的一次性 6 位字母/数字配对码，新手机免输长密码直接解锁</div>
-                </div>
-                <button class="pill-action-btn primary" onclick="openPairingCodeSheet()">📱 生成配对码</button>
-              </div>
-              <div class="settings-item">
-                <div>
-                  <div class="settings-item-title">修改总控台访问密码</div>
-                  <div class="settings-item-desc">随时更换访问密钥，防止未授权访问</div>
-                </div>
-                <button class="pill-action-btn" onclick="promptChangePassword()">🔑 修改密码</button>
-              </div>
-              <div class="settings-item">
-                <div>
-                  <div class="settings-item-title">锁定当前浏览器</div>
-                  <div class="settings-item-desc">清除本机浏览器缓存的登录凭证</div>
-                </div>
-                <button class="pill-action-btn" style="color:var(--red);" onclick="lockAndLogout()">🔒 立即锁定</button>
-              </div>
-            </div>
-          </div>
-
-          <div style="text-align:center;padding:8px 12px 20px;">
-            <div style="margin-bottom:10px;">
-              <button
-                type="button"
-                class="pill-action-btn"
-                style="font-size:12px;padding:6px 14px;"
-                onclick="forceHardUpgradeReload()"
-              >
-                🔄 强制刷新前端版本（清缓存重载）
-              </button>
-            </div>
-            <div
-              style="font-size:11.5px;color:var(--muted);cursor:pointer;user-select:none;"
-              onclick="copyCodeText('${escUriJsStr(`DSH Hub v${buildInfo.version || '0.2.0'} (${buildInfo.uiBuild || 'dev'}) · started ${buildInfo.startedAt ? new Date(buildInfo.startedAt).toISOString() : ''}`)}', '📋 版本信息已复制')"
-            >
-              DSH 远控总控台 v${esc(buildInfo.version || '0.2.0')} · 构建 <code>${esc(buildInfo.uiBuild || 'dev')}</code>${buildInfo.startedAt ? ' · 云端启动于 ' + formatTime(buildInfo.startedAt) : ''}
-            </div>
-          </div>
-        </div>
-      `;
-    if (prevScrollTop > 0) {
-      viewport.scrollTop = prevScrollTop;
+  function renderSettingsTab() {
+    if (!lastRenderedSettingsKey) {
+      settingsPanel.invalidate();
+      lastRenderedSettingsKey = 'delegated';
     }
-    void refreshPushStatus();
+    settingsPanel.render(document.getElementById('mainViewport'));
   }
 
   // 本机是否真的订阅成功，只有浏览器自己知道；服务端登记数则代表所有设备
@@ -8941,7 +8500,8 @@ export function initHubController() {
   async function refreshPushStatus(manual = false) {
     const statusEl = document.getElementById('pushLocalStatus');
     const listEl = document.getElementById('pushDeviceList');
-    if (!statusEl) return;
+    const summaryBadgeEl = document.getElementById('settingsPushSummaryBadge');
+    if (!statusEl && !summaryBadgeEl) return;
     const subs = hubState.pushSubscriptions || [];
     if (listEl) {
       if (!subs.length) {
@@ -8957,20 +8517,24 @@ export function initHubController() {
       }
       listEl.textContent = cachedPushDeviceListText;
     }
+    const applyPushUi = () => {
+      if (statusEl) {
+        statusEl.textContent = cachedPushStatusText;
+        if (cachedPushStatusColor) statusEl.style.color = cachedPushStatusColor;
+      }
+      settingsPanel.syncPushSummaryBadge(cachedPushStatusText);
+      if (langPref === 'en') applyLangToDom(document.body, langPref);
+    };
     // 已经有缓存状态时，10 秒内不重复轮询 Service Worker，直接沿用缓存，彻底消除状态闪烁
     if (!manual && cachedPushStatusText && Date.now() - lastPushStatusAt < 10000) {
-      statusEl.textContent = cachedPushStatusText;
-      if (cachedPushStatusColor) statusEl.style.color = cachedPushStatusColor;
-      if (langPref === 'en') applyLangToDom(document.body, langPref);
+      applyPushUi();
       return;
     }
     lastPushStatusAt = Date.now();
     if (!('serviceWorker' in navigator) || !('PushManager' in window) || typeof Notification === 'undefined') {
       cachedPushStatusText = '本机：当前浏览器不支持锁屏推送（iPhone 需从主屏幕 App 打开）';
       cachedPushStatusColor = '#d97706';
-      statusEl.textContent = cachedPushStatusText;
-      statusEl.style.color = cachedPushStatusColor;
-      if (langPref === 'en') applyLangToDom(document.body, langPref);
+      applyPushUi();
       return;
     }
     try {
@@ -9000,16 +8564,12 @@ export function initHubController() {
         cachedPushStatusText = '本机：未开启（点下方「开启推送」）';
         cachedPushStatusColor = '#d97706';
       }
-      statusEl.textContent = cachedPushStatusText;
-      statusEl.style.color = cachedPushStatusColor;
-      if (langPref === 'en') applyLangToDom(document.body, langPref);
+      applyPushUi();
       if (manual) showToast('已刷新推送状态');
     } catch (err) {
       cachedPushStatusText = '本机：状态读取失败（' + ((err && err.message) || err) + '）';
       cachedPushStatusColor = '#dc2626';
-      statusEl.textContent = cachedPushStatusText;
-      statusEl.style.color = cachedPushStatusColor;
-      if (langPref === 'en') applyLangToDom(document.body, langPref);
+      applyPushUi();
     }
   }
 
@@ -9312,6 +8872,10 @@ export function initHubController() {
   }
 
   function switchTab(tab) {
+    if (tab === 'settings' && currentTab === 'settings' && settingsPanel.getActiveSubpage() !== 'home') {
+      settingsPanel.closeSubpage();
+      return;
+    }
     currentTab = tab;
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
     document.getElementById('tab-' + tab).classList.add('active');
@@ -11641,6 +11205,8 @@ export function initHubController() {
     jumpToSessionFiles,
     deleteTargetSession,
     renderSettingsTab,
+    openSettingsSubpage,
+    closeSettingsSubpage,
     refreshPushStatus,
     disableIphonePush,
     activateFeishuHost,

@@ -1604,6 +1604,1222 @@ function bindWalkMediaSession(handlers) {
 		} catch {}
 	};
 }
+// hub/web/src/voice/provider-routing.js
+var PROTOCOL_LABELS = {
+	native: "手机自带免费",
+	openai_compat: "OpenAI 兼容",
+	gemini: "Google Gemini",
+	volcengine_asr: "火山豆包听写",
+	volcengine_tts: "火山豆包播报"
+};
+var STAGE_CAPABILITIES = {
+	openai_compat: [
+		"stt",
+		"brain",
+		"tts"
+	],
+	gemini: [
+		"stt",
+		"brain",
+		"tts"
+	],
+	volcengine_asr: ["stt"],
+	volcengine_tts: ["tts"]
+};
+var VOICE_PROVIDER_PRESETS = [
+	{
+		key: "deepseek",
+		icon: "🤖",
+		title: "DeepSeek",
+		sub: "高性价比语音大脑",
+		provider: "openai_compat",
+		label: "DeepSeek 官方",
+		baseUrl: "https://api.deepseek.com/v1",
+		defaultModel: "deepseek-chat",
+		defaultVoice: "",
+		resourceId: "",
+		modelChips: [{
+			label: "deepseek-chat (推荐)",
+			value: "deepseek-chat"
+		}, {
+			label: "deepseek-reasoner",
+			value: "deepseek-reasoner"
+		}],
+		keyPlaceholder: "粘贴 DeepSeek API Key（例：sk-...）"
+	},
+	{
+		key: "ark",
+		icon: "🌋",
+		title: "火山方舟 Ark",
+		sub: "豆包 / 方舟 DeepSeek",
+		provider: "openai_compat",
+		label: "火山方舟 Ark",
+		baseUrl: "https://ark.cn-beijing.volces.com/api/v3",
+		defaultModel: "doubao-seed-2-0-lite-260215",
+		defaultVoice: "",
+		resourceId: "",
+		modelChips: [
+			{
+				label: "豆包 2.0 Lite (推荐)",
+				value: "doubao-seed-2-0-lite-260215"
+			},
+			{
+				label: "方舟 DeepSeek V3",
+				value: "deepseek-v3-250324"
+			},
+			{
+				label: "方舟 DeepSeek R1",
+				value: "deepseek-r1-250528"
+			}
+		],
+		keyPlaceholder: "粘贴火山方舟 API Key"
+	},
+	{
+		key: "gemini",
+		icon: "✨",
+		title: "Google Gemini",
+		sub: "1 把 Key 全包听+想+说",
+		provider: "gemini",
+		label: "Google Gemini",
+		baseUrl: "https://generativelanguage.googleapis.com/v1beta",
+		defaultModel: "gemini-2.5-flash",
+		defaultVoice: "Kore",
+		resourceId: "",
+		modelChips: [{
+			label: "gemini-2.5-flash (极速推荐)",
+			value: "gemini-2.5-flash"
+		}, {
+			label: "gemini-3.8-flash",
+			value: "gemini-3.8-flash"
+		}],
+		keyPlaceholder: "粘贴 Gemini Key（例：AIzaSy... 或 AQ.Ab...）"
+	},
+	{
+		key: "openai",
+		icon: "🌐",
+		title: "OpenAI 官方",
+		sub: "听写 + 大脑 + 人声全包",
+		provider: "openai_compat",
+		label: "OpenAI 官方",
+		baseUrl: "https://api.openai.com/v1",
+		defaultModel: "gpt-4o-mini",
+		defaultVoice: "alloy",
+		resourceId: "",
+		modelChips: [{
+			label: "gpt-4o-mini (推荐)",
+			value: "gpt-4o-mini"
+		}, {
+			label: "gpt-4.1-mini",
+			value: "gpt-4.1-mini"
+		}],
+		keyPlaceholder: "粘贴 OpenAI Key（例：sk-proj-...）"
+	},
+	{
+		key: "volcengine_voice",
+		icon: "👂",
+		title: "火山豆包语音",
+		sub: "中文听写 ASR + 拟人播报 TTS",
+		provider: "volcengine_asr",
+		label: "火山豆包识别 (ASR)",
+		baseUrl: "https://openspeech.bytedance.com/api/v3/auc/bigmodel/recognize/flash",
+		defaultModel: "",
+		defaultVoice: "",
+		resourceId: "volc.bigasr.auc_turbo",
+		alsoCreateTts: true,
+		modelChips: [],
+		keyPlaceholder: "粘贴火山引擎「语音技术」API Key"
+	},
+	{
+		key: "siliconflow",
+		icon: "⚡",
+		title: "硅基流动",
+		sub: "国内高速聚合接口",
+		provider: "openai_compat",
+		label: "硅基流动",
+		baseUrl: "https://api.siliconflow.cn/v1",
+		defaultModel: "deepseek-ai/DeepSeek-V3",
+		defaultVoice: "",
+		resourceId: "",
+		modelChips: [{
+			label: "DeepSeek-V3",
+			value: "deepseek-ai/DeepSeek-V3"
+		}, {
+			label: "Qwen2.5-72B",
+			value: "Qwen/Qwen2.5-72B-Instruct"
+		}],
+		keyPlaceholder: "粘贴 SiliconFlow API Key（例：sk-...）"
+	},
+	{
+		key: "openrouter",
+		icon: "🔗",
+		title: "OpenRouter",
+		sub: "全球多模型统一路由",
+		provider: "openai_compat",
+		label: "OpenRouter",
+		baseUrl: "https://openrouter.ai/api/v1",
+		defaultModel: "openai/gpt-4o-mini",
+		defaultVoice: "",
+		resourceId: "",
+		modelChips: [{
+			label: "openai/gpt-4o-mini",
+			value: "openai/gpt-4o-mini"
+		}, {
+			label: "deepseek/deepseek-chat",
+			value: "deepseek/deepseek-chat"
+		}],
+		keyPlaceholder: "粘贴 OpenRouter API Key（例：sk-or-...）"
+	},
+	{
+		key: "custom",
+		icon: "🔧",
+		title: "完全自定义",
+		sub: "任意中转站 / 智谱 / Ollama",
+		provider: "openai_compat",
+		label: "",
+		baseUrl: "",
+		defaultModel: "",
+		defaultVoice: "",
+		resourceId: "",
+		modelChips: [],
+		keyPlaceholder: "粘贴该服务商的 API Key"
+	}
+];
+var TTS_VOICE_OPTIONS = {
+	volcengine_tts: [
+		{
+			label: "vv 自然女声",
+			value: "zh_female_vv_uranus_bigtts"
+		},
+		{
+			label: "小荷 温柔女声",
+			value: "zh_female_xiaohe_uranus_bigtts"
+		},
+		{
+			label: "阳光男声",
+			value: "zh_male_m191_uranus_bigtts"
+		},
+		{
+			label: "涛诚 稳重男声",
+			value: "zh_male_taocheng_uranus_bigtts"
+		}
+	],
+	gemini: [
+		{
+			label: "Kore (知性女声)",
+			value: "Kore"
+		},
+		{
+			label: "Puck (轻快)",
+			value: "Puck"
+		},
+		{
+			label: "Aoede (柔和)",
+			value: "Aoede"
+		},
+		{
+			label: "Zephyr (清亮)",
+			value: "Zephyr"
+		}
+	],
+	openai_compat: [
+		{
+			label: "alloy (中性)",
+			value: "alloy"
+		},
+		{
+			label: "nova (清晰女声)",
+			value: "nova"
+		},
+		{
+			label: "shimmer (柔和)",
+			value: "shimmer"
+		},
+		{
+			label: "coral (自然)",
+			value: "coral"
+		}
+	]
+};
+function providerSupportsStage(provider, stage) {
+	return (STAGE_CAPABILITIES[String(provider || "")] || []).includes(stage);
+}
+function extractHostFromUrl(rawUrl = "") {
+	const s = String(rawUrl || "").trim();
+	if (!s) return "";
+	try {
+		return new URL(s).host;
+	} catch {
+		return s.replace(/^https?:\/\//i, "").split("/")[0] || s;
+	}
+}
+function inferDefaultBrainModel(cred) {
+	if (!cred) return "rule-router";
+	if (cred.defaultModel && String(cred.defaultModel).trim()) return String(cred.defaultModel).trim();
+	if (cred.provider === "gemini") return "gemini-2.5-flash";
+	const u = String(cred.baseUrl || "").toLowerCase();
+	if (u.includes("deepseek")) return "deepseek-chat";
+	if (u.includes("volces.com") || u.includes("ark.")) return "doubao-seed-2-0-lite-260215";
+	if (u.includes("groq.com")) return "llama-3.3-70b-versatile";
+	if (u.includes("siliconflow")) return "deepseek-ai/DeepSeek-V3";
+	if (u.includes("11434") || u.includes("ollama")) return "qwen2.5:7b";
+	return "gpt-4o-mini";
+}
+function inferStageModelForCred(cred, stage) {
+	if (!cred) {
+		if (stage === "stt") return "browser-web-speech";
+		if (stage === "brain") return "rule-router";
+		return "browser-speech-synthesis";
+	}
+	const m = String(cred.defaultModel || "").trim();
+	if (cred.provider === "volcengine_asr") return String(cred.resourceId || "").trim() || "volc.bigasr.auc_turbo";
+	if (cred.provider === "volcengine_tts") return String(cred.resourceId || "").trim() || "seed-tts-2.0";
+	if (cred.provider === "gemini") {
+		if (stage === "tts") return /tts/i.test(m) ? m : "gemini-2.5-flash-preview-tts";
+		return m || "gemini-2.5-flash";
+	}
+	if (stage === "stt") {
+		if (/whisper|transcribe|asr|audio|sensevoice/i.test(m)) return m;
+		return "gpt-4o-mini-transcribe";
+	}
+	if (stage === "tts") {
+		if (/tts|speech|cosyvoice|fish/i.test(m)) return m;
+		return "gpt-4o-mini-tts";
+	}
+	return inferDefaultBrainModel(cred);
+}
+function inferStageVoiceForCred(cred, prevVoice = "") {
+	if (!cred) return "system-default";
+	const v = String(cred.defaultVoice || "").trim();
+	if (v) return v;
+	const pv = String(prevVoice || "").trim();
+	if (cred.provider === "volcengine_tts") return pv && pv.startsWith("zh_") ? pv : "zh_female_vv_uranus_bigtts";
+	if (cred.provider === "gemini") return pv && [
+		"Kore",
+		"Puck",
+		"Aoede",
+		"Zephyr",
+		"Fenrir"
+	].includes(pv) ? pv : "Kore";
+	if (cred.provider === "openai_compat") return pv && pv !== "system-default" ? pv : "alloy";
+	return "system-default";
+}
+/**
+* Resolves a stage config to a concrete PublicCredential from credentials[], or null if native / missing.
+*/
+function resolveStageCred(stageCfg, credentials = []) {
+	if (!stageCfg || !stageCfg.provider || stageCfg.provider === "native") return null;
+	const list = Array.isArray(credentials) ? credentials : [];
+	if (stageCfg.credId) {
+		const exact = list.find((c) => c.id === stageCfg.credId);
+		if (exact) return exact;
+	}
+	const active = list.find((c) => c.provider === stageCfg.provider && c.active);
+	if (active) return active;
+	return list.find((c) => c.provider === stageCfg.provider) || null;
+}
+/**
+* Returns select dropdown value: 'native' | 'cred:<id>' | 'missing:<provider>'
+*/
+function getStageSelectValue(stageCfg, credentials = []) {
+	if (!stageCfg || !stageCfg.provider || stageCfg.provider === "native") return "native";
+	const matched = resolveStageCred(stageCfg, credentials);
+	if (matched) return `cred:${matched.id}`;
+	return `missing:${stageCfg.provider}`;
+}
+/**
+* Returns which stages ('stt' | 'brain' | 'tts') currently resolve to a given credential id.
+*/
+function getCredentialActiveRoles(credId, activeProfile, credentials = []) {
+	if (!credId || !activeProfile || activeProfile.id === "native") return [];
+	const roles = [];
+	for (const stage of [
+		"stt",
+		"brain",
+		"tts"
+	]) {
+		const resolved = resolveStageCred(activeProfile[stage], credentials);
+		if (resolved && resolved.id === credId) roles.push(stage);
+	}
+	return roles;
+}
+function buildStageConfigFromSelectValue(selectVal, stage, credentials = [], prevStage = null) {
+	const val = String(selectVal || "native");
+	if (!val || val === "native" || !val.startsWith("cred:")) {
+		if (stage === "stt") return {
+			provider: "native",
+			credId: "",
+			model: "browser-web-speech",
+			language: "zh-CN",
+			thinkingLevel: "default",
+			fallbackChain: []
+		};
+		if (stage === "brain") return {
+			provider: "native",
+			credId: "",
+			model: "rule-router",
+			thinkingLevel: "off",
+			maxTokens: 256
+		};
+		return {
+			provider: "native",
+			credId: "",
+			model: "browser-speech-synthesis",
+			voice: "system-default",
+			format: "mp3",
+			speed: 1
+		};
+	}
+	const credId = val.slice(5);
+	const cred = (credentials || []).find((c) => c.id === credId);
+	if (!cred) return buildStageConfigFromSelectValue("native", stage, credentials, prevStage);
+	const model = inferStageModelForCred(cred, stage);
+	if (stage === "stt") return {
+		provider: cred.provider,
+		credId: cred.id,
+		model,
+		language: prevStage?.language || "zh-CN",
+		thinkingLevel: cred.provider === "gemini" ? "low" : "default",
+		fallbackChain: []
+	};
+	if (stage === "brain") return {
+		provider: cred.provider,
+		credId: cred.id,
+		model,
+		thinkingLevel: "off",
+		maxTokens: 320
+	};
+	return {
+		provider: cred.provider,
+		credId: cred.id,
+		model,
+		voice: inferStageVoiceForCred(cred, prevStage?.voice),
+		format: "mp3",
+		speed: prevStage?.speed || 1
+	};
+}
+function shortStageLabel(stageCfg, credentials = []) {
+	if (!stageCfg || !stageCfg.provider || stageCfg.provider === "native") return "手机免费";
+	const cred = resolveStageCred(stageCfg, credentials);
+	if (cred?.label) return cred.label;
+	return PROTOCOL_LABELS[stageCfg.provider] || stageCfg.provider;
+}
+function buildAutoProfileName(stt, brain, tts, credentials = []) {
+	if (stt.provider === "native" && brain.provider === "native" && tts.provider === "native") return "系统原生语音（免 Key 免费）";
+	const sttCred = resolveStageCred(stt, credentials);
+	const brainCred = resolveStageCred(brain, credentials);
+	const ttsCred = resolveStageCred(tts, credentials);
+	if (sttCred && brainCred && ttsCred && sttCred.id === brainCred.id && brainCred.id === ttsCred.id) return `全能 · ${sttCred.label}`;
+	if (stt.provider === "native" && tts.provider === "native" && brainCred) return `免费听说 + ${brainCred.label}`;
+	if (brainCred) {
+		const voiceLabel = ttsCred?.label || sttCred?.label || "";
+		return voiceLabel ? `${voiceLabel} + ${brainCred.label}` : brainCred.label;
+	}
+	const parts = [];
+	if (stt.provider !== "native") parts.push(shortStageLabel(stt, credentials));
+	if (tts.provider !== "native" && ttsCred?.id !== sttCred?.id) parts.push(shortStageLabel(tts, credentials));
+	return parts.join(" + ") || "自定义语音路由";
+}
+/**
+* Builds the exact payload to persist a routing change across stt / brain / tts.
+* Returns { isNativeOnly: true } if all 3 stages are native, or { isNativeOnly: false, profilePayload }.
+*/
+function buildRoutingProfilePayload({ sttVal, brainVal, ttsVal, credentials = [], existingProfiles = [], activeProfile = null }) {
+	const stt = buildStageConfigFromSelectValue(sttVal, "stt", credentials, activeProfile?.stt);
+	const brain = buildStageConfigFromSelectValue(brainVal, "brain", credentials, activeProfile?.brain);
+	const tts = buildStageConfigFromSelectValue(ttsVal, "tts", credentials, activeProfile?.tts);
+	if (stt.provider === "native" && brain.provider === "native" && tts.provider === "native") return {
+		isNativeOnly: true,
+		stt,
+		brain,
+		tts
+	};
+	const name = buildAutoProfileName(stt, brain, tts, credentials);
+	return {
+		isNativeOnly: false,
+		profilePayload: {
+			id: (activeProfile && !activeProfile.builtin ? activeProfile : (existingProfiles || []).find((p) => !p.builtin) || null)?.id || "",
+			name,
+			stt,
+			brain,
+			tts,
+			activate: true
+		}
+	};
+}
+/**
+* Computes smart default stage assignment when clicking "设为默认" on a single Provider card
+* or checking "保存后立即设为默认" when adding a new Provider.
+*/
+function computeSmartDefaultSelection(cred, currentSelection, extraPairedTtsCred = null) {
+	const next = {
+		sttVal: currentSelection.sttVal || "native",
+		brainVal: currentSelection.brainVal || "native",
+		ttsVal: currentSelection.ttsVal || "native"
+	};
+	if (!cred) return next;
+	const val = `cred:${cred.id}`;
+	if (cred.provider === "gemini") {
+		next.sttVal = val;
+		next.brainVal = val;
+		next.ttsVal = val;
+		return next;
+	}
+	if (cred.provider === "volcengine_asr") {
+		next.sttVal = val;
+		if (extraPairedTtsCred?.id) next.ttsVal = `cred:${extraPairedTtsCred.id}`;
+		return next;
+	}
+	if (cred.provider === "volcengine_tts") {
+		next.ttsVal = val;
+		return next;
+	}
+	next.brainVal = val;
+	if (extractHostFromUrl(cred.baseUrl).toLowerCase() === "api.openai.com") {
+		next.sttVal = val;
+		next.ttsVal = val;
+	}
+	return next;
+}
+/**
+* Computes fallback routing selection when a credential is deleted so activeProfile never breaks.
+*/
+function computeSelectionAfterDelete(deletedCredId, activeProfile, remainingCredentials = []) {
+	const cur = {
+		sttVal: getStageSelectValue(activeProfile?.stt, remainingCredentials),
+		brainVal: getStageSelectValue(activeProfile?.brain, remainingCredentials),
+		ttsVal: getStageSelectValue(activeProfile?.tts, remainingCredentials)
+	};
+	let affected = false;
+	for (const [stage, key] of [
+		["stt", "sttVal"],
+		["brain", "brainVal"],
+		["tts", "ttsVal"]
+	]) {
+		const st = activeProfile?.[stage];
+		if (st && st.provider !== "native") {
+			const wasDirectMatch = st.credId === deletedCredId;
+			const isNowMissing = cur[key].startsWith("missing:");
+			if (wasDirectMatch || isNowMissing) {
+				affected = true;
+				const fallbackCred = (remainingCredentials || []).find((c) => c.provider === st.provider && c.enabled !== false);
+				cur[key] = fallbackCred ? `cred:${fallbackCred.id}` : "native";
+			}
+		}
+	}
+	return {
+		affected,
+		nextSelection: cur
+	};
+}
+/**
+* Concise 1-line voice summary displayed right on Settings Home ("模型与偏好" -> "边走边听 · 语音总管").
+*/
+function formatVoiceSummaryForSettings(voiceCfg) {
+	if (!voiceCfg || !voiceCfg.activeProfile) return "免费本机语音 · 点此添加 Provider";
+	const prof = voiceCfg.activeProfile;
+	const creds = Array.isArray(voiceCfg.credentials) ? voiceCfg.credentials : [];
+	if (prof.id === "native" || prof.stt?.provider === "native" && prof.brain?.provider === "native" && prof.tts?.provider === "native") return creds.length > 0 ? `免费本机语音 · 已添加 ${creds.length} 个 Provider` : "免费本机语音 · 点此添加 Provider";
+	const sttCred = resolveStageCred(prof.stt, creds);
+	const brainCred = resolveStageCred(prof.brain, creds);
+	const ttsCred = resolveStageCred(prof.tts, creds);
+	if (sttCred && brainCred && ttsCred && sttCred.id === brainCred.id && brainCred.id === ttsCred.id) return `全能：${sttCred.label}${creds.length > 1 ? ` · 共 ${creds.length} 个 Provider` : ""}`;
+	return `听：${shortStageLabel(prof.stt, creds)} · 想：${shortStageLabel(prof.brain, creds)} · 说：${shortStageLabel(prof.tts, creds)}`;
+}
+// hub/web/src/components/VoiceProviderSheet.tsx
+function makeDraftFromPreset(presetKey = "deepseek") {
+	const preset = VOICE_PROVIDER_PRESETS.find((p) => p.key === presetKey) || VOICE_PROVIDER_PRESETS[0];
+	return {
+		id: "",
+		presetKey: preset.key,
+		provider: preset.provider,
+		label: preset.label || "",
+		baseUrl: preset.baseUrl || "",
+		volcAuthMode: "apiKey",
+		apiKey: "",
+		appId: "",
+		accessToken: "",
+		defaultModel: preset.defaultModel || "",
+		defaultVoice: preset.defaultVoice || "",
+		resourceId: preset.resourceId || "",
+		alsoCreateTts: Boolean(preset.alsoCreateTts),
+		pairedTtsVoice: "zh_female_vv_uranus_bigtts",
+		pairedTtsResourceId: "seed-tts-2.0",
+		setAsDefault: true
+	};
+}
+function makeDraftFromCredential(cred) {
+	return {
+		id: cred.id,
+		presetKey: "custom",
+		provider: cred.provider || "openai_compat",
+		label: cred.label || "",
+		baseUrl: cred.baseUrl || "",
+		volcAuthMode: "apiKey",
+		apiKey: "",
+		appId: "",
+		accessToken: "",
+		defaultModel: cred.defaultModel || "",
+		defaultVoice: cred.defaultVoice || "",
+		resourceId: cred.resourceId || "",
+		alsoCreateTts: false,
+		pairedTtsVoice: "zh_female_vv_uranus_bigtts",
+		pairedTtsResourceId: "seed-tts-2.0",
+		setAsDefault: false
+	};
+}
+function VoiceProviderSheet(props) {
+	const { open, onClose, config, loadingCfg, initialView = "list", onConfigChange, onUpdatePrefs, onSoundCheck, soundChecking, soundCheckMsg, onClearSoundCheckMsg, onRunBenchTurn, onToggleBenchVoice, benchDryRun, onSetBenchDryRun, benchText, onSetBenchText, benchRunning, benchRecording, benchReport, apiCall, toast } = props;
+	const [viewMode, setViewMode] = d("list");
+	const [draft, setDraft] = d(() => makeDraftFromPreset("deepseek"));
+	const [editingCredSummary, setEditingCredSummary] = d("");
+	const [savingEditor, setSavingEditor] = d(false);
+	const [editorError, setEditorError] = d("");
+	const [routingSaving, setRoutingSaving] = d(false);
+	const [routingMsg, setRoutingMsg] = d(null);
+	const [testingCredId, setTestingCredId] = d("");
+	const [testResults, setTestResults] = d({});
+	const [geekOpen, setGeekOpen] = d(false);
+	A(() => {
+		if (!open) return;
+		setRoutingMsg(null);
+		setEditorError("");
+		if (initialView === "add") {
+			setDraft(makeDraftFromPreset("deepseek"));
+			setEditingCredSummary("");
+			setViewMode("editor");
+		} else {
+			setViewMode("list");
+			setGeekOpen(initialView === "bench");
+		}
+	}, [open, initialView]);
+	if (!open) return null;
+	const activeProf = config.activeProfile;
+	const creds = config.credentials || [];
+	const sttVal = getStageSelectValue(activeProf?.stt, creds);
+	const brainVal = getStageSelectValue(activeProf?.brain, creds);
+	const ttsVal = getStageSelectValue(activeProf?.tts, creds);
+	const sttCreds = creds.filter((c) => providerSupportsStage(c.provider, "stt"));
+	const brainCreds = creds.filter((c) => providerSupportsStage(c.provider, "brain"));
+	const ttsCreds = creds.filter((c) => providerSupportsStage(c.provider, "tts"));
+	const missingStages = [];
+	if (sttVal.startsWith("missing:")) missingStages.push("听写");
+	if (brainVal.startsWith("missing:")) missingStages.push("大脑");
+	if (ttsVal.startsWith("missing:")) missingStages.push("播报");
+	const persistRouting = async (nextSttVal, nextBrainVal, nextTtsVal, latestCfg = config, successNotice) => {
+		setRoutingSaving(true);
+		setRoutingMsg(null);
+		try {
+			const plan = buildRoutingProfilePayload({
+				sttVal: nextSttVal,
+				brainVal: nextBrainVal,
+				ttsVal: nextTtsVal,
+				credentials: latestCfg.credentials,
+				existingProfiles: latestCfg.profiles,
+				activeProfile: latestCfg.activeProfile
+			});
+			if (plan.isNativeOnly) {
+				await onUpdatePrefs({ activeProfileId: "native" });
+				setRoutingMsg({
+					ok: true,
+					text: successNotice || "✅ 已切换为免费本机语音"
+				});
+				return;
+			}
+			const res = await apiCall("/api/voice/profiles", {
+				method: "POST",
+				body: JSON.stringify(plan.profilePayload)
+			});
+			const data = await res.json().catch(() => null);
+			if (!res.ok || !data?.ok || !data.config) {
+				const errText = data?.error || "保存默认分配失败";
+				setRoutingMsg({
+					ok: false,
+					text: `❌ ${errText}`
+				});
+				toast(`❌ ${errText}`);
+				return;
+			}
+			onConfigChange({
+				...latestCfg,
+				...data.config
+			});
+			setRoutingMsg({
+				ok: true,
+				text: successNotice || `✅ 默认分配已生效：${plan.profilePayload.name}`
+			});
+		} catch (err) {
+			setRoutingMsg({
+				ok: false,
+				text: `❌ ${err?.message || "保存失败"}`
+			});
+		} finally {
+			setRoutingSaving(false);
+		}
+	};
+	const handleStageChange = (stage, nextVal) => {
+		persistRouting(stage === "stt" ? nextVal : sttVal, stage === "brain" ? nextVal : brainVal, stage === "tts" ? nextVal : ttsVal);
+	};
+	const handleSetProviderDefault = async (cred) => {
+		const nextSel = computeSmartDefaultSelection(cred, {
+			sttVal,
+			brainVal,
+			ttsVal
+		});
+		await persistRouting(nextSel.sttVal, nextSel.brainVal, nextSel.ttsVal, config, `✅ 已将「${cred.label}」设为默认`);
+		toast(`✅ 已将「${cred.label}」设为默认`);
+	};
+	const handleTestProvider = async (credId) => {
+		setTestingCredId(credId);
+		try {
+			const res = await apiCall("/api/voice/test", {
+				method: "POST",
+				body: JSON.stringify({ credId })
+			});
+			const data = await res.json().catch(() => ({
+				ok: false,
+				error: `HTTP ${res.status}`
+			}));
+			setTestResults((prev) => ({
+				...prev,
+				[credId]: {
+					ok: Boolean(data?.ok),
+					summary: data?.summary || (data?.ok ? `✅ 连通正常 (${data.latencyMs ?? 0}ms)` : `❌ ${data?.error || "测试失败"}`)
+				}
+			}));
+		} catch (err) {
+			setTestResults((prev) => ({
+				...prev,
+				[credId]: {
+					ok: false,
+					summary: `❌ ${err?.message || "网络异常"}`
+				}
+			}));
+		} finally {
+			setTestingCredId("");
+		}
+	};
+	const handleDeleteProvider = async (cred) => {
+		if (!confirm(`确定删除 Provider「${cred.label}」吗？\n删除后如果正在使用它，对应环节会自动回退。`)) return;
+		try {
+			const res = await apiCall(`/api/voice/credentials/${encodeURIComponent(cred.id)}`, { method: "DELETE" });
+			const data = await res.json().catch(() => null);
+			if (!res.ok || !data?.ok || !data.config) {
+				toast(`❌ ${data?.error || "删除失败"}`);
+				return;
+			}
+			const nextCfg = {
+				...config,
+				...data.config
+			};
+			onConfigChange(nextCfg);
+			toast(`🗑️ 已删除「${cred.label}」`);
+			const fallback = computeSelectionAfterDelete(cred.id, config.activeProfile, nextCfg.credentials);
+			if (fallback.affected) await persistRouting(fallback.nextSelection.sttVal, fallback.nextSelection.brainVal, fallback.nextSelection.ttsVal, nextCfg, `🗑️ 已删除「${cred.label}」，受影响环节已安全回退`);
+		} catch (err) {
+			toast(`❌ 删除失败：${err?.message || "网络异常"}`);
+		}
+	};
+	const openAddEditor = (presetKey = "deepseek") => {
+		setDraft(makeDraftFromPreset(presetKey));
+		setEditingCredSummary("");
+		setEditorError("");
+		setViewMode("editor");
+	};
+	const openEditEditor = (cred) => {
+		setDraft(makeDraftFromCredential(cred));
+		setEditingCredSummary(cred.authSummary || "");
+		setEditorError("");
+		setViewMode("editor");
+	};
+	const handleSaveProvider = async () => {
+		setEditorError("");
+		const isEdit = Boolean(draft.id);
+		const isVolc = draft.provider === "volcengine_asr" || draft.provider === "volcengine_tts";
+		const cleanLabel = draft.label.trim() || (draft.baseUrl.trim() ? extractHostFromUrl(draft.baseUrl.trim()) : "") || PROTOCOL_LABELS[draft.provider] || "自定义 Provider";
+		if (draft.provider === "openai_compat" && !draft.baseUrl.trim()) {
+			setEditorError("请填写接口地址（Base URL），例如 https://api.deepseek.com/v1");
+			return;
+		}
+		if (!isEdit) {
+			if (isVolc && draft.volcAuthMode === "appToken") {
+				if (!draft.appId.trim() || !draft.accessToken.trim()) {
+					setEditorError("请同时填写火山引擎 AppID 和 Access Token");
+					return;
+				}
+			} else if (!draft.apiKey.trim()) {
+				setEditorError("请填写 API Key（会经 AES-256 加密保存，不会明文返回）");
+				return;
+			}
+		}
+		setSavingEditor(true);
+		try {
+			const payload = {
+				id: draft.id || "",
+				provider: draft.provider,
+				label: cleanLabel,
+				baseUrl: draft.baseUrl.trim(),
+				defaultModel: draft.defaultModel.trim(),
+				defaultVoice: draft.defaultVoice.trim(),
+				resourceId: draft.resourceId.trim(),
+				active: true
+			};
+			if (isVolc && draft.volcAuthMode === "appToken") {
+				if (draft.appId.trim()) payload.appId = draft.appId.trim();
+				if (draft.accessToken.trim()) payload.accessToken = draft.accessToken.trim();
+			} else if (draft.apiKey.trim()) payload.apiKey = draft.apiKey.trim();
+			const res = await apiCall("/api/voice/credentials", {
+				method: "POST",
+				body: JSON.stringify(payload)
+			});
+			const data = await res.json().catch(() => null);
+			if (!res.ok || !data?.ok || !data.credential) {
+				setEditorError(data?.error || "保存 Provider 失败，请检查地址和密钥");
+				return;
+			}
+			let latestCfg = data.config ? {
+				...config,
+				...data.config
+			} : config;
+			const savedCred = data.credential;
+			let pairedTtsCred = null;
+			if (!isEdit && draft.provider === "volcengine_asr" && draft.alsoCreateTts) {
+				const ttsPayload = {
+					provider: "volcengine_tts",
+					label: `${cleanLabel.replace(/\(ASR\)|识别/gi, "").trim() || "火山豆包"}播报 (TTS)`,
+					baseUrl: "https://openspeech.bytedance.com/api/v3/tts/unidirectional",
+					cloneSecretFromCredId: savedCred.id,
+					resourceId: draft.pairedTtsResourceId.trim() || "seed-tts-2.0",
+					defaultVoice: draft.pairedTtsVoice.trim() || "zh_female_vv_uranus_bigtts",
+					active: true
+				};
+				const ttsRes = await apiCall("/api/voice/credentials", {
+					method: "POST",
+					body: JSON.stringify(ttsPayload)
+				});
+				const ttsData = await ttsRes.json().catch(() => null);
+				if (ttsRes.ok && ttsData?.ok && ttsData.credential) {
+					pairedTtsCred = ttsData.credential;
+					if (ttsData.config) latestCfg = {
+						...latestCfg,
+						...ttsData.config
+					};
+				}
+			}
+			onConfigChange(latestCfg);
+			setViewMode("list");
+			const curRoles = getCredentialActiveRoles(savedCred.id, latestCfg.activeProfile, latestCfg.credentials);
+			if (draft.setAsDefault) {
+				const nextSel = computeSmartDefaultSelection(savedCred, {
+					sttVal: getStageSelectValue(latestCfg.activeProfile?.stt, latestCfg.credentials),
+					brainVal: getStageSelectValue(latestCfg.activeProfile?.brain, latestCfg.credentials),
+					ttsVal: getStageSelectValue(latestCfg.activeProfile?.tts, latestCfg.credentials)
+				}, pairedTtsCred);
+				await persistRouting(nextSel.sttVal, nextSel.brainVal, nextSel.ttsVal, latestCfg, pairedTtsCred ? `✅ 已添加「${savedCred.label}」与播报并设为默认` : `✅ 已保存「${savedCred.label}」并设为默认`);
+			} else if (isEdit && curRoles.length > 0) await persistRouting(getStageSelectValue(latestCfg.activeProfile?.stt, latestCfg.credentials), getStageSelectValue(latestCfg.activeProfile?.brain, latestCfg.credentials), getStageSelectValue(latestCfg.activeProfile?.tts, latestCfg.credentials), latestCfg, `✅ 已更新「${savedCred.label}」配置`);
+			toast(isEdit ? `✅ 已更新「${savedCred.label}」` : `✅ 已添加 Provider「${savedCred.label}」`);
+		} catch (err) {
+			setEditorError(err?.message || "网络异常，请重试");
+		} finally {
+			setSavingEditor(false);
+		}
+	};
+	const activePreset = VOICE_PROVIDER_PRESETS.find((p) => p.key === draft.presetKey);
+	const voiceChips = TTS_VOICE_OPTIONS[draft.provider] || [];
+	const isVolcDraft = draft.provider === "volcengine_asr" || draft.provider === "volcengine_tts";
+	const summaryLine = formatVoiceSummaryForSettings(config);
+	return /* @__PURE__ */ k$1("div", {
+		id: "voiceLabSheet",
+		class: "sheet-backdrop open voice-lab-backdrop",
+		onClick: (e) => {
+			if (e.target === e.currentTarget) onClose();
+		}
+	}, /* @__PURE__ */ k$1("div", { class: "sheet-panel voice-lab-panel" }, /* @__PURE__ */ k$1("div", { class: "sheet-handle" }), /* @__PURE__ */ k$1("div", {
+		class: "sheet-title",
+		style: "margin-bottom:10px;"
+	}, viewMode === "list" ? /* @__PURE__ */ k$1("span", { style: "overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" }, "🎙️ 边走边听 · Provider 配置") : /* @__PURE__ */ k$1("div", { style: "display:flex;align-items:center;gap:8px;min-width:0;" }, /* @__PURE__ */ k$1("button", {
+		type: "button",
+		class: "voice-back-btn",
+		id: "vpBackToListBtn",
+		onClick: () => {
+			setEditorError("");
+			setViewMode("list");
+		}
+	}, "‹ 返回列表"), /* @__PURE__ */ k$1("span", { style: "overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" }, draft.id ? "✏️ 编辑 Provider" : "➕ 添加 Provider")), /* @__PURE__ */ k$1("button", {
+		type: "button",
+		"aria-label": "关闭语音配置",
+		style: "border:none;background:transparent;color:var(--muted);font-size:18px;cursor:pointer;padding:4px 8px;",
+		onClick: onClose
+	}, "✕")), viewMode === "list" ? /* @__PURE__ */ k$1("div", { class: "voice-lab-body" }, loadingCfg && /* @__PURE__ */ k$1("div", { class: "voice-muted-note" }, "正在读取加密配置…"), /* @__PURE__ */ k$1("div", { class: "voice-tab-stack" }, /* @__PURE__ */ k$1("div", { class: "voice-card voice-status-hero" }, /* @__PURE__ */ k$1("div", { class: "voice-status-hero-row" }, /* @__PURE__ */ k$1("div", { style: "flex:1;min-width:0;" }, /* @__PURE__ */ k$1("div", { class: "voice-status-hero-title" }, activeProf.id === "native" ? "🆓 当前：免费本机语音" : `✅ 当前：${activeProf.name}`), /* @__PURE__ */ k$1("div", { class: "voice-status-hero-sub" }, summaryLine)), /* @__PURE__ */ k$1("button", {
+		type: "button",
+		class: "voice-pill-btn primary",
+		disabled: soundChecking,
+		onClick: () => void onSoundCheck()
+	}, soundChecking ? "试音中…" : "🔊 试听")), missingStages.length > 0 && /* @__PURE__ */ k$1("button", {
+		type: "button",
+		class: "voice-missing-key-cta",
+		style: "margin-top:8px;",
+		onClick: () => openAddEditor("deepseek")
+	}, /* @__PURE__ */ k$1("span", null, "⚠️ ", missingStages.join(" / "), " 指向的密钥已缺失"), /* @__PURE__ */ k$1("span", null, "去添加 →")), (soundCheckMsg || routingMsg) && /* @__PURE__ */ k$1("div", {
+		class: `voice-test-msg ${(routingMsg || soundCheckMsg).ok ? "ok" : "err"}`,
+		style: "margin-top:8px;",
+		onClick: () => {
+			setRoutingMsg(null);
+			onClearSoundCheckMsg();
+		}
+	}, (routingMsg || soundCheckMsg).text)), /* @__PURE__ */ k$1("div", { class: "voice-card" }, /* @__PURE__ */ k$1("div", {
+		class: "voice-card-head",
+		style: "margin-bottom:6px;"
+	}, /* @__PURE__ */ k$1("div", {
+		class: "voice-card-title",
+		style: "margin-bottom:0;"
+	}, "🎛️ 默认分配（听 · 想 · 说）"), activeProf.id !== "native" && /* @__PURE__ */ k$1("button", {
+		type: "button",
+		class: "voice-pill-btn",
+		disabled: routingSaving,
+		onClick: () => void persistRouting("native", "native", "native")
+	}, "切回免费本机")), /* @__PURE__ */ k$1("div", {
+		class: "voice-muted-note",
+		style: "margin-bottom:8px;"
+	}, "从下方你的 Provider 列表里，自由指定哪一家负责听、想、说，改完自动生效。"), /* @__PURE__ */ k$1("div", { class: "vp-routing-list" }, /* @__PURE__ */ k$1("div", { class: "vp-routing-row" }, /* @__PURE__ */ k$1("div", { class: "vp-routing-label" }, /* @__PURE__ */ k$1("span", { class: "vp-routing-title" }, "👂 听（语音转文字）")), /* @__PURE__ */ k$1("select", {
+		id: "voiceStageSttSelect",
+		class: "vp-routing-select",
+		disabled: routingSaving,
+		value: sttVal,
+		onChange: (e) => handleStageChange("stt", e.target.value)
+	}, /* @__PURE__ */ k$1("option", { value: "native" }, "🆓 手机自带免费"), sttVal.startsWith("missing:") && /* @__PURE__ */ k$1("option", { value: sttVal }, "⚠️ 密钥缺失 (", PROTOCOL_LABELS[sttVal.slice(8)] || sttVal.slice(8), ")"), sttCreds.map((c) => /* @__PURE__ */ k$1("option", {
+		key: c.id,
+		value: `cred:${c.id}`
+	}, c.label, " · ", PROTOCOL_LABELS[c.provider] || c.provider)))), /* @__PURE__ */ k$1("div", { class: "vp-routing-row" }, /* @__PURE__ */ k$1("div", { class: "vp-routing-label" }, /* @__PURE__ */ k$1("span", { class: "vp-routing-title" }, "🧠 想（语音大脑）")), /* @__PURE__ */ k$1("select", {
+		id: "voiceStageBrainSelect",
+		class: "vp-routing-select",
+		disabled: routingSaving,
+		value: brainVal,
+		onChange: (e) => handleStageChange("brain", e.target.value)
+	}, /* @__PURE__ */ k$1("option", { value: "native" }, "🆓 本地基础口令"), brainVal.startsWith("missing:") && /* @__PURE__ */ k$1("option", { value: brainVal }, "⚠️ 密钥缺失 (", PROTOCOL_LABELS[brainVal.slice(8)] || brainVal.slice(8), ")"), brainCreds.map((c) => /* @__PURE__ */ k$1("option", {
+		key: c.id,
+		value: `cred:${c.id}`
+	}, c.label, " · ", c.defaultModel || inferDefaultBrainModel(c))))), /* @__PURE__ */ k$1("div", { class: "vp-routing-row" }, /* @__PURE__ */ k$1("div", { class: "vp-routing-label" }, /* @__PURE__ */ k$1("span", { class: "vp-routing-title" }, "🗣️ 说（文字转语音）")), /* @__PURE__ */ k$1("select", {
+		id: "voiceStageTtsSelect",
+		class: "vp-routing-select",
+		disabled: routingSaving,
+		value: ttsVal,
+		onChange: (e) => handleStageChange("tts", e.target.value)
+	}, /* @__PURE__ */ k$1("option", { value: "native" }, "🆓 手机自带免费"), ttsVal.startsWith("missing:") && /* @__PURE__ */ k$1("option", { value: ttsVal }, "⚠️ 密钥缺失 (", PROTOCOL_LABELS[ttsVal.slice(8)] || ttsVal.slice(8), ")"), ttsCreds.map((c) => /* @__PURE__ */ k$1("option", {
+		key: c.id,
+		value: `cred:${c.id}`
+	}, c.label, " · ", c.defaultVoice || PROTOCOL_LABELS[c.provider] || c.provider)))))), /* @__PURE__ */ k$1("div", {
+		class: "voice-card",
+		id: "voiceProviderListSection"
+	}, /* @__PURE__ */ k$1("div", {
+		class: "voice-card-head",
+		style: "margin-bottom:8px;"
+	}, /* @__PURE__ */ k$1("div", null, /* @__PURE__ */ k$1("div", {
+		class: "voice-card-title",
+		style: "margin-bottom:2px;"
+	}, "🔌 我的 Provider 列表 (", creds.length, ")"), /* @__PURE__ */ k$1("div", {
+		class: "voice-muted-note",
+		style: "margin:0;"
+	}, "支持任意中转站、OpenAI 兼容接口、DeepSeek、火山豆包、Gemini 等")), /* @__PURE__ */ k$1("button", {
+		type: "button",
+		id: "voiceAddProviderBtn",
+		class: "voice-pill-btn primary",
+		onClick: () => openAddEditor("deepseek")
+	}, "＋ 添加")), creds.length === 0 ? /* @__PURE__ */ k$1("div", { class: "vp-empty-box" }, /* @__PURE__ */ k$1("div", { class: "vp-empty-title" }, "还没有添加任何 Provider"), /* @__PURE__ */ k$1("div", { class: "vp-empty-desc" }, "点下方按钮添加你自己的服务商（支持自定义接口地址、模型名和 API Key），添加后即可在上方选为默认。"), /* @__PURE__ */ k$1("button", {
+		type: "button",
+		class: "primary-block-btn",
+		style: "margin-top:10px;",
+		onClick: () => openAddEditor("deepseek")
+	}, "＋ 添加第一个 Provider")) : /* @__PURE__ */ k$1("div", { class: "vp-list" }, creds.map((cred) => {
+		const roles = getCredentialActiveRoles(cred.id, activeProf, creds);
+		const host = extractHostFromUrl(cred.baseUrl);
+		const modelOrRes = cred.defaultModel || cred.resourceId || "";
+		const testRes = testResults[cred.id];
+		const isPrimaryDefault = cred.provider === "gemini" && roles.length === 3 || cred.provider === "volcengine_asr" && roles.includes("stt") || cred.provider === "volcengine_tts" && roles.includes("tts") || cred.provider === "openai_compat" && roles.includes("brain");
+		return /* @__PURE__ */ k$1("div", {
+			key: cred.id,
+			class: `vp-item ${roles.length > 0 ? "is-active" : ""}`
+		}, /* @__PURE__ */ k$1("div", { class: "vp-item-top" }, /* @__PURE__ */ k$1("div", { class: "vp-item-title-wrap" }, /* @__PURE__ */ k$1("span", { class: "vp-item-name" }, cred.label), /* @__PURE__ */ k$1("span", { class: "voice-prov-tag" }, PROTOCOL_LABELS[cred.provider] || cred.provider)), roles.length > 0 && /* @__PURE__ */ k$1("div", { class: "vp-role-badges" }, roles.includes("stt") && /* @__PURE__ */ k$1("span", { class: "vp-role-pill stt" }, "👂 听"), roles.includes("brain") && /* @__PURE__ */ k$1("span", { class: "vp-role-pill brain" }, "🧠 想"), roles.includes("tts") && /* @__PURE__ */ k$1("span", { class: "vp-role-pill tts" }, "🗣️ 说"))), /* @__PURE__ */ k$1("div", { class: "vp-item-meta" }, host && /* @__PURE__ */ k$1("span", null, host), modelOrRes && /* @__PURE__ */ k$1("span", null, "· ", modelOrRes), cred.defaultVoice && cred.provider !== "volcengine_asr" && /* @__PURE__ */ k$1("span", null, "· 音色 ", cred.defaultVoice), /* @__PURE__ */ k$1("span", null, "· ", cred.authSummary)), testRes && /* @__PURE__ */ k$1("div", {
+			class: `voice-test-msg ${testRes.ok ? "ok" : "err"}`,
+			style: "margin-top:6px;"
+		}, testRes.summary), /* @__PURE__ */ k$1("div", { class: "vp-item-actions" }, /* @__PURE__ */ k$1("button", {
+			type: "button",
+			class: `voice-pill-btn ${isPrimaryDefault ? "" : "primary"}`,
+			disabled: routingSaving,
+			onClick: () => void handleSetProviderDefault(cred)
+		}, isPrimaryDefault ? "✅ 已为默认" : "⚡ 设为默认"), /* @__PURE__ */ k$1("button", {
+			type: "button",
+			class: "voice-pill-btn",
+			disabled: testingCredId === cred.id,
+			onClick: () => void handleTestProvider(cred.id)
+		}, testingCredId === cred.id ? "测试中…" : "🔌 测试"), /* @__PURE__ */ k$1("button", {
+			type: "button",
+			class: "voice-pill-btn",
+			onClick: () => openEditEditor(cred)
+		}, "✏️ 编辑"), /* @__PURE__ */ k$1("button", {
+			type: "button",
+			class: "voice-pill-btn danger",
+			onClick: () => void handleDeleteProvider(cred)
+		}, "删除")));
+	}))), /* @__PURE__ */ k$1("div", { class: "voice-card" }, /* @__PURE__ */ k$1("div", { class: "voice-toggle-row" }, /* @__PURE__ */ k$1("div", null, /* @__PURE__ */ k$1("div", { class: "voice-row-main" }, "🛡️ 高危操作二次确认"), /* @__PURE__ */ k$1("div", { class: "voice-row-sub" }, "删文件 / 强推 / 部署等危险指令时的保护方式")), /* @__PURE__ */ k$1("select", {
+		class: "voice-mini-select",
+		value: config.prefs.l2Policy,
+		onChange: (e) => void onUpdatePrefs({ l2Policy: e.target.value })
+	}, /* @__PURE__ */ k$1("option", { value: "pin" }, "🔢 念 3 位确认码"), /* @__PURE__ */ k$1("option", { value: "screen_only" }, "📱 仅点手机屏幕"))), /* @__PURE__ */ k$1("div", { class: "voice-toggle-row" }, /* @__PURE__ */ k$1("div", null, /* @__PURE__ */ k$1("div", { class: "voice-row-main" }, "🎙️ 播报完自动开麦听我回答"), /* @__PURE__ */ k$1("div", { class: "voice-row-sub" }, "念完选项后自动听 5.5 秒；边听歌时自动压低背景音乐")), /* @__PURE__ */ k$1("input", {
+		type: "checkbox",
+		class: "voice-switch",
+		checked: config.prefs.autoListenAfterBriefing,
+		onChange: (e) => void onUpdatePrefs({ autoListenAfterBriefing: e.target.checked })
+	}))), /* @__PURE__ */ k$1("details", {
+		class: "voice-adv-details",
+		open: geekOpen,
+		onToggle: (e) => setGeekOpen(Boolean(e.currentTarget?.open))
+	}, /* @__PURE__ */ k$1("summary", null, "🔧 高级选项与延迟压测（聊天页复用 / 试跑排障）"), /* @__PURE__ */ k$1("div", {
+		class: "voice-adv-body",
+		style: "display:flex;flex-direction:column;gap:10px;"
+	}, /* @__PURE__ */ k$1("div", null, /* @__PURE__ */ k$1("div", { class: "voice-toggle-row" }, /* @__PURE__ */ k$1("div", null, /* @__PURE__ */ k$1("div", { class: "voice-row-main" }, "🎵 边听歌边播报（压低背景音乐）"), /* @__PURE__ */ k$1("div", { class: "voice-row-sub" }, "播报时自动压低音乐音量，说完自动恢复")), /* @__PURE__ */ k$1("input", {
+		type: "checkbox",
+		class: "voice-switch",
+		checked: config.prefs.duckMusicMode,
+		onChange: (e) => void onUpdatePrefs({ duckMusicMode: e.target.checked })
+	})), /* @__PURE__ */ k$1("div", { class: "voice-toggle-row" }, /* @__PURE__ */ k$1("div", null, /* @__PURE__ */ k$1("div", { class: "voice-row-main" }, "聊天页「🔊 播报」复用云端声音"), /* @__PURE__ */ k$1("div", { class: "voice-row-sub" }, "默认用免费系统语音；开启后用上方选好的「说」服务")), /* @__PURE__ */ k$1("input", {
+		type: "checkbox",
+		class: "voice-switch",
+		checked: config.prefs.useByokForChatTts,
+		onChange: (e) => void onUpdatePrefs({ useByokForChatTts: e.target.checked })
+	})), /* @__PURE__ */ k$1("div", { class: "voice-toggle-row" }, /* @__PURE__ */ k$1("div", null, /* @__PURE__ */ k$1("div", { class: "voice-row-main" }, "聊天页语音输入复用云端听写"), /* @__PURE__ */ k$1("div", { class: "voice-row-sub" }, "默认用免费系统听写；开启后用上方选好的「听」服务")), /* @__PURE__ */ k$1("input", {
+		type: "checkbox",
+		class: "voice-switch",
+		checked: config.prefs.useByokForChatStt,
+		onChange: (e) => void onUpdatePrefs({ useByokForChatStt: e.target.checked })
+	}))), /* @__PURE__ */ k$1("div", { style: "border-top:1px solid var(--border);padding-top:8px;" }, /* @__PURE__ */ k$1("div", {
+		class: "voice-toggle-row",
+		style: "padding-top:0;"
+	}, /* @__PURE__ */ k$1("div", null, /* @__PURE__ */ k$1("div", { class: "voice-row-main" }, "🧪 安全试跑压测 (Dry-Run)"), /* @__PURE__ */ k$1("div", { class: "voice-row-sub" }, "排查哪一步慢或报错，绝不会真的遥控电脑")), /* @__PURE__ */ k$1("input", {
+		type: "checkbox",
+		class: "voice-switch",
+		checked: benchDryRun,
+		onChange: (e) => onSetBenchDryRun(e.target.checked)
+	})), /* @__PURE__ */ k$1("input", {
+		class: "voice-field-input",
+		value: benchText,
+		onInput: (e) => onSetBenchText(e.target.value),
+		placeholder: "输入一句测试口令..."
+	}), /* @__PURE__ */ k$1("div", { style: "display:flex;gap:8px;margin-top:6px;" }, /* @__PURE__ */ k$1("button", {
+		type: "button",
+		class: "voice-pill-btn primary",
+		style: "flex:1;padding:8px 10px;",
+		disabled: benchRunning,
+		onClick: () => void onRunBenchTurn()
+	}, benchRunning ? "⏳ 测速中…" : "🚀 跑一轮延迟压测"), /* @__PURE__ */ k$1("button", {
+		type: "button",
+		class: `voice-pill-btn ${benchRecording ? "danger" : ""}`,
+		style: "padding:8px 10px;",
+		disabled: benchRunning,
+		onClick: () => void onToggleBenchVoice()
+	}, benchRecording ? "⏹ 停止" : "🎙️ 录真声")), benchReport && /* @__PURE__ */ k$1("div", { style: "margin-top:8px;" }, /* @__PURE__ */ k$1("div", { class: "voice-metrics-grid" }, benchReport.stt && /* @__PURE__ */ k$1("div", { class: "voice-metric-box" }, /* @__PURE__ */ k$1("div", { class: "voice-metric-k" }, "听写"), /* @__PURE__ */ k$1("div", { class: "voice-metric-v" }, benchReport.stt.latencyMs ?? 0, "ms")), benchReport.turn && /* @__PURE__ */ k$1("div", { class: "voice-metric-box" }, /* @__PURE__ */ k$1("div", { class: "voice-metric-k" }, "大脑"), /* @__PURE__ */ k$1("div", { class: "voice-metric-v" }, benchReport.turn.latencyMs ?? 0, "ms")), benchReport.tts && /* @__PURE__ */ k$1("div", { class: "voice-metric-box" }, /* @__PURE__ */ k$1("div", { class: "voice-metric-k" }, "播报"), /* @__PURE__ */ k$1("div", { class: "voice-metric-v" }, benchReport.tts.latencyMs ?? 0, "ms"))), (benchReport.stt?.error || benchReport.turn?.error || benchReport.tts?.error) && /* @__PURE__ */ k$1("div", {
+		class: "voice-test-msg err",
+		style: "margin-top:6px;"
+	}, benchReport.stt?.error || benchReport.turn?.error || benchReport.tts?.error), benchReport.turn?.spokenReply && /* @__PURE__ */ k$1("div", {
+		class: "voice-bench-reply",
+		style: "margin-top:6px;"
+	}, benchReport.turn.spokenReply))))))) : /* @__PURE__ */ k$1("div", {
+		class: "voice-lab-body",
+		id: "voiceProviderEditor"
+	}, /* @__PURE__ */ k$1("div", { class: "voice-tab-stack" }, !draft.id && /* @__PURE__ */ k$1("div", {
+		class: "voice-card",
+		style: "padding:10px 11px;"
+	}, /* @__PURE__ */ k$1("div", {
+		class: "voice-card-title",
+		style: "margin-bottom:7px;"
+	}, "⚡ 选一个模板快填（也可以选「完全自定义」）"), /* @__PURE__ */ k$1("div", { class: "vp-preset-grid" }, VOICE_PROVIDER_PRESETS.map((p) => /* @__PURE__ */ k$1("button", {
+		key: p.key,
+		type: "button",
+		"data-preset-key": p.key,
+		class: `vp-preset-chip ${draft.presetKey === p.key ? "active" : ""}`,
+		onClick: () => {
+			setEditorError("");
+			setDraft(makeDraftFromPreset(p.key));
+		}
+	}, /* @__PURE__ */ k$1("span", { class: "vp-preset-title" }, p.icon, " ", p.title), /* @__PURE__ */ k$1("span", { class: "vp-preset-sub" }, p.sub))))), /* @__PURE__ */ k$1("div", { class: "voice-card" }, /* @__PURE__ */ k$1("label", {
+		class: "voice-field-label",
+		style: "margin-top:0;"
+	}, "显示名称（自己好认就行）"), /* @__PURE__ */ k$1("input", {
+		id: "vpLabelInput",
+		class: "voice-field-input",
+		value: draft.label,
+		placeholder: "例：我的中转站 / DeepSeek-V3 / 火山豆包",
+		onInput: (e) => setDraft({
+			...draft,
+			label: e.target.value
+		})
+	}), /* @__PURE__ */ k$1("label", { class: "voice-field-label" }, "接口协议类型"), /* @__PURE__ */ k$1("select", {
+		id: "vpProviderTypeSelect",
+		class: "voice-field-input",
+		disabled: Boolean(draft.id),
+		value: draft.provider,
+		onChange: (e) => {
+			const nextProv = e.target.value;
+			setDraft((prev) => ({
+				...prev,
+				presetKey: "custom",
+				provider: nextProv,
+				baseUrl: nextProv === "gemini" ? "https://generativelanguage.googleapis.com/v1beta" : nextProv === "volcengine_asr" ? "https://openspeech.bytedance.com/api/v3/auc/bigmodel/recognize/flash" : nextProv === "volcengine_tts" ? "https://openspeech.bytedance.com/api/v3/tts/unidirectional" : prev.baseUrl && !prev.baseUrl.includes("bytedance") && !prev.baseUrl.includes("googleapis") ? prev.baseUrl : "",
+				resourceId: nextProv === "volcengine_asr" ? "volc.bigasr.auc_turbo" : nextProv === "volcengine_tts" ? "seed-tts-2.0" : "",
+				defaultVoice: nextProv === "volcengine_tts" ? "zh_female_vv_uranus_bigtts" : nextProv === "gemini" ? "Kore" : prev.defaultVoice
+			}));
+		}
+	}, /* @__PURE__ */ k$1("option", { value: "openai_compat" }, "OpenAI 兼容接口（任意中转站 / DeepSeek / 方舟 / Ollama）"), /* @__PURE__ */ k$1("option", { value: "gemini" }, "Google Gemini 官方接口"), /* @__PURE__ */ k$1("option", { value: "volcengine_asr" }, "火山豆包语音识别（听写 ASR）"), /* @__PURE__ */ k$1("option", { value: "volcengine_tts" }, "火山豆包语音合成（播报 TTS）")), !isVolcDraft && /* @__PURE__ */ k$1(M, null, /* @__PURE__ */ k$1("label", { class: "voice-field-label" }, "接口地址 (Base URL)"), /* @__PURE__ */ k$1("input", {
+		id: "vpBaseUrlInput",
+		class: "voice-field-input",
+		value: draft.baseUrl,
+		placeholder: draft.provider === "gemini" ? "https://generativelanguage.googleapis.com/v1beta" : "例：https://api.example.com/v1",
+		onInput: (e) => setDraft({
+			...draft,
+			baseUrl: e.target.value
+		})
+	})), /* @__PURE__ */ k$1("label", { class: "voice-field-label" }, isVolcDraft ? "火山引擎鉴权密钥" : "API Key（加密保存，不回传明文）"), draft.id && editingCredSummary && /* @__PURE__ */ k$1("div", {
+		class: "voice-saved-hint",
+		style: "margin-bottom:6px;"
+	}, "🔐 已加密保存：", editingCredSummary, " · 留空则保持原密钥不变"), isVolcDraft && /* @__PURE__ */ k$1("div", {
+		class: "voice-subseg",
+		style: "margin-top:2px;margin-bottom:6px;"
+	}, /* @__PURE__ */ k$1("button", {
+		type: "button",
+		class: `voice-subseg-btn ${draft.volcAuthMode === "apiKey" ? "active" : ""}`,
+		onClick: () => setDraft({
+			...draft,
+			volcAuthMode: "apiKey"
+		})
+	}, "单把 API Key（推荐）"), /* @__PURE__ */ k$1("button", {
+		type: "button",
+		class: `voice-subseg-btn ${draft.volcAuthMode === "appToken" ? "active" : ""}`,
+		onClick: () => setDraft({
+			...draft,
+			volcAuthMode: "appToken"
+		})
+	}, "AppID + Access Token")), isVolcDraft && draft.volcAuthMode === "appToken" ? /* @__PURE__ */ k$1("div", { class: "voice-two-col" }, /* @__PURE__ */ k$1("input", {
+		class: "voice-field-input",
+		value: draft.appId,
+		placeholder: "火山 AppID",
+		onInput: (e) => setDraft({
+			...draft,
+			appId: e.target.value
+		})
+	}), /* @__PURE__ */ k$1("input", {
+		type: "password",
+		class: "voice-field-input",
+		value: draft.accessToken,
+		placeholder: draft.id ? "留空沿用原 Token" : "Access Token",
+		onInput: (e) => setDraft({
+			...draft,
+			accessToken: e.target.value
+		})
+	})) : /* @__PURE__ */ k$1("input", {
+		id: "vpApiKeyInput",
+		type: "password",
+		class: "voice-field-input",
+		value: draft.apiKey,
+		placeholder: draft.id ? "留空保留当前已保存密钥，或粘贴新 Key 替换" : activePreset?.keyPlaceholder || "粘贴 API Key...",
+		onInput: (e) => setDraft({
+			...draft,
+			apiKey: e.target.value
+		})
+	}), !isVolcDraft ? /* @__PURE__ */ k$1(M, null, /* @__PURE__ */ k$1("label", { class: "voice-field-label" }, "默认模型名"), /* @__PURE__ */ k$1("input", {
+		id: "vpDefaultModelInput",
+		class: "voice-field-input",
+		value: draft.defaultModel,
+		placeholder: "例：deepseek-chat / gpt-4o-mini / doubao-seed-2-0-lite-260215",
+		onInput: (e) => setDraft({
+			...draft,
+			defaultModel: e.target.value
+		})
+	}), activePreset?.modelChips && activePreset.modelChips.length > 0 && /* @__PURE__ */ k$1("div", {
+		class: "voice-chip-row",
+		style: "margin-top:5px;"
+	}, activePreset.modelChips.map((chip) => /* @__PURE__ */ k$1("button", {
+		key: chip.value,
+		type: "button",
+		class: `voice-quick-chip ${draft.defaultModel === chip.value ? "active" : ""}`,
+		onClick: () => setDraft({
+			...draft,
+			defaultModel: chip.value
+		})
+	}, chip.label)))) : /* @__PURE__ */ k$1(M, null, /* @__PURE__ */ k$1("label", { class: "voice-field-label" }, "Resource ID（默认 ", draft.provider === "volcengine_asr" ? "volc.bigasr.auc_turbo" : "seed-tts-2.0", "）"), /* @__PURE__ */ k$1("input", {
+		id: "vpResourceIdInput",
+		class: "voice-field-input",
+		value: draft.resourceId,
+		placeholder: draft.provider === "volcengine_asr" ? "volc.bigasr.auc_turbo" : "seed-tts-2.0",
+		onInput: (e) => setDraft({
+			...draft,
+			resourceId: e.target.value
+		})
+	})), (draft.provider === "volcengine_tts" || draft.provider === "gemini") && /* @__PURE__ */ k$1(M, null, /* @__PURE__ */ k$1("label", { class: "voice-field-label" }, "默认播报音色（可选）"), /* @__PURE__ */ k$1("input", {
+		class: "voice-field-input",
+		value: draft.defaultVoice,
+		placeholder: draft.provider === "volcengine_tts" ? "zh_female_vv_uranus_bigtts" : "Kore",
+		onInput: (e) => setDraft({
+			...draft,
+			defaultVoice: e.target.value
+		})
+	}), voiceChips.length > 0 && /* @__PURE__ */ k$1("div", {
+		class: "voice-chip-row",
+		style: "margin-top:5px;"
+	}, voiceChips.map((v) => /* @__PURE__ */ k$1("button", {
+		key: v.value,
+		type: "button",
+		class: `voice-quick-chip ${draft.defaultVoice === v.value ? "active" : ""}`,
+		onClick: () => setDraft({
+			...draft,
+			defaultVoice: v.value
+		})
+	}, v.label)))), !draft.id && draft.provider === "volcengine_asr" && /* @__PURE__ */ k$1("div", { style: "margin-top:10px;padding:9px 10px;border-radius:10px;background:var(--subtle);border:1px solid var(--border);" }, /* @__PURE__ */ k$1("label", {
+		class: "voice-dual-check",
+		style: "margin:0;"
+	}, /* @__PURE__ */ k$1("input", {
+		type: "checkbox",
+		checked: draft.alsoCreateTts,
+		onChange: (e) => setDraft({
+			...draft,
+			alsoCreateTts: Boolean(e.target.checked)
+		})
+	}), /* @__PURE__ */ k$1("span", null, /* @__PURE__ */ k$1("strong", null, "同时创建「火山豆包播报 (TTS)」并共用这把密钥"), "（免贴两遍）")), draft.alsoCreateTts && /* @__PURE__ */ k$1("div", { style: "margin-top:8px;" }, /* @__PURE__ */ k$1("div", { class: "voice-brick-sub-label" }, "挑一个播报声音"), /* @__PURE__ */ k$1("div", {
+		class: "voice-chip-row",
+		style: "margin-top:4px;"
+	}, TTS_VOICE_OPTIONS.volcengine_tts.map((v) => /* @__PURE__ */ k$1("button", {
+		key: v.value,
+		type: "button",
+		class: `voice-quick-chip ${draft.pairedTtsVoice === v.value ? "active" : ""}`,
+		onClick: () => setDraft({
+			...draft,
+			pairedTtsVoice: v.value
+		})
+	}, v.label))))), /* @__PURE__ */ k$1("label", {
+		class: "voice-dual-check",
+		style: "margin-top:10px;"
+	}, /* @__PURE__ */ k$1("input", {
+		type: "checkbox",
+		checked: draft.setAsDefault,
+		onChange: (e) => setDraft({
+			...draft,
+			setAsDefault: Boolean(e.target.checked)
+		})
+	}), /* @__PURE__ */ k$1("span", null, /* @__PURE__ */ k$1("strong", null, "保存后立即设为默认"), draft.provider === "gemini" ? "（自动用于 听 + 想 + 说）" : draft.provider === "volcengine_asr" ? draft.alsoCreateTts && !draft.id ? "（自动用于 听 + 说）" : "（自动用于 👂 听）" : draft.provider === "volcengine_tts" ? "（自动用于 🗣️ 说）" : "（自动用于 🧠 想，可在列表页随时调 听/说）")), editorError && /* @__PURE__ */ k$1("div", {
+		class: "voice-test-msg err",
+		style: "margin-top:8px;padding:7px 10px;"
+	}, "⚠️ ", editorError), /* @__PURE__ */ k$1("div", { style: "display:flex;gap:8px;margin-top:12px;" }, /* @__PURE__ */ k$1("button", {
+		type: "button",
+		id: "vpSaveProviderBtn",
+		class: "primary-block-btn",
+		style: "margin-top:0;flex:1;",
+		disabled: savingEditor,
+		onClick: () => void handleSaveProvider()
+	}, savingEditor ? "正在加密保存…" : "💾 保存 Provider"), /* @__PURE__ */ k$1("button", {
+		type: "button",
+		class: "voice-pill-btn",
+		style: "padding:11px 14px;",
+		onClick: () => setViewMode("list")
+	}, "取消")))))));
+}
 // hub/web/src/components/VoiceCopilotSheets.tsx
 var DEFAULT_CONFIG = {
 	storageMode: "memory",
@@ -1741,343 +2957,14 @@ function summarizeHubState(state) {
 		completedKeys
 	};
 }
-var PROVIDER_DISPLAY_NAMES = {
-	native: "系统免费原生",
-	gemini: "Google Gemini",
-	openai_compat: "OpenAI 兼容",
-	volcengine_asr: "火山豆包识别",
-	volcengine_tts: "火山豆包播报"
-};
-var SIMPLE_VENDOR_CARDS = [
-	{
-		id: "native",
-		icon: "🆓",
-		title: "免费本机",
-		sub: "免 Key · 手机自带听写播报"
-	},
-	{
-		id: "gemini",
-		icon: "✨",
-		title: "Gemini（推荐）",
-		sub: "1 把 Key 全包听+想+说"
-	},
-	{
-		id: "deepseek",
-		icon: "🤖",
-		title: "DeepSeek",
-		sub: "1 把 Key 做大脑 · 免费听说"
-	},
-	{
-		id: "ark",
-		icon: "🌋",
-		title: "火山方舟 Ark",
-		sub: "1 把方舟 Key（豆包/DS）"
-	},
-	{
-		id: "openai",
-		icon: "🌐",
-		title: "OpenAI",
-		sub: "1 把 Key 全包听+想+说"
-	},
-	{
-		id: "mix_volc_ds",
-		icon: "🔀",
-		title: "火山+DeepSeek混搭",
-		sub: "豆包人声 + DS大脑 ›"
-	}
-];
-var ARK_MODEL_CHIPS = [
-	{
-		label: "豆包 2.0 Lite (推荐)",
-		value: "doubao-seed-2-0-lite-260215"
-	},
-	{
-		label: "方舟 DeepSeek V3",
-		value: "deepseek-v3-250324"
-	},
-	{
-		label: "方舟 DeepSeek R1",
-		value: "deepseek-r1-250528"
-	}
-];
-var BRAIN_MODEL_CHIPS = {
-	gemini: [{
-		label: "gemini-2.5-flash (极速推荐)",
-		value: "gemini-2.5-flash"
-	}, {
-		label: "gemini-3.8-flash",
-		value: "gemini-3.8-flash"
-	}],
-	openai_compat: [
-		{
-			label: "deepseek-chat (DS官方)",
-			value: "deepseek-chat"
-		},
-		{
-			label: "doubao-seed-2-0-lite-260215 (豆包)",
-			value: "doubao-seed-2-0-lite-260215"
-		},
-		{
-			label: "deepseek-v3-250324 (方舟DS)",
-			value: "deepseek-v3-250324"
-		},
-		{
-			label: "gpt-4o-mini (OpenAI)",
-			value: "gpt-4o-mini"
-		}
-	]
-};
-function findSimpleVendorCred(vendor, credentials) {
-	if (vendor === "gemini") return credentials.find((c) => c.provider === "gemini" && c.active) || credentials.find((c) => c.provider === "gemini");
-	const oaiList = credentials.filter((c) => c.provider === "openai_compat");
-	if (vendor === "deepseek") return oaiList.find((c) => String(c.baseUrl || "").toLowerCase().includes("deepseek"));
-	if (vendor === "ark") return oaiList.find((c) => /volces\.com|ark\./i.test(String(c.baseUrl || "")));
-	return oaiList.find((c) => String(c.baseUrl || "").toLowerCase().includes("openai.com"));
-}
-function inferSimpleVendorFromConfig(cfg) {
-	const prof = cfg.activeProfile;
-	if (!prof || prof.id === "native") {
-		if (cfg.credentials.some((c) => c.provider === "gemini")) return "gemini";
-		if (cfg.credentials.some((c) => c.provider === "openai_compat" && /volces\.com|ark\./i.test(c.baseUrl || ""))) return "ark";
-		if (cfg.credentials.some((c) => c.provider === "openai_compat" && /deepseek/i.test(c.baseUrl || ""))) return "deepseek";
-		return "native";
-	}
-	if (prof.brain?.provider === "gemini") return "gemini";
-	if (prof.brain?.provider === "openai_compat") {
-		const cred = cfg.credentials.find((c) => c.id === prof.brain?.credId) || cfg.credentials.find((c) => c.provider === "openai_compat" && c.active);
-		const u = String(cred?.baseUrl || "").toLowerCase();
-		if (u.includes("volces.com") || u.includes("ark.")) return "ark";
-		if (u.includes("deepseek")) return "deepseek";
-		if (u.includes("openai.com")) return "openai";
-	}
-	return "native";
-}
-var TTS_VOICE_CHIPS = {
-	gemini: [
-		{
-			label: "Kore (知性女声)",
-			value: "Kore"
-		},
-		{
-			label: "Puck (轻快)",
-			value: "Puck"
-		},
-		{
-			label: "Aoede (柔和)",
-			value: "Aoede"
-		},
-		{
-			label: "Zephyr (清亮)",
-			value: "Zephyr"
-		}
-	],
-	volcengine_tts: [
-		{
-			label: "vv 自然女声",
-			value: "zh_female_vv_uranus_bigtts"
-		},
-		{
-			label: "小荷 温柔女声",
-			value: "zh_female_xiaohe_uranus_bigtts"
-		},
-		{
-			label: "阳光男声",
-			value: "zh_male_m191_uranus_bigtts"
-		},
-		{
-			label: "涛诚 稳重男声",
-			value: "zh_male_taocheng_uranus_bigtts"
-		}
-	],
-	openai_compat: [
-		{
-			label: "alloy (中性)",
-			value: "alloy"
-		},
-		{
-			label: "nova (清晰女声)",
-			value: "nova"
-		},
-		{
-			label: "shimmer (柔和)",
-			value: "shimmer"
-		},
-		{
-			label: "coral (自然)",
-			value: "coral"
-		}
-	]
-};
-function formatStageSummary(provider, model, stage, credId, credentials) {
-	if (provider === "native") return stage === "brain" ? "本地基础口令" : "系统免费原生";
-	const matchedCred = credentials?.length ? credentials.find((c) => credId && c.id === credId) || credentials.find((c) => c.provider === provider && c.active) : void 0;
-	const base = provider === "openai_compat" && matchedCred?.label ? matchedCred.label : PROVIDER_DISPLAY_NAMES[provider] || provider;
-	const m = String(model || "").trim();
-	if (!m || m === "default" || m === "browser-web-speech" || m === "browser-speech-synthesis" || m === "rule-router") return base;
-	if (stage === "brain") return `${base} (${m})`;
-	return base;
-}
-function getMissingProvidersForProfile(profile, credentials) {
-	const missing = /* @__PURE__ */ new Set();
-	for (const prov of [
-		profile.stt?.provider,
-		profile.brain?.provider,
-		profile.tts?.provider
-	]) {
-		if (!prov || prov === "native") continue;
-		if (!credentials.some((c) => c.provider === prov)) missing.add(prov);
-	}
-	return [...missing];
-}
-var MIX_COMBO_CARDS = [
-	{
-		id: "volc_ds",
-		icon: "🌋",
-		title: "火山豆包 + DeepSeek",
-		sub: "豆包听/说 · DS 大脑"
-	},
-	{
-		id: "volc_all",
-		icon: "🔥",
-		title: "全火山全家桶",
-		sub: "豆包听/说 · 方舟大模型"
-	},
-	{
-		id: "gemini_all",
-		icon: "✨",
-		title: "全 Gemini 极速",
-		sub: "1 把 Key 三段全包"
-	},
-	{
-		id: "free_voice_brain",
-		icon: "💸",
-		title: "免费听/说 + 大脑",
-		sub: "手机听说 · 最省额度"
-	}
-];
-var DEEPSEEK_MODEL_CHIPS = [{
-	label: "deepseek-chat (推荐)",
-	value: "deepseek-chat"
-}, {
-	label: "deepseek-reasoner",
-	value: "deepseek-reasoner"
-}];
-var OPENAI_MODEL_CHIPS = [{
-	label: "gpt-4o-mini (推荐)",
-	value: "gpt-4o-mini"
-}, {
-	label: "gpt-4.1-mini",
-	value: "gpt-4.1-mini"
-}];
-function findMixCred(kind, credentials, customBaseUrl = "") {
-	if (kind === "volcengine_asr" || kind === "volcengine_tts" || kind === "gemini") return credentials.find((c) => c.provider === kind && c.active) || credentials.find((c) => c.provider === kind);
-	const oaiList = credentials.filter((c) => c.provider === "openai_compat");
-	if (kind === "deepseek") return oaiList.find((c) => String(c.baseUrl || "").toLowerCase().includes("deepseek"));
-	if (kind === "ark") return oaiList.find((c) => /volces\.com|ark\./i.test(String(c.baseUrl || "")));
-	if (kind === "openai") return oaiList.find((c) => String(c.baseUrl || "").toLowerCase().includes("openai.com"));
-	if (customBaseUrl.trim()) {
-		const clean = customBaseUrl.trim().replace(/\/+$/, "").toLowerCase();
-		const byUrl = oaiList.find((c) => String(c.baseUrl || "").replace(/\/+$/, "").toLowerCase() === clean);
-		if (byUrl) return byUrl;
-	}
-	return oaiList.find((c) => !/deepseek|volces\.com|ark\.|openai\.com/i.test(String(c.baseUrl || "")));
-}
-function buildMixDraftFromConfig(cfg) {
-	const prof = cfg.activeProfile || DEFAULT_CONFIG.activeProfile;
-	const creds = cfg.credentials || [];
-	const earVendor = prof.stt?.provider === "volcengine_asr" ? "volcengine_asr" : prof.stt?.provider === "gemini" ? "gemini" : prof.stt?.provider === "openai_compat" ? "openai" : "native";
-	let brainVendor = "native";
-	let brainBaseUrl = "";
-	let brainModel = prof.brain?.model || "";
-	if (prof.brain?.provider === "gemini") {
-		brainVendor = "gemini";
-		brainModel = brainModel || "gemini-2.5-flash";
-	} else if (prof.brain?.provider === "openai_compat") {
-		const cred = creds.find((c) => c.id === prof.brain?.credId) || creds.find((c) => c.provider === "openai_compat" && c.active) || creds.find((c) => c.provider === "openai_compat");
-		const u = String(cred?.baseUrl || "").toLowerCase();
-		if (u.includes("deepseek")) {
-			brainVendor = "deepseek";
-			brainModel = brainModel || "deepseek-chat";
-		} else if (u.includes("volces.com") || u.includes("ark.")) {
-			brainVendor = "ark";
-			brainModel = brainModel || cred?.defaultModel || "doubao-seed-2-0-lite-260215";
-		} else if (u.includes("openai.com")) {
-			brainVendor = "openai";
-			brainModel = brainModel || "gpt-4o-mini";
-		} else {
-			brainVendor = "custom";
-			brainBaseUrl = cred?.baseUrl || "";
-			brainModel = brainModel || cred?.defaultModel || "deepseek-chat";
-		}
-	} else {
-		brainVendor = "native";
-		brainModel = "rule-router";
-	}
-	const mouthVendor = prof.tts?.provider === "volcengine_tts" ? "volcengine_tts" : prof.tts?.provider === "gemini" ? "gemini" : prof.tts?.provider === "openai_compat" ? "openai" : "native";
-	const defaultVoice = mouthVendor === "volcengine_tts" ? "zh_female_vv_uranus_bigtts" : mouthVendor === "gemini" ? "Kore" : mouthVendor === "openai" ? "alloy" : "system-default";
-	const earAsrCred = findMixCred("volcengine_asr", creds);
-	const mouthTtsCred = findMixCred("volcengine_tts", creds);
-	return {
-		earVendor,
-		earApiKey: "",
-		earVolcMode: "apiKey",
-		earAppId: "",
-		earAccessToken: "",
-		earResourceId: earVendor === "volcengine_asr" && prof.stt?.model && prof.stt.model !== "browser-web-speech" ? prof.stt.model : earAsrCred?.resourceId || "volc.bigasr.auc_turbo",
-		brainVendor,
-		brainReuseEarGemini: earVendor === "gemini" && brainVendor === "gemini",
-		brainApiKey: "",
-		brainBaseUrl,
-		brainModel,
-		mouthVendor,
-		mouthReuseKey: mouthVendor === "volcengine_tts" && earVendor === "volcengine_asr" || mouthVendor === "gemini" && (earVendor === "gemini" || brainVendor === "gemini") || mouthVendor === "openai" && (earVendor === "openai" || brainVendor === "openai"),
-		mouthApiKey: "",
-		mouthVolcMode: "apiKey",
-		mouthAppId: "",
-		mouthAccessToken: "",
-		mouthResourceId: mouthVendor === "volcengine_tts" && prof.tts?.model && prof.tts.model !== "browser-speech-synthesis" ? prof.tts.model : mouthTtsCred?.resourceId || "seed-tts-2.0",
-		mouthVoice: prof.tts?.voice && prof.tts.voice !== "system-default" ? prof.tts.voice : defaultVoice
-	};
-}
-function buildMixProfileName(draft) {
-	if (draft.earVendor === "native" && draft.brainVendor === "native" && draft.mouthVendor === "native") return "系统原生语音（免 Key 免费）";
-	if (draft.earVendor === "gemini" && draft.brainVendor === "gemini" && draft.mouthVendor === "gemini") return "全 Gemini 极速随行";
-	if (draft.earVendor === "volcengine_asr" && draft.mouthVendor === "volcengine_tts") {
-		if (draft.brainVendor === "deepseek") return "火山豆包 + DeepSeek";
-		if (draft.brainVendor === "ark") return "全火山（豆包 + 方舟）";
-		if (draft.brainVendor === "gemini") return "火山豆包 + Gemini";
-		if (draft.brainVendor === "openai") return "火山豆包 + OpenAI";
-		if (draft.brainVendor === "custom") return "火山豆包 + 自定义大脑";
-		return "火山豆包语音";
-	}
-	const brainLabels = {
-		deepseek: "DeepSeek",
-		ark: "火山方舟",
-		gemini: "Gemini",
-		openai: "OpenAI",
-		custom: "自定义大脑",
-		native: "本地口令"
-	};
-	if (draft.earVendor === "native" && draft.mouthVendor === "native") return `免费听/说 + ${brainLabels[draft.brainVendor]}`;
-	if (draft.mouthVendor === "volcengine_tts") return `豆包人声 + ${brainLabels[draft.brainVendor]}`;
-	return `自定义混搭 · ${brainLabels[draft.brainVendor]}`;
-}
 function VoiceCopilotSheets() {
 	const [walkOpen, setWalkOpen] = d(false);
 	const [labOpen, setLabOpen] = d(false);
-	const [labView, setLabView] = d("simple");
+	const [labInitialView, setLabInitialView] = d("list");
 	const [config, setConfig] = d(DEFAULT_CONFIG);
 	const [loadingCfg, setLoadingCfg] = d(false);
-	const [simpleVendor, setSimpleVendor] = d("gemini");
-	const [simpleApiKey, setSimpleApiKey] = d("");
-	const [simpleArkModel, setSimpleArkModel] = d("doubao-seed-2-0-lite-260215");
-	const [simpleSaving, setSimpleSaving] = d(false);
 	const [soundChecking, setSoundChecking] = d(false);
 	const [soundCheckMsg, setSoundCheckMsg] = d(null);
-	const [mix, setMix] = d(() => buildMixDraftFromConfig(DEFAULT_CONFIG));
-	const [mixSaving, setMixSaving] = d(false);
-	const [mixStatusMsg, setMixStatusMsg] = d(null);
-	const [geekOpen, setGeekOpen] = d(false);
 	const [walkPhase, setWalkPhase] = d("idle");
 	const [micLevel, setMicLevel] = d(0);
 	const [wakeLocked, setWakeLocked] = d(false);
@@ -2090,8 +2977,6 @@ function VoiceCopilotSheets() {
 	const [walkTextInputOpen, setWalkTextInputOpen] = d(false);
 	const [walkTextDraft, setWalkTextDraft] = d("");
 	const [hubSummary, setHubSummary] = d(() => summarizeHubState(window.__dshLastHubState));
-	const [testingCredId, setTestingCredId] = d("");
-	const [testResults, setTestResults] = d({});
 	const [benchDryRun, setBenchDryRun] = d(true);
 	const [benchText, setBenchText] = d("现在有哪些待审批和运行中的任务？");
 	const [benchRunning, setBenchRunning] = d(false);
@@ -2158,16 +3043,8 @@ function VoiceCopilotSheets() {
 			setWalkOpen(false);
 		};
 		window.openVoiceLab = (tab) => {
-			if (!tab || tab === "simple") {
-				setLabView("simple");
-				setSimpleVendor(inferSimpleVendorFromConfig(configRef.current));
-				setSoundCheckMsg(null);
-			} else {
-				setLabView("advanced");
-				setMix(buildMixDraftFromConfig(configRef.current));
-				setMixStatusMsg(null);
-				setGeekOpen(tab === "bench");
-			}
+			setSoundCheckMsg(null);
+			setLabInitialView(tab === "bench" ? "bench" : tab === "add" ? "add" : "list");
 			setLabOpen(true);
 			refreshConfig(false);
 		};
@@ -2787,672 +3664,10 @@ function VoiceCopilotSheets() {
 			setSoundChecking(false);
 		}
 	};
-	const handleSimpleQuickActivate = async () => {
-		if (simpleVendor === "native") {
-			await updatePrefPatch({ activeProfileId: "native" });
-			setSoundCheckMsg({
-				ok: true,
-				text: "✅ 已切换为免费本机语音（零 Key）"
-			});
-			return;
-		}
-		const existingCred = findSimpleVendorCred(simpleVendor, config.credentials);
-		const keyTrimmed = simpleApiKey.trim();
-		if (!keyTrimmed && !existingCred) {
-			toast("⚠️ 请先粘贴 API Key");
-			return;
-		}
-		setSimpleSaving(true);
-		setSoundCheckMsg(null);
-		try {
-			let credId = existingCred?.id || "";
-			const vendorSpec = {
-				gemini: {
-					provider: "gemini",
-					label: "Google Gemini",
-					baseUrl: "https://generativelanguage.googleapis.com/v1beta",
-					model: "gemini-2.5-flash",
-					voice: "Kore",
-					profileName: "全 Gemini 极速随行"
-				},
-				deepseek: {
-					provider: "openai_compat",
-					label: "DeepSeek 官方",
-					baseUrl: "https://api.deepseek.com/v1",
-					model: "deepseek-chat",
-					voice: "",
-					profileName: "DeepSeek 智能语音"
-				},
-				ark: {
-					provider: "openai_compat",
-					label: "火山方舟 Ark",
-					baseUrl: "https://ark.cn-beijing.volces.com/api/v3",
-					model: simpleArkModel.trim() || "doubao-seed-2-0-lite-260215",
-					voice: "",
-					profileName: "火山方舟智能语音"
-				},
-				openai: {
-					provider: "openai_compat",
-					label: "OpenAI 官方",
-					baseUrl: "https://api.openai.com/v1",
-					model: "gpt-4o-mini",
-					voice: "alloy",
-					profileName: "全 OpenAI 极速随行"
-				}
-			}[simpleVendor];
-			let latestConfig = config;
-			if (keyTrimmed) {
-				const credRes = await apiCall("/api/voice/credentials", {
-					method: "POST",
-					body: JSON.stringify({
-						id: existingCred?.id || "",
-						provider: vendorSpec.provider,
-						label: vendorSpec.label,
-						baseUrl: vendorSpec.baseUrl,
-						apiKey: keyTrimmed,
-						defaultModel: vendorSpec.model,
-						defaultVoice: vendorSpec.voice,
-						active: true
-					})
-				});
-				const credData = await credRes.json().catch(() => null);
-				if (!credRes.ok || !credData?.ok) {
-					toast(`❌ ${credData?.error || "保存密钥失败"}`);
-					return;
-				}
-				credId = credData.credential?.id || credId;
-				if (credData.config) latestConfig = {
-					...latestConfig,
-					...credData.config
-				};
-			}
-			const existingProf = latestConfig.profiles.find((p) => !p.builtin && p.name === vendorSpec.profileName);
-			const profilePayload = simpleVendor === "gemini" ? {
-				id: existingProf?.id || "",
-				name: vendorSpec.profileName,
-				builtin: false,
-				activate: true,
-				stt: {
-					provider: "gemini",
-					credId,
-					model: "gemini-2.5-flash",
-					language: "zh-CN",
-					thinkingLevel: "low",
-					fallbackChain: []
-				},
-				brain: {
-					provider: "gemini",
-					credId,
-					model: "gemini-2.5-flash",
-					thinkingLevel: "off",
-					maxTokens: 320
-				},
-				tts: {
-					provider: "gemini",
-					credId,
-					model: "gemini-2.5-flash-preview-tts",
-					voice: "Kore",
-					format: "mp3",
-					speed: 1
-				}
-			} : simpleVendor === "openai" ? {
-				id: existingProf?.id || "",
-				name: vendorSpec.profileName,
-				builtin: false,
-				activate: true,
-				stt: {
-					provider: "openai_compat",
-					credId,
-					model: "gpt-4o-mini-transcribe",
-					language: "zh-CN",
-					thinkingLevel: "default",
-					fallbackChain: []
-				},
-				brain: {
-					provider: "openai_compat",
-					credId,
-					model: "gpt-4o-mini",
-					thinkingLevel: "off",
-					maxTokens: 320
-				},
-				tts: {
-					provider: "openai_compat",
-					credId,
-					model: "gpt-4o-mini-tts",
-					voice: "alloy",
-					format: "mp3",
-					speed: 1
-				}
-			} : {
-				id: existingProf?.id || "",
-				name: vendorSpec.profileName,
-				builtin: false,
-				activate: true,
-				stt: {
-					provider: "native",
-					credId: "",
-					model: "browser-web-speech",
-					language: "zh-CN",
-					thinkingLevel: "default",
-					fallbackChain: []
-				},
-				brain: {
-					provider: "openai_compat",
-					credId,
-					model: vendorSpec.model,
-					thinkingLevel: "off",
-					maxTokens: 320
-				},
-				tts: {
-					provider: "native",
-					credId: "",
-					model: "browser-speech-synthesis",
-					voice: "system-default",
-					format: "mp3",
-					speed: 1
-				}
-			};
-			const profRes = await apiCall("/api/voice/profiles", {
-				method: "POST",
-				body: JSON.stringify(profilePayload)
-			});
-			const profData = await profRes.json().catch(() => null);
-			if (!profRes.ok || !profData?.ok) {
-				toast(`❌ ${profData?.error || "启用方案失败"}`);
-				return;
-			}
-			setConfig((prev) => ({
-				...prev,
-				...profData.config
-			}));
-			setSimpleApiKey("");
-			setSoundCheckMsg({
-				ok: true,
-				text: `✅ 已启用「${vendorSpec.profileName}」，点右边「🔊 试听」即可验证`
-			});
-			toast(`✅ 已自动配好并启用「${vendorSpec.profileName}」`);
-		} finally {
-			setSimpleSaving(false);
-		}
-	};
-	const applyMixCombo = (comboId) => {
-		setMixStatusMsg(null);
-		const arkCred = findMixCred("ark", config.credentials);
-		const asrCred = findMixCred("volcengine_asr", config.credentials);
-		const ttsCred = findMixCred("volcengine_tts", config.credentials);
-		if (comboId === "volc_ds") {
-			setMix((prev) => ({
-				...prev,
-				earVendor: "volcengine_asr",
-				earResourceId: asrCred?.resourceId || prev.earResourceId || "volc.bigasr.auc_turbo",
-				brainVendor: "deepseek",
-				brainReuseEarGemini: false,
-				brainModel: "deepseek-chat",
-				mouthVendor: "volcengine_tts",
-				mouthReuseKey: true,
-				mouthResourceId: ttsCred?.resourceId || prev.mouthResourceId || "seed-tts-2.0",
-				mouthVoice: prev.mouthVoice && prev.mouthVoice.startsWith("zh_") ? prev.mouthVoice : ttsCred?.defaultVoice || "zh_female_vv_uranus_bigtts"
-			}));
-			return;
-		}
-		if (comboId === "volc_all") {
-			setMix((prev) => ({
-				...prev,
-				earVendor: "volcengine_asr",
-				earResourceId: asrCred?.resourceId || prev.earResourceId || "volc.bigasr.auc_turbo",
-				brainVendor: "ark",
-				brainReuseEarGemini: false,
-				brainModel: arkCred?.defaultModel || "doubao-seed-2-0-lite-260215",
-				mouthVendor: "volcengine_tts",
-				mouthReuseKey: true,
-				mouthResourceId: ttsCred?.resourceId || prev.mouthResourceId || "seed-tts-2.0",
-				mouthVoice: prev.mouthVoice && prev.mouthVoice.startsWith("zh_") ? prev.mouthVoice : ttsCred?.defaultVoice || "zh_female_vv_uranus_bigtts"
-			}));
-			return;
-		}
-		if (comboId === "gemini_all") {
-			setMix((prev) => ({
-				...prev,
-				earVendor: "gemini",
-				brainVendor: "gemini",
-				brainReuseEarGemini: true,
-				brainModel: "gemini-2.5-flash",
-				mouthVendor: "gemini",
-				mouthReuseKey: true,
-				mouthVoice: prev.mouthVoice && [
-					"Kore",
-					"Puck",
-					"Aoede",
-					"Zephyr"
-				].includes(prev.mouthVoice) ? prev.mouthVoice : "Kore"
-			}));
-			return;
-		}
-		setMix((prev) => ({
-			...prev,
-			earVendor: "native",
-			brainVendor: prev.brainVendor === "native" ? "deepseek" : prev.brainVendor,
-			brainReuseEarGemini: false,
-			brainModel: prev.brainVendor === "native" ? "deepseek-chat" : prev.brainModel || "deepseek-chat",
-			mouthVendor: "native",
-			mouthReuseKey: false
-		}));
-	};
-	const handleSaveMixDraft = async () => {
-		setMixSaving(true);
-		setMixStatusMsg(null);
-		try {
-			let latestCfg = config;
-			const upsertCred = async (body) => {
-				const res = await apiCall("/api/voice/credentials", {
-					method: "POST",
-					body: JSON.stringify(body)
-				});
-				const data = await res.json().catch(() => null);
-				if (!res.ok || !data?.ok) throw new Error(data?.error || "保存密钥失败");
-				if (data.config) latestCfg = {
-					...latestCfg,
-					...data.config
-				};
-				return data.credential?.id;
-			};
-			let earCredId = "";
-			let sttStage = {
-				provider: "native",
-				credId: "",
-				model: "browser-web-speech",
-				language: "zh-CN",
-				thinkingLevel: "default",
-				fallbackChain: []
-			};
-			if (mix.earVendor === "volcengine_asr") {
-				const existing = findMixCred("volcengine_asr", latestCfg.credentials);
-				if (mix.earVolcMode === "appToken" ? Boolean(mix.earAppId.trim() && mix.earAccessToken.trim()) : Boolean(mix.earApiKey.trim())) earCredId = await upsertCred({
-					id: existing?.id || "",
-					provider: "volcengine_asr",
-					label: existing?.label || "火山豆包语音 (ASR)",
-					baseUrl: "https://openspeech.bytedance.com/api/v3/auc/bigmodel/recognize/flash",
-					apiKey: mix.earVolcMode === "appToken" ? "" : mix.earApiKey.trim(),
-					appId: mix.earVolcMode === "appToken" ? mix.earAppId.trim() : "",
-					accessToken: mix.earVolcMode === "appToken" ? mix.earAccessToken.trim() : "",
-					resourceId: mix.earResourceId.trim() || "volc.bigasr.auc_turbo",
-					active: true
-				});
-				else if (existing) earCredId = existing.id;
-				else {
-					setMixStatusMsg({
-						ok: false,
-						text: "⚠️ 请在「👂 1. 听我说话」粘贴火山语音 Key，或改选「手机自带免费」"
-					});
-					return;
-				}
-				sttStage = {
-					provider: "volcengine_asr",
-					credId: earCredId,
-					model: mix.earResourceId.trim() || "volc.bigasr.auc_turbo",
-					language: "zh-CN",
-					thinkingLevel: "low",
-					fallbackChain: []
-				};
-			} else if (mix.earVendor === "gemini") {
-				const existing = findMixCred("gemini", latestCfg.credentials);
-				if (mix.earApiKey.trim()) earCredId = await upsertCred({
-					id: existing?.id || "",
-					provider: "gemini",
-					label: existing?.label || "Google Gemini",
-					baseUrl: "https://generativelanguage.googleapis.com/v1beta",
-					apiKey: mix.earApiKey.trim(),
-					defaultModel: "gemini-2.5-flash",
-					defaultVoice: "Kore",
-					active: true
-				});
-				else if (existing) earCredId = existing.id;
-				else {
-					setMixStatusMsg({
-						ok: false,
-						text: "⚠️ 请在「👂 1. 听我说话」粘贴 Gemini Key，或改选「手机自带免费」"
-					});
-					return;
-				}
-				sttStage = {
-					provider: "gemini",
-					credId: earCredId,
-					model: "gemini-2.5-flash",
-					language: "zh-CN",
-					thinkingLevel: "low",
-					fallbackChain: []
-				};
-			} else if (mix.earVendor === "openai") {
-				const existing = findMixCred("openai", latestCfg.credentials);
-				if (mix.earApiKey.trim()) earCredId = await upsertCred({
-					id: existing?.id || "",
-					provider: "openai_compat",
-					label: existing?.label || "OpenAI 官方",
-					baseUrl: "https://api.openai.com/v1",
-					apiKey: mix.earApiKey.trim(),
-					defaultModel: "gpt-4o-mini",
-					defaultVoice: "alloy",
-					active: true
-				});
-				else if (existing) earCredId = existing.id;
-				else {
-					setMixStatusMsg({
-						ok: false,
-						text: "⚠️ 请在「👂 1. 听我说话」粘贴 OpenAI Key，或改选「手机自带免费」"
-					});
-					return;
-				}
-				sttStage = {
-					provider: "openai_compat",
-					credId: earCredId,
-					model: "gpt-4o-mini-transcribe",
-					language: "zh-CN",
-					thinkingLevel: "default",
-					fallbackChain: []
-				};
-			}
-			let brainCredId = "";
-			let brainStage = {
-				provider: "native",
-				credId: "",
-				model: "rule-router",
-				thinkingLevel: "off",
-				maxTokens: 256
-			};
-			if (mix.brainVendor === "gemini") {
-				if (mix.earVendor === "gemini" && mix.brainReuseEarGemini && earCredId) brainCredId = earCredId;
-				else {
-					const existing = findMixCred("gemini", latestCfg.credentials);
-					if (mix.brainApiKey.trim()) brainCredId = await upsertCred({
-						id: existing?.id || "",
-						provider: "gemini",
-						label: existing?.label || "Google Gemini",
-						baseUrl: "https://generativelanguage.googleapis.com/v1beta",
-						apiKey: mix.brainApiKey.trim(),
-						defaultModel: mix.brainModel.trim() || "gemini-2.5-flash",
-						defaultVoice: "Kore",
-						active: true
-					});
-					else if (existing) brainCredId = existing.id;
-					else {
-						setMixStatusMsg({
-							ok: false,
-							text: "⚠️ 请在「🧠 2. 帮我思考」粘贴 Gemini Key"
-						});
-						return;
-					}
-				}
-				brainStage = {
-					provider: "gemini",
-					credId: brainCredId,
-					model: mix.brainModel.trim() || "gemini-2.5-flash",
-					thinkingLevel: "off",
-					maxTokens: 320
-				};
-			} else if (mix.brainVendor !== "native") {
-				if (mix.brainVendor === "custom" && !mix.brainBaseUrl.trim()) {
-					setMixStatusMsg({
-						ok: false,
-						text: "⚠️ 自定义中转站请填写接口地址（Base URL）"
-					});
-					return;
-				}
-				const meta = {
-					deepseek: {
-						label: "DeepSeek 官方",
-						baseUrl: "https://api.deepseek.com/v1",
-						defModel: "deepseek-chat"
-					},
-					ark: {
-						label: "火山方舟 Ark",
-						baseUrl: "https://ark.cn-beijing.volces.com/api/v3",
-						defModel: "doubao-seed-2-0-lite-260215"
-					},
-					openai: {
-						label: "OpenAI 官方",
-						baseUrl: "https://api.openai.com/v1",
-						defModel: "gpt-4o-mini"
-					},
-					custom: {
-						label: "自定义中转",
-						baseUrl: mix.brainBaseUrl.trim(),
-						defModel: "deepseek-chat"
-					}
-				}[mix.brainVendor];
-				const modelVal = mix.brainModel.trim() || meta.defModel;
-				const existing = findMixCred(mix.brainVendor, latestCfg.credentials, meta.baseUrl);
-				if (mix.brainApiKey.trim()) brainCredId = await upsertCred({
-					id: existing?.id || "",
-					provider: "openai_compat",
-					label: existing?.label || meta.label,
-					baseUrl: meta.baseUrl,
-					apiKey: mix.brainApiKey.trim(),
-					defaultModel: modelVal,
-					active: true
-				});
-				else if (existing) brainCredId = existing.id;
-				else {
-					setMixStatusMsg({
-						ok: false,
-						text: `⚠️ 请在「🧠 2. 帮我思考」粘贴 ${meta.label} 的 API Key`
-					});
-					return;
-				}
-				brainStage = {
-					provider: "openai_compat",
-					credId: brainCredId,
-					model: modelVal,
-					thinkingLevel: "off",
-					maxTokens: 320
-				};
-			}
-			let mouthCredId = "";
-			let ttsStage = {
-				provider: "native",
-				credId: "",
-				model: "browser-speech-synthesis",
-				voice: "system-default",
-				format: "mp3",
-				speed: 1
-			};
-			if (mix.mouthVendor === "volcengine_tts") {
-				const existingTts = findMixCred("volcengine_tts", latestCfg.credentials);
-				const voiceVal = mix.mouthVoice.trim() || "zh_female_vv_uranus_bigtts";
-				const resVal = mix.mouthResourceId.trim() || "seed-tts-2.0";
-				if (mix.mouthReuseKey && mix.earVendor === "volcengine_asr" && earCredId) {
-					const earHasFreshKey = mix.earVolcMode === "appToken" ? Boolean(mix.earAppId.trim() && mix.earAccessToken.trim()) : Boolean(mix.earApiKey.trim());
-					mouthCredId = await upsertCred({
-						id: existingTts?.id || "",
-						provider: "volcengine_tts",
-						label: existingTts?.label || "火山豆包播报 (TTS)",
-						baseUrl: "https://openspeech.bytedance.com/api/v3/tts/unidirectional",
-						...earHasFreshKey ? {
-							apiKey: mix.earVolcMode === "appToken" ? "" : mix.earApiKey.trim(),
-							appId: mix.earVolcMode === "appToken" ? mix.earAppId.trim() : "",
-							accessToken: mix.earVolcMode === "appToken" ? mix.earAccessToken.trim() : ""
-						} : { cloneSecretFromCredId: earCredId },
-						resourceId: resVal,
-						defaultVoice: voiceVal,
-						active: true
-					});
-				} else if (mix.mouthVolcMode === "appToken" ? Boolean(mix.mouthAppId.trim() && mix.mouthAccessToken.trim()) : Boolean(mix.mouthApiKey.trim())) mouthCredId = await upsertCred({
-					id: existingTts?.id || "",
-					provider: "volcengine_tts",
-					label: existingTts?.label || "火山豆包播报 (TTS)",
-					baseUrl: "https://openspeech.bytedance.com/api/v3/tts/unidirectional",
-					apiKey: mix.mouthVolcMode === "appToken" ? "" : mix.mouthApiKey.trim(),
-					appId: mix.mouthVolcMode === "appToken" ? mix.mouthAppId.trim() : "",
-					accessToken: mix.mouthVolcMode === "appToken" ? mix.mouthAccessToken.trim() : "",
-					resourceId: resVal,
-					defaultVoice: voiceVal,
-					active: true
-				});
-				else if (existingTts) mouthCredId = existingTts.id;
-				else {
-					setMixStatusMsg({
-						ok: false,
-						text: "⚠️ 请在「🗣️ 3. 念给我听」粘贴火山语音 Key，或改选「手机自带免费」"
-					});
-					return;
-				}
-				ttsStage = {
-					provider: "volcengine_tts",
-					credId: mouthCredId,
-					model: resVal,
-					voice: voiceVal,
-					format: "mp3",
-					speed: 1
-				};
-			} else if (mix.mouthVendor === "gemini") {
-				const voiceVal = mix.mouthVoice.trim() || "Kore";
-				const sharedGeminiId = mix.mouthReuseKey && (mix.earVendor === "gemini" ? earCredId : mix.brainVendor === "gemini" ? brainCredId : "") || "";
-				if (sharedGeminiId) mouthCredId = sharedGeminiId;
-				else {
-					const existing = findMixCred("gemini", latestCfg.credentials);
-					if (mix.mouthApiKey.trim()) mouthCredId = await upsertCred({
-						id: existing?.id || "",
-						provider: "gemini",
-						label: existing?.label || "Google Gemini",
-						baseUrl: "https://generativelanguage.googleapis.com/v1beta",
-						apiKey: mix.mouthApiKey.trim(),
-						defaultModel: "gemini-2.5-flash",
-						defaultVoice: voiceVal,
-						active: true
-					});
-					else if (existing) mouthCredId = existing.id;
-					else {
-						setMixStatusMsg({
-							ok: false,
-							text: "⚠️ 请在「🗣️ 3. 念给我听」粘贴 Gemini Key"
-						});
-						return;
-					}
-				}
-				ttsStage = {
-					provider: "gemini",
-					credId: mouthCredId,
-					model: "gemini-2.5-flash-preview-tts",
-					voice: voiceVal,
-					format: "mp3",
-					speed: 1
-				};
-			} else if (mix.mouthVendor === "openai") {
-				const voiceVal = mix.mouthVoice.trim() || "alloy";
-				const sharedOaiId = mix.mouthReuseKey && (mix.earVendor === "openai" ? earCredId : mix.brainVendor === "openai" ? brainCredId : "") || "";
-				if (sharedOaiId) mouthCredId = sharedOaiId;
-				else {
-					const existing = findMixCred("openai", latestCfg.credentials);
-					if (mix.mouthApiKey.trim()) mouthCredId = await upsertCred({
-						id: existing?.id || "",
-						provider: "openai_compat",
-						label: existing?.label || "OpenAI 官方",
-						baseUrl: "https://api.openai.com/v1",
-						apiKey: mix.mouthApiKey.trim(),
-						defaultModel: "gpt-4o-mini",
-						defaultVoice: voiceVal,
-						active: true
-					});
-					else if (existing) mouthCredId = existing.id;
-					else {
-						setMixStatusMsg({
-							ok: false,
-							text: "⚠️ 请在「🗣️ 3. 念给我听」粘贴 OpenAI Key"
-						});
-						return;
-					}
-				}
-				ttsStage = {
-					provider: "openai_compat",
-					credId: mouthCredId,
-					model: "gpt-4o-mini-tts",
-					voice: voiceVal,
-					format: "mp3",
-					speed: 1
-				};
-			}
-			if (mix.earVendor === "native" && mix.brainVendor === "native" && mix.mouthVendor === "native") {
-				await updatePrefPatch({ activeProfileId: "native" });
-				setMixStatusMsg({
-					ok: true,
-					text: "✅ 已切换为免费本机语音"
-				});
-				return;
-			}
-			const profName = buildMixProfileName(mix);
-			const existingProf = latestCfg.profiles.find((p) => !p.builtin && p.name === profName);
-			const profRes = await apiCall("/api/voice/profiles", {
-				method: "POST",
-				body: JSON.stringify({
-					id: existingProf?.id || "",
-					name: profName,
-					stt: sttStage,
-					brain: brainStage,
-					tts: ttsStage,
-					activate: true
-				})
-			});
-			const profData = await profRes.json().catch(() => null);
-			if (!profRes.ok || !profData?.ok) throw new Error(profData?.error || "保存混搭方案失败");
-			setConfig((prev) => ({
-				...prev,
-				...profData.config
-			}));
-			setMix((prev) => ({
-				...prev,
-				earApiKey: "",
-				earAppId: "",
-				earAccessToken: "",
-				brainApiKey: "",
-				mouthApiKey: "",
-				mouthAppId: "",
-				mouthAccessToken: ""
-			}));
-			setMixStatusMsg({
-				ok: true,
-				text: `✅ 已生效：「${profName}」，点右边「🔊 试听」立刻听效果`
-			});
-			toast(`✅ 已保存并启用「${profName}」`);
-		} catch (err) {
-			setMixStatusMsg({
-				ok: false,
-				text: `❌ ${err?.message || "保存失败"}`
-			});
-		} finally {
-			setMixSaving(false);
-		}
-	};
-	const handleTestCredential = async (credId) => {
-		setTestingCredId(credId);
-		try {
-			const res = await apiCall("/api/voice/test", {
-				method: "POST",
-				body: JSON.stringify({ credId })
-			});
-			const data = await res.json().catch(() => ({
-				ok: false,
-				error: `HTTP ${res.status}`
-			}));
-			setTestResults((prev) => ({
-				...prev,
-				[credId]: {
-					ok: Boolean(data?.ok),
-					summary: data?.summary || (data?.ok ? `✅ 连通 (${data.latencyMs}ms)` : `❌ ${data?.error || "测试失败"}`)
-				}
-			}));
-		} finally {
-			setTestingCredId("");
-		}
-	};
-	const handleDeleteCredential = async (credId) => {
-		const res = await apiCall(`/api/voice/credentials/${encodeURIComponent(credId)}`, { method: "DELETE" });
-		const data = await res.json().catch(() => null);
-		if (res.ok && data?.ok && data.config) {
-			setConfig((prev) => ({
-				...prev,
-				...data.config
-			}));
-			toast("🗑️ 密钥已移除");
-		}
+	const handleConfigChange = (next) => {
+		setConfig(next);
+		window.__dshVoiceConfig = next;
+		window.dispatchEvent(new CustomEvent("dsh:voice-config", { detail: next }));
 	};
 	const runBenchTurn = async (textOverride, sttMeta) => {
 		const input = String(textOverride ?? benchText).trim();
@@ -3550,34 +3765,13 @@ function VoiceCopilotSheets() {
 			toast(err?.message || "无法打开麦克风");
 		}
 	};
-	const openAdvancedMixView = (presetCombo) => {
-		const base = buildMixDraftFromConfig(config);
-		setMixStatusMsg(null);
-		setLabView("advanced");
-		if (presetCombo === "volc_ds") {
-			const asrCred = findMixCred("volcengine_asr", config.credentials);
-			const ttsCred = findMixCred("volcengine_tts", config.credentials);
-			setMix({
-				...base,
-				earVendor: "volcengine_asr",
-				earResourceId: asrCred?.resourceId || "volc.bigasr.auc_turbo",
-				brainVendor: "deepseek",
-				brainReuseEarGemini: false,
-				brainModel: "deepseek-chat",
-				mouthVendor: "volcengine_tts",
-				mouthReuseKey: true,
-				mouthResourceId: ttsCred?.resourceId || "seed-tts-2.0",
-				mouthVoice: ttsCred?.defaultVoice || "zh_female_vv_uranus_bigtts"
-			});
-		} else setMix(base);
-	};
 	const activeProf = config.activeProfile || DEFAULT_CONFIG.activeProfile;
-	const activeMissingProviders = getMissingProvidersForProfile(activeProf, config.credentials);
-	const simpleMatchedCred = simpleVendor === "native" ? void 0 : findSimpleVendorCred(simpleVendor, config.credentials);
-	const earSavedCred = mix.earVendor === "native" ? void 0 : findMixCred(mix.earVendor, config.credentials);
-	const brainSavedCred = mix.brainVendor === "native" ? void 0 : findMixCred(mix.brainVendor, config.credentials, mix.brainBaseUrl);
-	const mouthSavedCred = mix.mouthVendor === "native" ? void 0 : findMixCred(mix.mouthVendor, config.credentials);
-	const activeComboId = mix.earVendor === "volcengine_asr" && mix.mouthVendor === "volcengine_tts" && mix.brainVendor === "deepseek" ? "volc_ds" : mix.earVendor === "volcengine_asr" && mix.mouthVendor === "volcengine_tts" && mix.brainVendor === "ark" ? "volc_all" : mix.earVendor === "gemini" && mix.brainVendor === "gemini" && mix.mouthVendor === "gemini" ? "gemini_all" : mix.earVendor === "native" && mix.mouthVendor === "native" && mix.brainVendor !== "native" ? "free_voice_brain" : "";
+	const openLabFromWalk = () => {
+		setSoundCheckMsg(null);
+		setLabInitialView("list");
+		setLabOpen(true);
+		refreshConfig(false);
+	};
 	const orbScale = walkPhase === "listening" ? 1 + Math.min(.18, micLevel * .22) : 1;
 	return /* @__PURE__ */ k$1(M, null, walkOpen && /* @__PURE__ */ k$1("div", {
 		id: "walkModeOverlay",
@@ -3587,23 +3781,13 @@ function VoiceCopilotSheets() {
 	}, /* @__PURE__ */ k$1("div", { class: "walk-top-bar" }, /* @__PURE__ */ k$1("div", { class: "walk-top-left" }, /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: "walk-profile-pill",
-		onClick: () => {
-			setLabView("simple");
-			setSimpleVendor(inferSimpleVendorFromConfig(config));
-			setSoundCheckMsg(null);
-			setLabOpen(true);
-		},
+		onClick: openLabFromWalk,
 		title: "点击快速切换语音配置"
 	}, /* @__PURE__ */ k$1("span", null, "🎧"), /* @__PURE__ */ k$1("span", { class: "walk-profile-name" }, activeProf.name), /* @__PURE__ */ k$1("span", null, "▾")), hubSummary.approvals.length > 0 && /* @__PURE__ */ k$1("span", { class: "walk-badge-warn" }, "⚠️ ", hubSummary.approvals.length, " 待审批"), wakeLocked && /* @__PURE__ */ k$1("span", { class: "walk-badge-subtle" }, "🔆 常亮")), /* @__PURE__ */ k$1("div", { class: "walk-top-right" }, /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: "walk-top-btn",
 		id: "walkOpenLabBtn",
-		onClick: () => {
-			setLabView("simple");
-			setSimpleVendor(inferSimpleVendorFromConfig(config));
-			setSoundCheckMsg(null);
-			setLabOpen(true);
-		}
+		onClick: openLabFromWalk
 	}, "⚙️ 配置"), /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: "walk-top-btn walk-exit-btn",
@@ -3699,461 +3883,30 @@ function VoiceCopilotSheets() {
 		type: "button",
 		class: `walk-mini-toggle ${config.prefs.autoVad ? "on" : ""}`,
 		onClick: () => void updatePrefPatch({ autoVad: !config.prefs.autoVad })
-	}, config.prefs.autoVad ? "🟢 自动停顿发送" : "⚪ 手动点停")))), labOpen && /* @__PURE__ */ k$1("div", {
-		id: "voiceLabSheet",
-		class: "sheet-backdrop open voice-lab-backdrop",
-		onClick: (e) => {
-			if (e.target === e.currentTarget) setLabOpen(false);
-		}
-	}, /* @__PURE__ */ k$1("div", { class: "sheet-panel voice-lab-panel" }, /* @__PURE__ */ k$1("div", { class: "sheet-handle" }), /* @__PURE__ */ k$1("div", {
-		class: "sheet-title",
-		style: "margin-bottom:10px;"
-	}, labView === "simple" ? /* @__PURE__ */ k$1("span", null, "🎙️ 随行语音设置") : /* @__PURE__ */ k$1("div", { style: "display:flex;align-items:center;gap:8px;min-width:0;" }, /* @__PURE__ */ k$1("button", {
-		type: "button",
-		class: "voice-back-btn",
-		onClick: () => {
-			setLabView("simple");
-			setSimpleVendor(inferSimpleVendorFromConfig(config));
-		}
-	}, "‹ 极简"), /* @__PURE__ */ k$1("span", { style: "overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" }, "🎛️ 自由混搭（听 · 想 · 说）")), /* @__PURE__ */ k$1("button", {
-		type: "button",
-		style: "border:none;background:transparent;color:var(--muted);font-size:18px;cursor:pointer;padding:4px 8px;",
-		onClick: () => setLabOpen(false)
-	}, "✕")), labView === "simple" ? /* @__PURE__ */ k$1("div", { class: "voice-lab-body" }, loadingCfg && /* @__PURE__ */ k$1("div", { class: "voice-muted-note" }, "正在读取加密配置…"), /* @__PURE__ */ k$1("div", { class: "voice-tab-stack" }, /* @__PURE__ */ k$1("div", { class: "voice-card voice-status-hero" }, /* @__PURE__ */ k$1("div", { class: "voice-status-hero-row" }, /* @__PURE__ */ k$1("div", { style: "flex:1;min-width:0;" }, /* @__PURE__ */ k$1("div", { class: "voice-status-hero-title" }, activeProf.id === "native" ? "🆓 当前：免费本机语音" : `✅ 当前：${activeProf.name}`), /* @__PURE__ */ k$1("div", { class: "voice-status-hero-sub" }, activeProf.id === "native" ? "免填 Key · 直接用手机自带听写与播报" : `听：${formatStageSummary(activeProf.stt.provider, activeProf.stt.model, "stt", activeProf.stt.credId, config.credentials)} · 想：${formatStageSummary(activeProf.brain.provider, activeProf.brain.model, "brain", activeProf.brain.credId, config.credentials)} · 说：${formatStageSummary(activeProf.tts.provider, activeProf.tts.model, "tts", activeProf.tts.credId, config.credentials)}`)), /* @__PURE__ */ k$1("button", {
-		type: "button",
-		class: "voice-pill-btn primary",
-		disabled: soundChecking,
-		onClick: () => void handleQuickSoundCheck()
-	}, soundChecking ? "试音中…" : "🔊 试听")), activeMissingProviders.length > 0 && /* @__PURE__ */ k$1("button", {
-		type: "button",
-		class: "voice-missing-key-cta",
-		style: "margin-top:8px;",
-		onClick: () => openAdvancedMixView()
-	}, /* @__PURE__ */ k$1("span", null, "⚠️ 缺少 ", activeMissingProviders.map((pr) => PROVIDER_DISPLAY_NAMES[pr] || pr).join("、"), " 密钥"), /* @__PURE__ */ k$1("span", null, "去补填 →")), soundCheckMsg && /* @__PURE__ */ k$1("div", {
-		class: `voice-test-msg ${soundCheckMsg.ok ? "ok" : "err"}`,
-		style: "margin-top:8px;"
-	}, soundCheckMsg.text)), /* @__PURE__ */ k$1("div", { class: "voice-card" }, /* @__PURE__ */ k$1("div", { class: "voice-card-title" }, "⚡ 1 把 Key 快速上手（模型全自动）"), /* @__PURE__ */ k$1("div", {
-		class: "voice-muted-note",
-		style: "margin-bottom:10px;"
-	}, "选一家贴 1 把密钥点保存即可生效；想做", /* @__PURE__ */ k$1("strong", null, "火山豆包 + DeepSeek 混搭"), "点最后一项。"), /* @__PURE__ */ k$1("div", { class: "voice-provider-grid" }, SIMPLE_VENDOR_CARDS.map((card) => {
-		const isMix = card.id === "mix_volc_ds";
-		const isSelected = !isMix && simpleVendor === card.id;
-		const hasSaved = card.id !== "native" && !isMix ? Boolean(findSimpleVendorCred(card.id, config.credentials)) : false;
-		return /* @__PURE__ */ k$1("button", {
-			key: card.id,
-			type: "button",
-			class: `voice-provider-card ${isSelected ? "active" : ""} ${isMix ? "voice-mix-shortcut-card" : ""}`,
-			onClick: () => {
-				if (isMix) {
-					openAdvancedMixView("volc_ds");
-					return;
-				}
-				setSimpleVendor(card.id);
-				setSimpleApiKey("");
-				if (card.id === "ark") {
-					const arkCred = findSimpleVendorCred("ark", config.credentials);
-					if (arkCred?.defaultModel) setSimpleArkModel(arkCred.defaultModel);
-				}
-			}
-		}, /* @__PURE__ */ k$1("div", { class: "voice-provider-card-title" }, /* @__PURE__ */ k$1("span", null, card.icon, " ", card.title), hasSaved && /* @__PURE__ */ k$1("span", { class: "voice-provider-badge" }, "已存")), /* @__PURE__ */ k$1("div", { class: "voice-provider-card-sub" }, card.sub));
-	})), simpleVendor === "native" ? /* @__PURE__ */ k$1("div", { class: "voice-simple-box" }, /* @__PURE__ */ k$1("div", {
-		class: "voice-muted-note",
-		style: "margin-top:0;"
-	}, "直接调用 iPhone / 浏览器自带听写与朗读，无需任何 API Key，支持「1号允许」「拒绝」「汇报进度」等常用口令。"), /* @__PURE__ */ k$1("button", {
-		type: "button",
-		class: "primary-block-btn",
-		disabled: activeProf.id === "native",
-		onClick: () => void handleSimpleQuickActivate()
-	}, activeProf.id === "native" ? "✅ 当前已在使用免费本机语音" : "🆓 切回免费本机语音")) : /* @__PURE__ */ k$1("div", { class: "voice-simple-box" }, simpleMatchedCred && /* @__PURE__ */ k$1("div", { class: "voice-saved-hint" }, "🔐 已保存密钥：", simpleMatchedCred.label, " (", simpleMatchedCred.authSummary, ") · 留空可直接启用，或粘贴新 Key 覆盖"), /* @__PURE__ */ k$1("label", {
-		class: "voice-field-label",
-		style: "margin-top:2px;"
-	}, simpleVendor === "gemini" ? "Gemini API Key" : simpleVendor === "deepseek" ? "DeepSeek API Key" : simpleVendor === "ark" ? "火山方舟 Ark API Key" : "OpenAI API Key"), /* @__PURE__ */ k$1("input", {
-		type: "password",
-		class: "voice-field-input",
-		value: simpleApiKey,
-		placeholder: simpleMatchedCred ? "留空沿用已保存密钥，或粘贴新 Key 替换" : simpleVendor === "gemini" ? "例：AIzaSy... 或 AQ.Ab..." : simpleVendor === "deepseek" ? "例：sk-..." : simpleVendor === "ark" ? "粘贴火山方舟控制台 API Key（例：8f3a...）" : "例：sk-proj-...",
-		onInput: (e) => setSimpleApiKey(e.target.value)
-	}), simpleVendor === "ark" && /* @__PURE__ */ k$1(M, null, /* @__PURE__ */ k$1("label", { class: "voice-field-label" }, "模型名或接入点 ID（已填好，可点选或填 ep-xxxx）"), /* @__PURE__ */ k$1("input", {
-		class: "voice-field-input",
-		value: simpleArkModel,
-		placeholder: "例：doubao-seed-2-0-lite-260215 或 ep-2025xxxx",
-		onInput: (e) => setSimpleArkModel(e.target.value)
-	}), /* @__PURE__ */ k$1("div", {
-		class: "voice-chip-row",
-		style: "margin-top:5px;"
-	}, ARK_MODEL_CHIPS.map((chip) => /* @__PURE__ */ k$1("button", {
-		key: chip.value,
-		type: "button",
-		class: `voice-quick-chip ${simpleArkModel === chip.value ? "active" : ""}`,
-		onClick: () => setSimpleArkModel(chip.value)
-	}, chip.label)))), /* @__PURE__ */ k$1("div", { class: "voice-auto-plan-note" }, simpleVendor === "gemini" && "自动配置：听写 + 大脑 gemini-2.5-flash · 播报 Kore 自然女声", simpleVendor === "deepseek" && "自动配置：大脑 deepseek-chat · 听写与播报自动用手机免费语音", simpleVendor === "ark" && `自动配置：大脑火山方舟 (${simpleArkModel.trim() || "doubao-seed-2-0-lite-260215"}) · 听写与播报自动用手机免费语音`, simpleVendor === "openai" && "自动配置：听写 + 大脑 gpt-4o-mini · 播报 alloy 自然人声"), /* @__PURE__ */ k$1("button", {
-		type: "button",
-		class: "primary-block-btn",
-		disabled: simpleSaving,
-		onClick: () => void handleSimpleQuickActivate()
-	}, simpleSaving ? "正在自动配置…" : simpleApiKey.trim() ? "⚡ 保存并立即启用" : simpleMatchedCred ? "⚡ 直接启用已有密钥" : "⚡ 保存并立即启用"))), /* @__PURE__ */ k$1("div", { class: "voice-card" }, /* @__PURE__ */ k$1("div", { class: "voice-toggle-row" }, /* @__PURE__ */ k$1("div", null, /* @__PURE__ */ k$1("div", { class: "voice-row-main" }, "🛡️ 高危操作二次确认"), /* @__PURE__ */ k$1("div", { class: "voice-row-sub" }, "删文件 / 强推 / 部署等危险指令时的保护方式")), /* @__PURE__ */ k$1("select", {
-		class: "voice-mini-select",
-		value: config.prefs.l2Policy,
-		onChange: (e) => void updatePrefPatch({ l2Policy: e.target.value })
-	}, /* @__PURE__ */ k$1("option", { value: "pin" }, "🔢 念 3 位确认码"), /* @__PURE__ */ k$1("option", { value: "screen_only" }, "📱 仅点手机屏幕"))), /* @__PURE__ */ k$1("div", { class: "voice-toggle-row" }, /* @__PURE__ */ k$1("div", null, /* @__PURE__ */ k$1("div", { class: "voice-row-main" }, "🎙️ 播报完自动开麦听我回答"), /* @__PURE__ */ k$1("div", { class: "voice-row-sub" }, "念完选项后自动听 5.5 秒；边听歌时自动压低背景音乐")), /* @__PURE__ */ k$1("input", {
-		type: "checkbox",
-		class: "voice-switch",
-		checked: config.prefs.autoListenAfterBriefing,
-		onChange: (e) => void updatePrefPatch({ autoListenAfterBriefing: e.target.checked })
-	}))), /* @__PURE__ */ k$1("button", {
-		type: "button",
-		class: "voice-adv-entry-btn",
-		onClick: () => openAdvancedMixView()
-	}, /* @__PURE__ */ k$1("div", { style: "min-width:0;" }, /* @__PURE__ */ k$1("div", { class: "voice-adv-entry-title" }, "🎛️ 高级自由混搭（听 · 想 · 说）"), /* @__PURE__ */ k$1("div", { class: "voice-adv-entry-sub" }, "选套餐或直接就地填 Key：火山豆包听/说 + DeepSeek / 方舟大脑、选声音")), /* @__PURE__ */ k$1("span", { class: "voice-adv-entry-go" }, "进入 ›")))) : /* @__PURE__ */ k$1("div", { class: "voice-lab-body" }, loadingCfg && /* @__PURE__ */ k$1("div", { class: "voice-muted-note" }, "正在读取加密配置…"), /* @__PURE__ */ k$1("div", { class: "voice-tab-stack" }, /* @__PURE__ */ k$1("div", {
-		class: "voice-card",
-		style: "padding:10px 11px;"
-	}, /* @__PURE__ */ k$1("div", {
-		class: "voice-card-title",
-		style: "margin-bottom:7px;"
-	}, "⚡ 选一套组合（自动填好下面 3 张卡）"), /* @__PURE__ */ k$1("div", {
-		class: "voice-provider-grid",
-		style: "margin-bottom:0;"
-	}, MIX_COMBO_CARDS.map((combo) => /* @__PURE__ */ k$1("button", {
-		key: combo.id,
-		type: "button",
-		class: `voice-provider-card ${activeComboId === combo.id ? "active" : ""}`,
-		onClick: () => applyMixCombo(combo.id)
-	}, /* @__PURE__ */ k$1("div", { class: "voice-provider-card-title" }, /* @__PURE__ */ k$1("span", null, combo.icon, " ", combo.title)), /* @__PURE__ */ k$1("div", { class: "voice-provider-card-sub" }, combo.sub))))), /* @__PURE__ */ k$1("div", { class: "voice-card voice-brick-card" }, /* @__PURE__ */ k$1("div", { class: "voice-brick-head" }, /* @__PURE__ */ k$1("span", { class: "voice-brick-title" }, "👂 1. 听我说话"), /* @__PURE__ */ k$1("select", {
-		class: "voice-brick-select",
-		value: mix.earVendor,
-		onChange: (e) => {
-			const v = e.target.value;
-			setMix((prev) => ({
-				...prev,
-				earVendor: v,
-				earApiKey: "",
-				mouthReuseKey: prev.mouthVendor === "volcengine_tts" && v === "volcengine_asr" || prev.mouthVendor === "gemini" && (v === "gemini" || prev.brainVendor === "gemini") || prev.mouthVendor === "openai" && (v === "openai" || prev.brainVendor === "openai")
-			}));
-		}
-	}, /* @__PURE__ */ k$1("option", { value: "native" }, "手机自带免费"), /* @__PURE__ */ k$1("option", { value: "volcengine_asr" }, "火山豆包语音"), /* @__PURE__ */ k$1("option", { value: "gemini" }, "Google Gemini"), /* @__PURE__ */ k$1("option", { value: "openai" }, "OpenAI Whisper"))), mix.earVendor === "native" ? /* @__PURE__ */ k$1("div", { class: "voice-brick-note" }, "免费 · 直接用手机自带听写，无需填 Key") : /* @__PURE__ */ k$1("div", { class: "voice-brick-body" }, earSavedCred && /* @__PURE__ */ k$1("div", { class: "voice-brick-saved-row" }, /* @__PURE__ */ k$1("span", { class: "voice-brick-saved-pill" }, "✅ 已存 (", earSavedCred.authSummary, ")"), /* @__PURE__ */ k$1("button", {
-		type: "button",
-		class: "voice-pill-btn",
-		disabled: testingCredId === earSavedCred.id,
-		onClick: () => void handleTestCredential(earSavedCred.id)
-	}, testingCredId === earSavedCred.id ? "测速中…" : "🔌 测一下")), earSavedCred && testResults[earSavedCred.id] && /* @__PURE__ */ k$1("div", { class: `voice-test-msg ${testResults[earSavedCred.id].ok ? "ok" : "err"}` }, testResults[earSavedCred.id].summary), mix.earVendor === "volcengine_asr" && mix.earVolcMode === "appToken" ? /* @__PURE__ */ k$1("div", {
-		class: "voice-two-col",
-		style: "margin-top:6px;"
-	}, /* @__PURE__ */ k$1("input", {
-		class: "voice-field-input",
-		value: mix.earAppId,
-		placeholder: "火山 AppID",
-		onInput: (e) => setMix({
-			...mix,
-			earAppId: e.target.value
-		})
-	}), /* @__PURE__ */ k$1("input", {
-		type: "password",
-		class: "voice-field-input",
-		value: mix.earAccessToken,
-		placeholder: "Access Token",
-		onInput: (e) => setMix({
-			...mix,
-			earAccessToken: e.target.value
-		})
-	})) : /* @__PURE__ */ k$1("input", {
-		type: "password",
-		class: "voice-field-input",
-		style: "margin-top:6px;",
-		value: mix.earApiKey,
-		placeholder: earSavedCred ? "已存 Key 可留空，或粘贴新 Key 替换" : mix.earVendor === "volcengine_asr" ? "粘贴火山「语音技术」API Key" : mix.earVendor === "gemini" ? "粘贴 Gemini Key（例：AIzaSy...）" : "粘贴 OpenAI Key（例：sk-...）",
-		onInput: (e) => setMix({
-			...mix,
-			earApiKey: e.target.value
-		})
-	}), mix.earVendor === "volcengine_asr" && /* @__PURE__ */ k$1("details", { class: "voice-tiny-details" }, /* @__PURE__ */ k$1("summary", null, "用旧版 AppID+Token 或改资源 ID"), /* @__PURE__ */ k$1("div", { class: "voice-adv-body" }, /* @__PURE__ */ k$1("div", {
-		class: "voice-subseg",
-		style: "margin-top:0;"
-	}, /* @__PURE__ */ k$1("button", {
-		type: "button",
-		class: `voice-subseg-btn ${mix.earVolcMode === "apiKey" ? "active" : ""}`,
-		onClick: () => setMix({
-			...mix,
-			earVolcMode: "apiKey"
-		})
-	}, "单把 API Key"), /* @__PURE__ */ k$1("button", {
-		type: "button",
-		class: `voice-subseg-btn ${mix.earVolcMode === "appToken" ? "active" : ""}`,
-		onClick: () => setMix({
-			...mix,
-			earVolcMode: "appToken"
-		})
-	}, "AppID + Token")), /* @__PURE__ */ k$1("label", { class: "voice-field-label" }, "Resource ID（默认 volc.bigasr.auc_turbo）"), /* @__PURE__ */ k$1("input", {
-		class: "voice-field-input",
-		value: mix.earResourceId,
-		placeholder: "volc.bigasr.auc_turbo",
-		onInput: (e) => setMix({
-			...mix,
-			earResourceId: e.target.value
-		})
-	}))))), /* @__PURE__ */ k$1("div", { class: "voice-card voice-brick-card" }, /* @__PURE__ */ k$1("div", { class: "voice-brick-head" }, /* @__PURE__ */ k$1("span", { class: "voice-brick-title" }, "🧠 2. 帮我思考"), /* @__PURE__ */ k$1("select", {
-		class: "voice-brick-select",
-		value: mix.brainVendor,
-		onChange: (e) => {
-			const v = e.target.value;
-			const defModel = v === "deepseek" ? "deepseek-chat" : v === "ark" ? findMixCred("ark", config.credentials)?.defaultModel || "doubao-seed-2-0-lite-260215" : v === "gemini" ? "gemini-2.5-flash" : v === "openai" ? "gpt-4o-mini" : v === "custom" ? "deepseek-chat" : "rule-router";
-			setMix((prev) => ({
-				...prev,
-				brainVendor: v,
-				brainApiKey: "",
-				brainReuseEarGemini: v === "gemini" && prev.earVendor === "gemini",
-				brainModel: defModel
-			}));
-		}
-	}, /* @__PURE__ */ k$1("option", { value: "deepseek" }, "DeepSeek 官方"), /* @__PURE__ */ k$1("option", { value: "ark" }, "火山方舟 Ark (豆包/DS)"), /* @__PURE__ */ k$1("option", { value: "gemini" }, "Google Gemini"), /* @__PURE__ */ k$1("option", { value: "openai" }, "OpenAI 官方"), /* @__PURE__ */ k$1("option", { value: "custom" }, "自定义中转站"), /* @__PURE__ */ k$1("option", { value: "native" }, "本地免费口令"))), mix.brainVendor === "native" ? /* @__PURE__ */ k$1("div", { class: "voice-brick-note" }, "免 Key · 仅支持简单固定口令（「1号允许」「拒绝」「汇报进度」）") : /* @__PURE__ */ k$1("div", { class: "voice-brick-body" }, mix.brainVendor === "gemini" && mix.earVendor === "gemini" ? /* @__PURE__ */ k$1("label", {
-		class: "voice-dual-check",
-		style: "margin:6px 0;"
-	}, /* @__PURE__ */ k$1("input", {
-		type: "checkbox",
-		checked: mix.brainReuseEarGemini,
-		onChange: (e) => setMix({
-			...mix,
-			brainReuseEarGemini: Boolean(e.target.checked)
-		})
-	}), /* @__PURE__ */ k$1("span", null, /* @__PURE__ */ k$1("strong", null, "自动复用上面「耳朵」的 Gemini Key"), "（免贴两遍）")) : null, !(mix.brainVendor === "gemini" && mix.earVendor === "gemini" && mix.brainReuseEarGemini) && /* @__PURE__ */ k$1(M, null, brainSavedCred && /* @__PURE__ */ k$1("div", { class: "voice-brick-saved-row" }, /* @__PURE__ */ k$1("span", { class: "voice-brick-saved-pill" }, "✅ 已存 (", brainSavedCred.authSummary, ")"), /* @__PURE__ */ k$1("button", {
-		type: "button",
-		class: "voice-pill-btn",
-		disabled: testingCredId === brainSavedCred.id,
-		onClick: () => void handleTestCredential(brainSavedCred.id)
-	}, testingCredId === brainSavedCred.id ? "测速中…" : "🔌 测一下")), brainSavedCred && testResults[brainSavedCred.id] && /* @__PURE__ */ k$1("div", { class: `voice-test-msg ${testResults[brainSavedCred.id].ok ? "ok" : "err"}` }, testResults[brainSavedCred.id].summary), mix.brainVendor === "custom" && /* @__PURE__ */ k$1("input", {
-		class: "voice-field-input",
-		style: "margin-top:6px;",
-		value: mix.brainBaseUrl,
-		placeholder: "接口地址，例：https://api.example.com/v1",
-		onInput: (e) => setMix({
-			...mix,
-			brainBaseUrl: e.target.value
-		})
-	}), /* @__PURE__ */ k$1("input", {
-		type: "password",
-		class: "voice-field-input",
-		style: "margin-top:6px;",
-		value: mix.brainApiKey,
-		placeholder: brainSavedCred ? "已存 Key 可留空，或粘贴新 Key 替换" : mix.brainVendor === "deepseek" ? "粘贴 DeepSeek API Key（例：sk-...）" : mix.brainVendor === "ark" ? "粘贴火山方舟 Ark API Key" : mix.brainVendor === "gemini" ? "粘贴 Gemini Key（例：AIzaSy...）" : "粘贴 API Key（例：sk-...）",
-		onInput: (e) => setMix({
-			...mix,
-			brainApiKey: e.target.value
-		})
-	})), /* @__PURE__ */ k$1("div", { style: "margin-top:7px;" }, /* @__PURE__ */ k$1("input", {
-		class: "voice-field-input",
-		value: mix.brainModel,
-		placeholder: mix.brainVendor === "ark" ? "模型名或接入点 ID（例：doubao-seed-2-0-lite-260215 或 ep-xxxx）" : "模型名（已填好，可点下方切换）",
-		onInput: (e) => setMix({
-			...mix,
-			brainModel: e.target.value
-		})
-	}), (() => {
-		const chips = mix.brainVendor === "deepseek" ? DEEPSEEK_MODEL_CHIPS : mix.brainVendor === "ark" ? ARK_MODEL_CHIPS : mix.brainVendor === "gemini" ? BRAIN_MODEL_CHIPS.gemini : mix.brainVendor === "openai" ? OPENAI_MODEL_CHIPS : [];
-		if (!chips.length) return null;
-		return /* @__PURE__ */ k$1("div", {
-			class: "voice-chip-row",
-			style: "margin-top:5px;"
-		}, chips.map((chip) => /* @__PURE__ */ k$1("button", {
-			key: chip.value,
-			type: "button",
-			class: `voice-quick-chip ${mix.brainModel === chip.value ? "active" : ""}`,
-			onClick: () => setMix({
-				...mix,
-				brainModel: chip.value
-			})
-		}, chip.label)));
-	})()))), /* @__PURE__ */ k$1("div", { class: "voice-card voice-brick-card" }, /* @__PURE__ */ k$1("div", { class: "voice-brick-head" }, /* @__PURE__ */ k$1("span", { class: "voice-brick-title" }, "🗣️ 3. 念给我听"), /* @__PURE__ */ k$1("select", {
-		class: "voice-brick-select",
-		value: mix.mouthVendor,
-		onChange: (e) => {
-			const v = e.target.value;
-			const defVoice = v === "volcengine_tts" ? "zh_female_vv_uranus_bigtts" : v === "gemini" ? "Kore" : v === "openai" ? "alloy" : "system-default";
-			setMix((prev) => ({
-				...prev,
-				mouthVendor: v,
-				mouthApiKey: "",
-				mouthVoice: defVoice,
-				mouthReuseKey: v === "volcengine_tts" && prev.earVendor === "volcengine_asr" || v === "gemini" && (prev.earVendor === "gemini" || prev.brainVendor === "gemini") || v === "openai" && (prev.earVendor === "openai" || prev.brainVendor === "openai")
-			}));
-		}
-	}, /* @__PURE__ */ k$1("option", { value: "native" }, "手机自带免费"), /* @__PURE__ */ k$1("option", { value: "volcengine_tts" }, "火山豆包人声"), /* @__PURE__ */ k$1("option", { value: "gemini" }, "Google Gemini"), /* @__PURE__ */ k$1("option", { value: "openai" }, "OpenAI 语音"))), mix.mouthVendor === "native" ? /* @__PURE__ */ k$1("div", { class: "voice-brick-note" }, "免费零延迟 · 直接用手机自带朗读") : /* @__PURE__ */ k$1("div", { class: "voice-brick-body" }, (() => {
-		const canReuseEarVolc = mix.mouthVendor === "volcengine_tts" && mix.earVendor === "volcengine_asr";
-		const canReuseGemini = mix.mouthVendor === "gemini" && (mix.earVendor === "gemini" || mix.brainVendor === "gemini");
-		const canReuseOpenAi = mix.mouthVendor === "openai" && (mix.earVendor === "openai" || mix.brainVendor === "openai");
-		const canReuse = canReuseEarVolc || canReuseGemini || canReuseOpenAi;
-		const reuseLabel = canReuseEarVolc ? "自动复用上面「耳朵」的火山语音 Key（免贴两遍）" : canReuseGemini ? "自动复用上面的 Gemini Key（免贴两遍）" : "自动复用上面的 OpenAI Key（免贴两遍）";
-		return /* @__PURE__ */ k$1(M, null, canReuse && /* @__PURE__ */ k$1("label", {
-			class: "voice-dual-check",
-			style: "margin:6px 0;"
-		}, /* @__PURE__ */ k$1("input", {
-			type: "checkbox",
-			checked: mix.mouthReuseKey,
-			onChange: (e) => setMix({
-				...mix,
-				mouthReuseKey: Boolean(e.target.checked)
-			})
-		}), /* @__PURE__ */ k$1("span", null, /* @__PURE__ */ k$1("strong", null, reuseLabel))), !(canReuse && mix.mouthReuseKey) && /* @__PURE__ */ k$1(M, null, mouthSavedCred && /* @__PURE__ */ k$1("div", { class: "voice-brick-saved-row" }, /* @__PURE__ */ k$1("span", { class: "voice-brick-saved-pill" }, "✅ 已存 (", mouthSavedCred.authSummary, ")"), /* @__PURE__ */ k$1("button", {
-			type: "button",
-			class: "voice-pill-btn",
-			disabled: testingCredId === mouthSavedCred.id,
-			onClick: () => void handleTestCredential(mouthSavedCred.id)
-		}, testingCredId === mouthSavedCred.id ? "测速中…" : "🔌 测一下")), mouthSavedCred && testResults[mouthSavedCred.id] && /* @__PURE__ */ k$1("div", { class: `voice-test-msg ${testResults[mouthSavedCred.id].ok ? "ok" : "err"}` }, testResults[mouthSavedCred.id].summary), mix.mouthVendor === "volcengine_tts" && mix.mouthVolcMode === "appToken" ? /* @__PURE__ */ k$1("div", {
-			class: "voice-two-col",
-			style: "margin-top:6px;"
-		}, /* @__PURE__ */ k$1("input", {
-			class: "voice-field-input",
-			value: mix.mouthAppId,
-			placeholder: "火山 AppID",
-			onInput: (e) => setMix({
-				...mix,
-				mouthAppId: e.target.value
-			})
-		}), /* @__PURE__ */ k$1("input", {
-			type: "password",
-			class: "voice-field-input",
-			value: mix.mouthAccessToken,
-			placeholder: "Access Token",
-			onInput: (e) => setMix({
-				...mix,
-				mouthAccessToken: e.target.value
-			})
-		})) : /* @__PURE__ */ k$1("input", {
-			type: "password",
-			class: "voice-field-input",
-			style: "margin-top:6px;",
-			value: mix.mouthApiKey,
-			placeholder: mouthSavedCred ? "已存 Key 可留空，或粘贴新 Key 替换" : mix.mouthVendor === "volcengine_tts" ? "粘贴火山「语音技术」API Key" : mix.mouthVendor === "gemini" ? "粘贴 Gemini Key（例：AIzaSy...）" : "粘贴 OpenAI Key（例：sk-...）",
-			onInput: (e) => setMix({
-				...mix,
-				mouthApiKey: e.target.value
-			})
-		})), (() => {
-			const voiceList = TTS_VOICE_CHIPS[mix.mouthVendor === "openai" ? "openai_compat" : mix.mouthVendor] || [];
-			if (!voiceList.length) return null;
-			return /* @__PURE__ */ k$1("div", { style: "margin-top:6px;" }, /* @__PURE__ */ k$1("div", { class: "voice-brick-sub-label" }, "挑个声音"), /* @__PURE__ */ k$1("div", {
-				class: "voice-chip-row",
-				style: "margin-top:4px;"
-			}, voiceList.map((v) => /* @__PURE__ */ k$1("button", {
-				key: v.value,
-				type: "button",
-				class: `voice-quick-chip ${mix.mouthVoice === v.value ? "active" : ""}`,
-				onClick: () => setMix({
-					...mix,
-					mouthVoice: v.value
-				})
-			}, v.label))));
-		})(), mix.mouthVendor === "volcengine_tts" && /* @__PURE__ */ k$1("details", { class: "voice-tiny-details" }, /* @__PURE__ */ k$1("summary", null, "自定义音色代码 / Resource ID (seed-tts-2.0)"), /* @__PURE__ */ k$1("div", { class: "voice-adv-body" }, !(canReuse && mix.mouthReuseKey) && /* @__PURE__ */ k$1("div", {
-			class: "voice-subseg",
-			style: "margin-top:0;"
-		}, /* @__PURE__ */ k$1("button", {
-			type: "button",
-			class: `voice-subseg-btn ${mix.mouthVolcMode === "apiKey" ? "active" : ""}`,
-			onClick: () => setMix({
-				...mix,
-				mouthVolcMode: "apiKey"
-			})
-		}, "单把 API Key"), /* @__PURE__ */ k$1("button", {
-			type: "button",
-			class: `voice-subseg-btn ${mix.mouthVolcMode === "appToken" ? "active" : ""}`,
-			onClick: () => setMix({
-				...mix,
-				mouthVolcMode: "appToken"
-			})
-		}, "AppID + Token")), /* @__PURE__ */ k$1("label", { class: "voice-field-label" }, "音色代码"), /* @__PURE__ */ k$1("input", {
-			class: "voice-field-input",
-			value: mix.mouthVoice,
-			placeholder: "zh_female_vv_uranus_bigtts",
-			onInput: (e) => setMix({
-				...mix,
-				mouthVoice: e.target.value
-			})
-		}), /* @__PURE__ */ k$1("label", { class: "voice-field-label" }, "Resource ID"), /* @__PURE__ */ k$1("input", {
-			class: "voice-field-input",
-			value: mix.mouthResourceId,
-			placeholder: "seed-tts-2.0",
-			onInput: (e) => setMix({
-				...mix,
-				mouthResourceId: e.target.value
-			})
-		}))));
-	})())), (mixStatusMsg || soundCheckMsg) && /* @__PURE__ */ k$1("div", {
-		class: `voice-test-msg ${(mixStatusMsg || soundCheckMsg).ok ? "ok" : "err"}`,
-		style: "margin-top:0;padding:8px 10px;"
-	}, (mixStatusMsg || soundCheckMsg).text), /* @__PURE__ */ k$1("div", { style: "display:flex;gap:8px;align-items:center;" }, /* @__PURE__ */ k$1("button", {
-		type: "button",
-		class: "primary-block-btn",
-		style: "margin-top:0;flex:1;",
-		disabled: mixSaving,
-		onClick: () => void handleSaveMixDraft()
-	}, mixSaving ? "正在加密保存并生效…" : "💾 保存并立即生效"), /* @__PURE__ */ k$1("button", {
-		type: "button",
-		class: "voice-pill-btn",
-		style: "padding:11px 14px;font-size:12.5px;",
-		disabled: soundChecking,
-		onClick: () => void handleQuickSoundCheck()
-	}, soundChecking ? "试音中…" : "🔊 试听")), /* @__PURE__ */ k$1("details", {
-		class: "voice-adv-details",
-		open: geekOpen,
-		onToggle: (e) => setGeekOpen(Boolean(e.currentTarget?.open))
-	}, /* @__PURE__ */ k$1("summary", null, "🔧 极客排障（聊天页开关 / 密钥清理 / 延迟压测）"), /* @__PURE__ */ k$1("div", {
-		class: "voice-adv-body",
-		style: "display:flex;flex-direction:column;gap:10px;"
-	}, /* @__PURE__ */ k$1("div", null, /* @__PURE__ */ k$1("div", { class: "voice-toggle-row" }, /* @__PURE__ */ k$1("div", null, /* @__PURE__ */ k$1("div", { class: "voice-row-main" }, "🎵 边听歌边播报（Safari 压低混音）"), /* @__PURE__ */ k$1("div", { class: "voice-row-sub" }, "播报时自动压低背景音乐，说完恢复")), /* @__PURE__ */ k$1("input", {
-		type: "checkbox",
-		class: "voice-switch",
-		checked: config.prefs.duckMusicMode,
-		onChange: (e) => void updatePrefPatch({ duckMusicMode: e.target.checked })
-	})), /* @__PURE__ */ k$1("div", { class: "voice-toggle-row" }, /* @__PURE__ */ k$1("div", null, /* @__PURE__ */ k$1("div", { class: "voice-row-main" }, "聊天页「🔊 播报」复用云端声音"), /* @__PURE__ */ k$1("div", { class: "voice-row-sub" }, "默认用免费系统语音；开启后用上面选好的嘴巴播报")), /* @__PURE__ */ k$1("input", {
-		type: "checkbox",
-		class: "voice-switch",
-		checked: config.prefs.useByokForChatTts,
-		onChange: (e) => void updatePrefPatch({ useByokForChatTts: e.target.checked })
-	})), /* @__PURE__ */ k$1("div", { class: "voice-toggle-row" }, /* @__PURE__ */ k$1("div", null, /* @__PURE__ */ k$1("div", { class: "voice-row-main" }, "聊天页语音输入复用云端听写"), /* @__PURE__ */ k$1("div", { class: "voice-row-sub" }, "默认用免费系统听写；开启后用上面选好的耳朵转写")), /* @__PURE__ */ k$1("input", {
-		type: "checkbox",
-		class: "voice-switch",
-		checked: config.prefs.useByokForChatStt,
-		onChange: (e) => void updatePrefPatch({ useByokForChatStt: e.target.checked })
-	}))), config.credentials.length > 0 && /* @__PURE__ */ k$1("div", { style: "border-top:1px solid var(--border);padding-top:8px;" }, /* @__PURE__ */ k$1("div", {
-		class: "voice-field-label",
-		style: "margin-top:0;"
-	}, "已加密保存的密钥 (", config.credentials.length, ")"), config.credentials.map((c) => /* @__PURE__ */ k$1("div", {
-		key: c.id,
-		class: "voice-cred-item"
-	}, /* @__PURE__ */ k$1("div", { style: "flex:1;min-width:0;" }, /* @__PURE__ */ k$1("div", { class: "voice-cred-title" }, /* @__PURE__ */ k$1("span", { class: "voice-prov-tag" }, PROVIDER_DISPLAY_NAMES[c.provider] || c.provider), /* @__PURE__ */ k$1("span", null, c.label)), /* @__PURE__ */ k$1("div", { class: "voice-cred-sub" }, c.authSummary)), /* @__PURE__ */ k$1("button", {
-		type: "button",
-		class: "voice-pill-btn danger",
-		onClick: () => void handleDeleteCredential(c.id)
-	}, "删")))), /* @__PURE__ */ k$1("div", { style: "border-top:1px solid var(--border);padding-top:8px;" }, /* @__PURE__ */ k$1("div", {
-		class: "voice-toggle-row",
-		style: "padding-top:0;"
-	}, /* @__PURE__ */ k$1("div", null, /* @__PURE__ */ k$1("div", { class: "voice-row-main" }, "🧪 安全试跑压测 (Dry-Run)"), /* @__PURE__ */ k$1("div", { class: "voice-row-sub" }, "排查哪一步慢或报错，绝不会真的遥控电脑")), /* @__PURE__ */ k$1("input", {
-		type: "checkbox",
-		class: "voice-switch",
-		checked: benchDryRun,
-		onChange: (e) => setBenchDryRun(e.target.checked)
-	})), /* @__PURE__ */ k$1("input", {
-		class: "voice-field-input",
-		value: benchText,
-		onInput: (e) => setBenchText(e.target.value),
-		placeholder: "输入一句测试口令..."
-	}), /* @__PURE__ */ k$1("div", { style: "display:flex;gap:8px;margin-top:6px;" }, /* @__PURE__ */ k$1("button", {
-		type: "button",
-		class: "voice-pill-btn primary",
-		style: "flex:1;padding:8px 10px;",
-		disabled: benchRunning,
-		onClick: () => void runBenchTurn()
-	}, benchRunning ? "⏳ 测速中…" : "🚀 跑一轮延迟压测"), /* @__PURE__ */ k$1("button", {
-		type: "button",
-		class: `voice-pill-btn ${benchRecording ? "danger" : ""}`,
-		style: "padding:8px 10px;",
-		disabled: benchRunning,
-		onClick: () => void toggleBenchVoiceCapture()
-	}, benchRecording ? "⏹ 停止" : "🎙️ 录真声")), benchReport && /* @__PURE__ */ k$1("div", { style: "margin-top:8px;" }, /* @__PURE__ */ k$1("div", { class: "voice-metrics-grid" }, benchReport.stt && /* @__PURE__ */ k$1("div", { class: "voice-metric-box" }, /* @__PURE__ */ k$1("div", { class: "voice-metric-k" }, "听写"), /* @__PURE__ */ k$1("div", { class: "voice-metric-v" }, benchReport.stt.latencyMs ?? 0, "ms")), benchReport.turn && /* @__PURE__ */ k$1("div", { class: "voice-metric-box" }, /* @__PURE__ */ k$1("div", { class: "voice-metric-k" }, "大脑"), /* @__PURE__ */ k$1("div", { class: "voice-metric-v" }, benchReport.turn.latencyMs ?? 0, "ms")), benchReport.tts && /* @__PURE__ */ k$1("div", { class: "voice-metric-box" }, /* @__PURE__ */ k$1("div", { class: "voice-metric-k" }, "播报"), /* @__PURE__ */ k$1("div", { class: "voice-metric-v" }, benchReport.tts.latencyMs ?? 0, "ms"))), (benchReport.stt?.error || benchReport.turn?.error || benchReport.tts?.error) && /* @__PURE__ */ k$1("div", {
-		class: "voice-test-msg err",
-		style: "margin-top:6px;"
-	}, benchReport.stt?.error || benchReport.turn?.error || benchReport.tts?.error), benchReport.turn?.spokenReply && /* @__PURE__ */ k$1("div", {
-		class: "voice-bench-reply",
-		style: "margin-top:6px;"
-	}, benchReport.turn.spokenReply))))))))));
+	}, config.prefs.autoVad ? "🟢 自动停顿发送" : "⚪ 手动点停")))), /* @__PURE__ */ k$1(VoiceProviderSheet, {
+		open: labOpen,
+		onClose: () => setLabOpen(false),
+		config,
+		loadingCfg,
+		initialView: labInitialView,
+		onConfigChange: handleConfigChange,
+		onUpdatePrefs: updatePrefPatch,
+		onSoundCheck: handleQuickSoundCheck,
+		soundChecking,
+		soundCheckMsg,
+		onClearSoundCheckMsg: () => setSoundCheckMsg(null),
+		onRunBenchTurn: () => runBenchTurn(),
+		onToggleBenchVoice: toggleBenchVoiceCapture,
+		benchDryRun,
+		onSetBenchDryRun: setBenchDryRun,
+		benchText,
+		onSetBenchText: setBenchText,
+		benchRunning,
+		benchRecording,
+		benchReport,
+		apiCall,
+		toast
+	}));
 }
 // hub/web/src/App.tsx
 var HARNESS_SVG_SPRITE = `<svg id="dshHarnessSvgDefs" width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
@@ -4423,6 +4176,875 @@ function isStandaloneForHint() {
 }
 function shouldShowInstallHint({ isIos, isStandalone, dismissed } = {}) {
 	return Boolean(isIos) && !isStandalone && !dismissed;
+}
+// hub/web/src/settings/settings-panel.js
+var SETTINGS_SUBPAGE_TITLES = {
+	host_detail: "电脑详情与控制",
+	add_host: "添加电脑与手机扫码",
+	push: "手机锁屏通知",
+	security: "设备审批与安全防护",
+	password: "密码与配对登录",
+	shares: "加密分享记录",
+	capabilities: "各 AI 工具能力说明"
+};
+function computePushBadgeMeta(statusText = "") {
+	const s = String(statusText || "");
+	if (!s || s.includes("正在检测")) return {
+		text: "检测中…",
+		tone: "muted"
+	};
+	if (s.includes("已开启")) return {
+		text: "✅ 已开启",
+		tone: "green"
+	};
+	if (s.includes("被拒绝")) return {
+		text: "🚫 权限被拒",
+		tone: "red"
+	};
+	if (s.includes("不支持")) return {
+		text: "需主屏幕",
+		tone: "amber"
+	};
+	if (s.includes("未开启")) return {
+		text: "未开启",
+		tone: "amber"
+	};
+	if (s.includes("失败")) return {
+		text: "状态异常",
+		tone: "red"
+	};
+	return {
+		text: "查看状态",
+		tone: "muted"
+	};
+}
+function createSettingsPanel(deps) {
+	let activeSubpage = "home";
+	let activeHostId = "";
+	let lastRenderedKey = "";
+	let savedHomeScrollTop = 0;
+	function getVoiceConfig() {
+		if (typeof deps.getVoiceConfig === "function") return deps.getVoiceConfig();
+		return typeof window !== "undefined" ? window.__dshVoiceConfig || null : null;
+	}
+	function invalidate() {
+		lastRenderedKey = "";
+	}
+	function getActiveSubpage() {
+		return activeSubpage;
+	}
+	function openSubpage(page, param = "") {
+		if (!new Set(Object.keys(SETTINGS_SUBPAGE_TITLES)).has(page)) {
+			closeSubpage();
+			return;
+		}
+		const viewport = deps.getViewport?.();
+		if (activeSubpage === "home" && viewport) savedHomeScrollTop = viewport.scrollTop || 0;
+		activeSubpage = page;
+		activeHostId = page === "host_detail" ? String(param || "") : "";
+		lastRenderedKey = "";
+		if (viewport) render(viewport, { scrollToTop: true });
+	}
+	function closeSubpage() {
+		if (activeSubpage === "home") return;
+		activeSubpage = "home";
+		activeHostId = "";
+		lastRenderedKey = "";
+		const viewport = deps.getViewport?.();
+		if (viewport) render(viewport, { restoreHomeScroll: true });
+	}
+	function syncPushSummaryBadge(statusText = "") {
+		if (typeof document === "undefined") return;
+		const badge = document.getElementById("settingsPushSummaryBadge");
+		if (!badge) return;
+		const meta = computePushBadgeMeta(statusText);
+		badge.textContent = meta.text;
+		badge.className = `settings-status-pill tone-${meta.tone}`;
+	}
+	function buildSignature(state, voiceSummary) {
+		const { hubState, themePref, langPref, cachedPushStatusText, upgradingHostMap, tokenTail } = state;
+		const hosts = hubState.hosts || [];
+		const shares = hubState.shares || [];
+		const buildInfo = hubState.build || {};
+		const secSum = hubState.securitySummary || {
+			total24h: 0,
+			high24h: 0,
+			uniqueIps24h: 0,
+			recentEvents: []
+		};
+		const ac = hubState.accessControl || {
+			deviceApprovalEnabled: false,
+			trustedDevices: [],
+			pendingDeviceLogins: [],
+			pendingHosts: []
+		};
+		return JSON.stringify({
+			subpage: activeSubpage,
+			activeHostId,
+			themePref,
+			langPref,
+			voiceSummary,
+			pushBadge: computePushBadgeMeta(cachedPushStatusText).text,
+			tokenTail,
+			enrollmentCode: hubState.enrollment?.code || "",
+			joinedCount: hubState.enrollment?.joinedCount || 0,
+			pushCount: (hubState.pushSubscriptions || []).length,
+			secSig: `${secSum.total24h}:${secSum.high24h}:${(secSum.recentEvents || []).length}:${secSum.recentEvents?.[0]?.id || ""}`,
+			acSig: `${ac.deviceApprovalEnabled ? 1 : 0}:${(ac.trustedDevices || []).length}:${(ac.pendingDeviceLogins || []).map((x) => x.id).join(",")}:${(ac.pendingHosts || []).map((x) => x.hostId).join(",")}`,
+			build: buildInfo.uiBuild || buildInfo.version || "",
+			hosts: hosts.map((h) => ({
+				id: h.hostId,
+				name: h.hostName,
+				online: deps.isHostLiveOnline(h),
+				trustStatus: h.trustStatus || h.trust?.status || "",
+				hasDedicatedToken: Boolean(h.hasDedicatedToken),
+				isFeishuActive: h.isFeishuActive,
+				remoteActive: h.remoteActive,
+				taskCount: (h.bridgeState?.tasks || []).length,
+				runningCount: h.runningCount || 0,
+				totalBytesBucket: activeSubpage === "host_detail" && activeHostId === h.hostId ? Math.round((h.totalBytes || 0) / 10240) : 0,
+				agentVersion: h.bridgeState?.agentVersion || "",
+				upgrading: Boolean(upgradingHostMap[h.hostId] && Date.now() - upgradingHostMap[h.hostId] < 45e3),
+				turbo: h.bridgeState?.turbo?.engineLabel || "",
+				power: h.bridgeState?.systemTelemetry?.power?.shortLabel || "",
+				net: h.bridgeState?.systemTelemetry?.network?.kindLabel || "",
+				shareUrl: h.lastShareResult?.shareUrl || ""
+			})),
+			shares: shares.map((s) => ({
+				id: s.id || s.shareId,
+				at: s.createdAt
+			}))
+		});
+	}
+	function renderSubpageHeaderHtml(title) {
+		return `
+      <div class="settings-sub-header">
+        <button
+          type="button"
+          class="settings-sub-back"
+          id="settingsSubBackBtn"
+          onclick="closeSettingsSubpage()"
+        >
+          ‹ 设置
+        </button>
+        <div class="settings-sub-title">${deps.esc(title)}</div>
+        <div class="settings-sub-spacer"></div>
+      </div>
+    `;
+	}
+	function renderHomeHtml(state, voiceSummary) {
+		const { hubState, themePref, langPref, cachedPushStatusText, upgradingHostMap } = state;
+		const hosts = hubState.hosts || [];
+		const shares = hubState.shares || [];
+		const buildInfo = hubState.build || {};
+		const hubVer = String(buildInfo.version || "0.9.20");
+		const secSum = hubState.securitySummary || {
+			total24h: 0,
+			high24h: 0,
+			uniqueIps24h: 0,
+			recentEvents: []
+		};
+		const ac = hubState.accessControl || {
+			deviceApprovalEnabled: false,
+			trustedDevices: [],
+			pendingDeviceLogins: [],
+			pendingHosts: []
+		};
+		const pendingCount = (ac.pendingDeviceLogins || []).length + (ac.pendingHosts || []).length;
+		const onlineCount = hosts.filter((h) => deps.isHostLiveOnline(h) && (h.trustStatus || h.trust?.status) !== "revoked").length;
+		const enrollmentCode = hubState.enrollment?.code || "";
+		const pushBadge = computePushBadgeMeta(cachedPushStatusText);
+		const securityBadge = secSum.total24h > 0 ? {
+			text: `🚨 ${secSum.total24h} 次拦截`,
+			tone: "red"
+		} : pendingCount > 0 ? {
+			text: `⏳ ${pendingCount} 待审批`,
+			tone: "amber"
+		} : ac.deviceApprovalEnabled ? {
+			text: "🛡️ 已保护",
+			tone: "green"
+		} : {
+			text: "未开启",
+			tone: "amber"
+		};
+		const hostRowsHtml = hosts.length > 0 ? hosts.map((h) => {
+			const isRevoked = (h.trustStatus || h.trust?.status) === "revoked";
+			const isHostLive = deps.isHostLiveOnline(h);
+			const tm = deps.formatHostTelemetry(h);
+			const sessCount = (h.bridgeState?.tasks || []).length;
+			const runCount = h.runningCount || 0;
+			const hostVer = String(h.bridgeState?.agentVersion || "");
+			const isUpgradingHost = Boolean(upgradingHostMap[h.hostId] && Date.now() - upgradingHostMap[h.hostId] < 45e3);
+			const isHostOutdated = Boolean(isHostLive && !isRevoked && (!hostVer || deps.compareSemver(hostVer, hubVer) < 0));
+			const subLine = isHostLive ? `${tm.powerIcon} ${deps.esc(tm.powerShort)} · ${tm.netIcon} ${deps.esc(tm.netShort)} · ${sessCount} 会话${runCount > 0 ? ` · <strong style="color:var(--green);">${runCount} 运行中</strong>` : ""}` : `⚪ 已离线 (${deps.formatTime(h.lastSeen)}) · ${sessCount} 会话`;
+			return `
+          <div
+            class="settings-nav-row settings-host-row"
+            data-settings-host="${deps.esc(h.hostId)}"
+            onclick="openSettingsSubpage('host_detail', '${deps.escJsStr(h.hostId)}')"
+          >
+            <div class="settings-nav-main">
+              <div class="settings-nav-title-line">
+                <span class="status-dot ${isHostLive && !isRevoked ? "" : "offline"}"></span>
+                <span class="settings-nav-title">${deps.esc(h.hostName)}</span>
+                ${h.isFeishuActive ? `<span class="settings-mini-tag tone-blue">主控</span>` : ""}
+                ${isRevoked ? `<span class="settings-mini-tag tone-red">已吊销</span>` : ""}
+                ${isUpgradingHost ? `<span class="settings-mini-tag tone-amber">升级中…</span>` : ""}
+              </div>
+              <div class="settings-nav-sub">${subLine}</div>
+            </div>
+            <div class="settings-nav-right">
+              ${isHostOutdated && !isUpgradingHost ? `
+                <button
+                  type="button"
+                  class="pill-action-btn primary"
+                  style="padding:4px 9px;font-size:11.5px;"
+                  onclick="event.stopPropagation(); upgradeHostTurbo('${deps.escJsStr(h.hostId)}', '${deps.escJsStr(h.hostName)}')"
+                >⬆️ 升级</button>
+              ` : ""}
+              <span class="settings-chevron">›</span>
+            </div>
+          </div>
+        `;
+		}).join("") : `
+        <div class="settings-nav-row" onclick="openSettingsSubpage('add_host')">
+          <div class="settings-nav-main">
+            <div class="settings-nav-title">暂未接入在线电脑</div>
+            <div class="settings-nav-sub">点下方「添加新电脑」复制一行命令即可秒连</div>
+          </div>
+          <span class="settings-chevron">›</span>
+        </div>
+      `;
+		const buildCopyPayload = `DSH Hub v${hubVer} (${buildInfo.uiBuild || "dev"}) · started ${buildInfo.startedAt ? new Date(buildInfo.startedAt).toISOString() : ""}`;
+		return `
+      <div class="settings-wrap settings-grouped-home">
+        <!-- 分组 1：电脑与连接 -->
+        <section class="settings-group" data-settings-group="hosts">
+          <div class="settings-group-header">
+            <div class="settings-group-title">电脑与连接</div>
+            <div class="settings-group-meta">${hosts.length ? `${onlineCount}/${hosts.length} 台在线` : "未连接"}</div>
+          </div>
+          <div class="settings-card">
+            ${hostRowsHtml}
+            <div
+              class="settings-nav-row settings-add-host-row"
+              data-settings-row="add_host"
+              onclick="openSettingsSubpage('add_host')"
+            >
+              <div class="settings-nav-main">
+                <div class="settings-nav-title" style="color:var(--primary);">➕ 添加新电脑 / 手机扫码登录</div>
+                <div class="settings-nav-sub">复制一行安装命令或生成新设备配对码</div>
+              </div>
+              <div class="settings-nav-right">
+                ${enrollmentCode ? `<span class="settings-code-chip">${deps.esc(enrollmentCode)}</span>` : ""}
+                <span class="settings-chevron">›</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-card" style="margin-top:10px;">
+            <div
+              class="settings-nav-row"
+              data-settings-row="migrate"
+              onclick="openMigrateWizard()"
+            >
+              <div class="settings-nav-main">
+                <div class="settings-nav-title">📦 多电脑协同与一键迁移</div>
+                <div class="settings-nav-sub">将源电脑会话打包同步至目标电脑</div>
+              </div>
+              <div class="settings-nav-right">
+                <span class="settings-nav-meta">${hosts.length >= 2 ? `${hosts.length} 台可用` : "需 ≥2 台"}</span>
+                <span class="settings-chevron">›</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 分组 2：模型与偏好 -->
+        <section class="settings-group" data-settings-group="model-prefs">
+          <div class="settings-group-header">
+            <div class="settings-group-title">模型与偏好</div>
+          </div>
+          <div class="settings-card">
+            <div
+              class="settings-nav-row"
+              data-settings-row="voice"
+              onclick="openVoiceLab('list')"
+            >
+              <div class="settings-nav-main">
+                <div class="settings-nav-title-line">
+                  <span class="settings-nav-title">🎧 边走边听 · 语音总管</span>
+                  <span class="settings-mini-tag tone-blue">试用</span>
+                </div>
+                <div class="settings-nav-sub" id="settingsVoiceSummaryText">${deps.esc(voiceSummary)}</div>
+              </div>
+              <div class="settings-nav-right">
+                <button
+                  type="button"
+                  class="pill-action-btn primary"
+                  style="padding:5px 10px;font-size:12px;"
+                  onclick="event.stopPropagation(); openWalkMode()"
+                >🎧 进入</button>
+                <span class="settings-chevron">›</span>
+              </div>
+            </div>
+
+            <div
+              class="settings-nav-row"
+              data-settings-row="push"
+              onclick="openSettingsSubpage('push')"
+            >
+              <div class="settings-nav-main">
+                <div class="settings-nav-title">🔔 手机锁屏通知</div>
+                <div class="settings-nav-sub">待审批、任务完成与安全告警实时弹窗</div>
+              </div>
+              <div class="settings-nav-right">
+                <span id="settingsPushSummaryBadge" class="settings-status-pill tone-${pushBadge.tone}">${deps.esc(pushBadge.text)}</span>
+                <span class="settings-chevron">›</span>
+              </div>
+            </div>
+
+            <div class="settings-item" style="gap:8px;">
+              <div style="min-width:0;flex:1;">
+                <div class="settings-item-title" style="white-space:nowrap;">🌐 界面语言</div>
+              </div>
+              <div class="theme-seg-group">
+                <button type="button" class="theme-seg-btn ${langPref === "zh" ? "active" : ""}" onclick="setLangPreference('zh')">🇨🇳 中文</button>
+                <button type="button" class="theme-seg-btn ${langPref === "en" ? "active" : ""}" onclick="setLangPreference('en')">🇺🇸 EN</button>
+              </div>
+            </div>
+
+            <div class="settings-item" style="gap:8px;">
+              <div style="min-width:0;flex:1;">
+                <div class="settings-item-title" style="white-space:nowrap;">🎨 外观主题</div>
+              </div>
+              <div class="theme-seg-group">
+                <button type="button" class="theme-seg-btn ${themePref === "system" ? "active" : ""}" onclick="setThemePreference('system')">跟随</button>
+                <button type="button" class="theme-seg-btn ${themePref === "light" ? "active" : ""}" onclick="setThemePreference('light')">☀️ 浅</button>
+                <button type="button" class="theme-seg-btn ${themePref === "dark" ? "active" : ""}" onclick="setThemePreference('dark')">🌙 深</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 分组 3：安全与隐私 -->
+        <section class="settings-group" data-settings-group="security">
+          <div class="settings-group-header">
+            <div class="settings-group-title">安全与隐私</div>
+          </div>
+          <div class="settings-card">
+            <div
+              class="settings-nav-row"
+              data-settings-row="security"
+              onclick="openSettingsSubpage('security')"
+            >
+              <div class="settings-nav-main">
+                <div class="settings-nav-title">🛡️ 设备审批与安全防护</div>
+                <div class="settings-nav-sub">已信任 ${(ac.trustedDevices || []).length} 台设备 · 异常探测实时拦截</div>
+              </div>
+              <div class="settings-nav-right">
+                <span class="settings-status-pill tone-${securityBadge.tone}">${deps.esc(securityBadge.text)}</span>
+                <span class="settings-chevron">›</span>
+              </div>
+            </div>
+
+            <div
+              class="settings-nav-row"
+              data-settings-row="password"
+              onclick="openSettingsSubpage('password')"
+            >
+              <div class="settings-nav-main">
+                <div class="settings-nav-title">🔑 密码与配对登录</div>
+                <div class="settings-nav-sub">6 位免密配对码 · 修改密码 · 锁定当前浏览器</div>
+              </div>
+              <div class="settings-nav-right">
+                <span class="settings-chevron">›</span>
+              </div>
+            </div>
+
+            <div
+              class="settings-nav-row"
+              data-settings-row="shares"
+              onclick="openSettingsSubpage('shares')"
+            >
+              <div class="settings-nav-main">
+                <div class="settings-nav-title">🔐 加密分享记录</div>
+                <div class="settings-nav-sub">端到端加密回放链接管理与销毁</div>
+              </div>
+              <div class="settings-nav-right">
+                <span class="settings-nav-meta">${shares.length} 条</span>
+                <span class="settings-chevron">›</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 分组 4：关于与工具 -->
+        <section class="settings-group" data-settings-group="about">
+          <div class="settings-group-header">
+            <div class="settings-group-title">关于与工具</div>
+          </div>
+          <div class="settings-card">
+            <div
+              class="settings-nav-row"
+              data-settings-row="capabilities"
+              onclick="openSettingsSubpage('capabilities')"
+            >
+              <div class="settings-nav-main">
+                <div class="settings-nav-title">📊 各 AI 工具能力说明</div>
+                <div class="settings-nav-sub">查看各后端支持看会话、发指令、审批与插话范围</div>
+              </div>
+              <div class="settings-nav-right">
+                <span class="settings-chevron">›</span>
+              </div>
+            </div>
+
+            <div
+              class="settings-nav-row"
+              data-settings-row="reload"
+              onclick="forceHardUpgradeReload()"
+            >
+              <div class="settings-nav-main">
+                <div class="settings-nav-title">🔄 强制刷新前端版本</div>
+                <div class="settings-nav-sub">清除本地缓存并拉取最新页面</div>
+              </div>
+              <div class="settings-nav-right">
+                <span class="settings-nav-meta">v${deps.esc(hubVer)}</span>
+                <span class="settings-chevron">›</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <div class="settings-version-footer">
+          <div
+            style="cursor:pointer;user-select:none;"
+            onclick="copyCodeText('${deps.escUriJsStr(buildCopyPayload)}', '📋 版本信息已复制')"
+          >
+            DSH 远控总控台 v${deps.esc(hubVer)} · 构建 <code>${deps.esc(buildInfo.uiBuild || "dev")}</code>${buildInfo.startedAt ? " · 云端启动于 " + deps.formatTime(buildInfo.startedAt) : ""}
+          </div>
+        </div>
+      </div>
+    `;
+	}
+	function renderHostDetailSubpageHtml(state) {
+		const { hubState, upgradingHostMap } = state;
+		const hosts = hubState.hosts || [];
+		const buildInfo = hubState.build || {};
+		const hubVer = String(buildInfo.version || "0.9.20");
+		const h = hosts.find((item) => item.hostId === activeHostId) || hosts[0];
+		if (!h) return `
+        <div class="settings-wrap settings-subpage-wrap">
+          ${renderSubpageHeaderHtml("电脑详情")}
+          <div class="settings-card" style="padding:20px;text-align:center;color:var(--muted);">
+            该电脑当前已不在列表中，请返回设置首页查看。
+          </div>
+        </div>
+      `;
+		const isRevoked = (h.trustStatus || h.trust?.status) === "revoked";
+		const isHostLive = deps.isHostLiveOnline(h);
+		const tm = deps.formatHostTelemetry(h);
+		const sessCount = (h.bridgeState?.tasks || []).length;
+		const runCount = h.runningCount || 0;
+		const turboShort = h.bridgeState?.turbo?.enabled ? "⚡ 极速" : "🐢 轮询";
+		const shortFp = (h.fingerprint || "已锁定").slice(0, 14);
+		const hostVer = String(h.bridgeState?.agentVersion || "");
+		const isUpgradingHost = Boolean(upgradingHostMap[h.hostId] && Date.now() - upgradingHostMap[h.hostId] < 45e3);
+		const isHostOutdated = Boolean(isHostLive && !isRevoked && (!hostVer || deps.compareSemver(hostVer, hubVer) < 0));
+		const versionBadgeHtml = isUpgradingHost ? `<span class="settings-status-pill tone-amber">⏳ 正在升级重启…</span>` : isHostOutdated ? `<span class="settings-status-pill tone-amber">⬆️ 可升 v${deps.esc(hubVer)} (${hostVer ? "当前 v" + deps.esc(hostVer) : "旧版"})</span>` : hostVer ? `<span class="settings-status-pill tone-green">v${deps.esc(hostVer)} 最新</span>` : "";
+		return `
+      <div class="settings-wrap settings-subpage-wrap" data-settings-subpage="host_detail">
+        ${renderSubpageHeaderHtml(h.hostName || "电脑详情")}
+
+        <div class="host-visual-card ${h.isFeishuActive ? "active-feishu" : ""}" style="padding:14px;">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
+            <span class="status-dot ${isHostLive && !isRevoked ? "" : "offline"}"></span>
+            <span style="font-size:16px;font-weight:800;color:var(--text);">${deps.esc(h.hostName)}</span>
+            ${h.isFeishuActive ? `<span class="settings-mini-tag tone-blue">🎯 飞书主控</span>` : ""}
+            ${isRevoked ? `<span class="settings-mini-tag tone-red">🚫 已吊销</span>` : ""}
+            ${versionBadgeHtml}
+          </div>
+
+          <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;font-size:12px;">
+            <div style="padding:9px 10px;border-radius:10px;background:${tm.lowBattery ? "var(--amber-soft)" : "var(--subtle)"};border:1px solid ${tm.lowBattery ? "#fde68a" : "var(--border)"};">
+              <div style="font-size:11px;color:var(--muted);">供电与电量</div>
+              <div style="font-weight:700;color:var(--text);margin-top:2px;">${tm.powerIcon} ${deps.esc(tm.powerDetail)}${tm.lowBattery ? " ⚠️" : ""}</div>
+            </div>
+            <div style="padding:9px 10px;border-radius:10px;background:var(--subtle);border:1px solid var(--border);">
+              <div style="font-size:11px;color:var(--muted);">网络与延迟</div>
+              <div style="font-weight:700;color:var(--text);margin-top:2px;">${tm.netIcon} ${deps.esc(tm.netDetail)}</div>
+            </div>
+            <div style="padding:9px 10px;border-radius:10px;background:var(--subtle);border:1px solid var(--border);">
+              <div style="font-size:11px;color:var(--muted);">会话与存储</div>
+              <div style="font-weight:700;color:var(--text);margin-top:2px;">${sessCount} 条 · ${runCount} 运行 · ${deps.formatBytes(h.totalBytes)}</div>
+            </div>
+            <div style="padding:9px 10px;border-radius:10px;background:var(--subtle);border:1px solid var(--border);">
+              <div style="font-size:11px;color:var(--muted);">同步与系统</div>
+              <div style="font-weight:700;color:var(--text);margin-top:2px;">${deps.esc(h.platform || "macOS")} ${deps.esc(h.arch || "")} · ${turboShort}</div>
+            </div>
+          </div>
+
+          <div style="margin-top:12px;">
+            <div style="font-size:11.5px;font-weight:700;color:var(--text-secondary);margin-bottom:6px;">已检测到的 AI 工具</div>
+            <div style="display:flex;flex-wrap:wrap;gap:6px;font-size:11.5px;">
+              <span style="display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border-radius:999px;background:var(--subtle);color:var(--text);">${deps.renderHarnessBadgeHtml("dsh", "inline")} DSH · ✅ 远控+审批</span>
+              <span style="display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border-radius:999px;background:var(--subtle);color:var(--text);">${deps.renderHarnessBadgeHtml("antigravity-ide", "inline")} Antigravity · ✅ 远控+审批</span>
+              ${(h.bridgeState?.harnesses || []).map((ad) => {
+			const canApproveNow = Boolean(ad.capabilities?.canApprove || ad.id === "codex" || ad.id === "workbuddy");
+			const isObserveAdapter = ad.capabilities?.canPrompt === false || ad.id === "doubao";
+			const statusTag = !ad.installed && !ad.hasBinary ? "⚪ 未安装" : isObserveAdapter ? "👀 仅观测" : ad.hasBinary ? canApproveNow ? "✅ 远控+审批" : "🔵 看会话/发指令" : "👀 观察模式";
+			return `
+                  <span style="display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border-radius:999px;background:var(--subtle);color:var(--text);">
+                    ${deps.renderHarnessBadgeHtml(ad.id, "inline")} ${deps.esc(ad.label || ad.id)} · ${statusTag}
+                  </span>
+                `;
+		}).join("")}
+            </div>
+          </div>
+
+          <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--hairline);font-size:11.5px;color:var(--muted);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px;">
+            <span>🔒 指纹 <code>${deps.esc(shortFp)}</code> · ${h.hasDedicatedToken ? `🔑 独立凭证 (${deps.esc(h.hostTokenPreview)})` : "🔑 管理员凭证"}</span>
+            <span>${h.syncMeta?.seq ? `同步序号 #${h.syncMeta.seq}` : ""}</span>
+          </div>
+        </div>
+
+        <div class="settings-card">
+          <div class="settings-item">
+            <div>
+              <div class="settings-item-title">飞书主控电脑</div>
+              <div class="settings-item-desc">指定飞书机器人指令默认发送到哪台电脑</div>
+            </div>
+            <button type="button" class="pill-action-btn ${h.isFeishuActive ? "primary" : ""}" onclick="activateFeishuHost('${deps.escJsStr(h.hostId)}')">
+              ${h.isFeishuActive ? "🎯 当前主控" : "设为主控"}
+            </button>
+          </div>
+          <div class="settings-item">
+            <div>
+              <div class="settings-item-title">飞书实时通知</div>
+              <div class="settings-item-desc">开启后 2 小时无操作自动关闭</div>
+            </div>
+            <button type="button" class="pill-action-btn ${h.remoteActive ? "primary" : ""}" onclick="toggleHostRemoteMode('${deps.escJsStr(h.hostId)}', ${!h.remoteActive})">
+              ${h.remoteActive ? "🔔 已开启" : "🔕 已关闭"}
+            </button>
+          </div>
+          <div class="settings-item">
+            <div>
+              <div class="settings-item-title">极速同步引擎</div>
+              <div class="settings-item-desc">查看 Rust 极速同步状态或一键开启提速</div>
+            </div>
+            <button type="button" class="pill-action-btn" onclick="openTurboGuideSheet()">
+              ${h.bridgeState?.turbo?.enabled ? "⚡ 极速详情" : "🚀 一键提速"}
+            </button>
+          </div>
+          <div class="settings-item">
+            <div>
+              <div class="settings-item-title">客户端版本更新</div>
+              <div class="settings-item-desc">${hostVer ? `当前 v${deps.esc(hostVer)} · 云端 v${deps.esc(hubVer)}` : `云端最新 v${deps.esc(hubVer)}`}</div>
+            </div>
+            <button type="button" class="pill-action-btn ${isHostOutdated ? "primary" : ""}" onclick="upgradeHostTurbo('${deps.escJsStr(h.hostId)}', '${deps.escJsStr(h.hostName)}')" ${isUpgradingHost ? "disabled" : ""}>
+              ${isUpgradingHost ? "⏳ 升级中…" : isHostOutdated ? `🔄 升级 v${deps.esc(hubVer)}` : "🔄 重装/更新"}
+            </button>
+          </div>
+          <div class="settings-item">
+            <div>
+              <div class="settings-item-title">独立访问凭证</div>
+              <div class="settings-item-desc">吊销后该电脑将立即断开连接，不影响其他电脑</div>
+            </div>
+            ${isRevoked ? `
+              <button type="button" class="pill-action-btn primary" onclick="unrevokeHostCredential('${deps.escJsStr(h.hostId)}', '${deps.escJsStr(h.hostName)}')">恢复接入</button>
+            ` : `
+              <button type="button" class="pill-action-btn" style="color:var(--red);" onclick="revokeHostCredential('${deps.escJsStr(h.hostId)}', '${deps.escJsStr(h.hostName)}')">🚫 吊销凭证</button>
+            `}
+          </div>
+        </div>
+      </div>
+    `;
+	}
+	function renderAddHostSubpageHtml() {
+		return `
+      <div class="settings-wrap settings-subpage-wrap" data-settings-subpage="add_host">
+        ${renderSubpageHeaderHtml(SETTINGS_SUBPAGE_TITLES.add_host)}
+        ${deps.renderAddHostPanelHtml({
+			isEmptyState: false,
+			forceExpanded: true
+		})}
+      </div>
+    `;
+	}
+	function renderPushSubpageHtml(state) {
+		const { cachedPushStatusText, cachedPushStatusColor, cachedPushDeviceListText } = state;
+		return `
+      <div class="settings-wrap settings-subpage-wrap" data-settings-subpage="push">
+        ${renderSubpageHeaderHtml(SETTINGS_SUBPAGE_TITLES.push)}
+        <div class="settings-card">
+          <div class="settings-item" style="display:block;">
+            <div class="settings-item-title">启用 iPhone 锁屏实时推送</div>
+            <div class="settings-item-desc">当任意电脑有待审批、任务完成或异常时直接弹窗提醒</div>
+            <div id="pushLocalStatus" style="margin-top:10px;font-size:13px;font-weight:700;color:${deps.esc(cachedPushStatusColor || "var(--primary)")};">
+              ${deps.esc(cachedPushStatusText || "正在检测本机推送状态…")}
+            </div>
+            <div id="pushDeviceList" style="margin-top:5px;font-size:12px;color:var(--muted);line-height:1.55;">
+              ${deps.esc(cachedPushDeviceListText || "")}
+            </div>
+            <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;">
+              <button type="button" class="pill-action-btn primary" onclick="subscribeIphonePush()">📲 开启推送</button>
+              <button type="button" class="pill-action-btn" onclick="sendTestPush()">🔔 发送测试</button>
+              <button type="button" class="pill-action-btn" style="color:var(--red);" onclick="disableIphonePush()">关闭本机推送</button>
+            </div>
+            <div class="settings-item-desc" style="margin-top:10px;">
+              iPhone 需先在 Safari 点击「分享 → 添加到主屏幕」，再从桌面图标打开本页并开启推送，才能收到锁屏通知。
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+	}
+	function renderSecuritySubpageHtml(state) {
+		const { hubState, currentDeviceId } = state;
+		const secSum = hubState.securitySummary || {
+			total24h: 0,
+			high24h: 0,
+			uniqueIps24h: 0,
+			recentEvents: []
+		};
+		const ac = hubState.accessControl || {
+			deviceApprovalEnabled: false,
+			trustedDevices: [],
+			pendingDeviceLogins: [],
+			pendingHosts: []
+		};
+		return `
+      <div class="settings-wrap settings-subpage-wrap" data-settings-subpage="security">
+        ${renderSubpageHeaderHtml(SETTINGS_SUBPAGE_TITLES.security)}
+
+        <div class="settings-card">
+          <div class="settings-item">
+            <div>
+              <div class="settings-item-title">
+                🔐 新设备 / 新电脑接入需我手机审批
+                <span class="settings-status-pill tone-${ac.deviceApprovalEnabled ? "green" : "amber"}" style="margin-left:6px;">
+                  ${ac.deviceApprovalEnabled ? "已开启保护" : "未开启"}
+                </span>
+              </div>
+              <div class="settings-item-desc">
+                开启后，即使有人拿到管理密码，新浏览器登录或新电脑接入都必须先经你这台手机点击「允许」，否则一律拦截。
+              </div>
+            </div>
+            <button
+              type="button"
+              class="pill-action-btn ${ac.deviceApprovalEnabled ? "" : "primary"}"
+              onclick="toggleDeviceApprovalGuard(${ac.deviceApprovalEnabled ? "false" : "true"})"
+            >
+              ${ac.deviceApprovalEnabled ? "关闭保护" : "立即开启"}
+            </button>
+          </div>
+
+          ${(ac.trustedDevices || []).length > 0 ? `
+            <div class="settings-item" style="display:block;">
+              <div class="settings-item-title">📱 已信任的手机 / 浏览器 (${(ac.trustedDevices || []).length})</div>
+              <div style="margin-top:8px;display:flex;flex-direction:column;gap:6px;">
+                ${(ac.trustedDevices || []).map((dev) => `
+                  <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;border-radius:10px;background:var(--subtle);border:1px solid var(--border);font-size:12px;">
+                    <div style="min-width:0;flex:1;">
+                      <div style="font-weight:700;color:var(--text);">
+                        ${deps.esc(dev.name || "已信任设备")}
+                        ${dev.isCurrent || dev.id === hubState.currentDeviceId || dev.id === currentDeviceId ? `<span class="settings-mini-tag tone-blue" style="margin-left:4px;">本机</span>` : ""}
+                      </div>
+                      <div style="font-size:11px;color:var(--muted);margin-top:2px;">
+                        IP: <code>${deps.esc(dev.ip || "-")}</code> · 最近活跃 ${deps.formatTime(dev.lastSeen || dev.approvedAt)}
+                      </div>
+                    </div>
+                    <button type="button" class="pill-action-btn" style="color:var(--red);padding:4px 8px;font-size:11px;" onclick="revokeTrustedDeviceById('${deps.escJsStr(dev.id)}')">🚫 踢出</button>
+                  </div>
+                `).join("")}
+              </div>
+            </div>
+          ` : ""}
+
+          <div class="settings-item" style="display:block;">
+            <div class="settings-item-title">
+              ${secSum.total24h > 0 ? `<span style="color:var(--red);">🚨 近 24 小时已拦截 ${secSum.total24h} 次异常探测（${secSum.uniqueIps24h} 个来源 IP）</span>` : `<span style="color:var(--green);">🟢 运行安全 · 近 24 小时 0 次攻击探测</span>`}
+            </div>
+            <div class="settings-item-desc" style="margin-top:4px;">
+              监测伪造令牌、敏感路径探测（403）、密码爆破（429）与未审批设备直连，命中后立即推送到你的手机锁屏。
+            </div>
+            <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
+              <button type="button" class="pill-action-btn" onclick="sendTestSecurityAlert()">🚨 演练告警</button>
+              ${(secSum.recentEvents || []).length > 0 ? `<button type="button" class="pill-action-btn" onclick="clearSecurityAlerts()">🧹 清空日志</button>` : ""}
+            </div>
+            ${(secSum.recentEvents || []).length > 0 ? `
+              <div style="margin-top:10px;display:flex;flex-direction:column;gap:6px;max-height:300px;overflow-y:auto;">
+                ${(secSum.recentEvents || []).slice(0, 12).map((ev) => {
+			const badge = {
+				forged_host_token: "伪造令牌",
+				sensitive_path_probe: "敏感路径",
+				auth_bruteforce: "密码爆破",
+				unauth_api_scan: "异常直连"
+			}[ev.kind] || ev.kind || "异常";
+			return `
+                    <div style="padding:8px 10px;border-radius:10px;background:var(--subtle);border:1px solid var(--border);font-size:11.5px;line-height:1.45;">
+                      <div style="display:flex;justify-content:space-between;gap:6px;align-items:center;flex-wrap:wrap;">
+                        <span>
+                          <strong style="color:${ev.severity === "high" ? "var(--red)" : "#d97706"};">[${deps.esc(badge)} · ${deps.esc(String(ev.status || 401))}]</strong>
+                          <code style="margin-left:4px;">${deps.esc(ev.ip || "unknown")}</code>
+                        </span>
+                        <span style="color:var(--muted);">${deps.formatTime(ev.at)}</span>
+                      </div>
+                      <div style="color:var(--text-secondary);font-family:var(--mono);font-size:11px;margin-top:3px;word-break:break-all;">
+                        ${deps.esc(ev.method || "GET")} ${deps.esc(ev.path || "")}
+                      </div>
+                      ${ev.detail ? `<div style="color:var(--muted);margin-top:2px;">${deps.esc(ev.detail)}</div>` : ""}
+                    </div>
+                  `;
+		}).join("")}
+              </div>
+            ` : ""}
+          </div>
+        </div>
+      </div>
+    `;
+	}
+	function renderPasswordSubpageHtml() {
+		return `
+      <div class="settings-wrap settings-subpage-wrap" data-settings-subpage="password">
+        ${renderSubpageHeaderHtml(SETTINGS_SUBPAGE_TITLES.password)}
+        <div class="settings-card">
+          <div class="settings-item">
+            <div>
+              <div class="settings-item-title">添加新手机（6 位免密配对码）</div>
+              <div class="settings-item-desc">生成 3 分钟有效的一次性 6 位字母/数字配对码，新手机免输长密码直接解锁</div>
+            </div>
+            <button type="button" class="pill-action-btn primary" onclick="openPairingCodeSheet()">📱 生成配对码</button>
+          </div>
+          <div class="settings-item">
+            <div>
+              <div class="settings-item-title">修改总控台访问密码</div>
+              <div class="settings-item-desc">随时更换访问密钥，防止未授权访问</div>
+            </div>
+            <button type="button" class="pill-action-btn" onclick="promptChangePassword()">🔑 修改密码</button>
+          </div>
+          <div class="settings-item">
+            <div>
+              <div class="settings-item-title">锁定当前浏览器</div>
+              <div class="settings-item-desc">清除本机浏览器缓存的登录凭证</div>
+            </div>
+            <button type="button" class="pill-action-btn" style="color:var(--red);" onclick="lockAndLogout()">🔒 立即锁定</button>
+          </div>
+        </div>
+      </div>
+    `;
+	}
+	function renderSharesSubpageHtml(state) {
+		const { hubState } = state;
+		const hosts = hubState.hosts || [];
+		const shares = hubState.shares || [];
+		const origin = typeof location !== "undefined" ? location.origin : "";
+		const latestShareResults = hosts.filter((h) => h.lastShareResult && h.lastShareResult.shareUrl).map((h) => {
+			const rawUrl = h.lastShareResult.shareUrl;
+			const fullUrl = rawUrl.startsWith("http") ? rawUrl : origin + rawUrl;
+			return {
+				hostName: h.hostName,
+				shareId: h.lastShareResult.shareId || "",
+				fullUrl,
+				at: h.lastShareResult.at || 0
+			};
+		});
+		return `
+      <div class="settings-wrap settings-subpage-wrap" data-settings-subpage="shares">
+        ${renderSubpageHeaderHtml(`${SETTINGS_SUBPAGE_TITLES.shares} (${shares.length})`)}
+        <div class="settings-card">
+          ${latestShareResults.map((item) => `
+            <div class="settings-item" style="flex-direction:column;align-items:stretch;gap:8px;">
+              <div style="display:flex;justify-content:space-between;align-items:center;">
+                <div class="settings-item-title">🔐 最近生成（来自 ${deps.esc(item.hostName)}）</div>
+                <span style="font-size:11.5px;color:var(--muted);">${deps.formatTime(item.at)}</span>
+              </div>
+              <div style="font-size:11.5px;color:var(--muted);font-family:var(--mono);word-break:break-all;background:var(--subtle);padding:6px 8px;border-radius:8px;">
+                ${deps.esc(item.fullUrl)}
+              </div>
+              <div style="display:flex;gap:8px;">
+                <button type="button" class="pill-action-btn primary" onclick="copyCodeText('${deps.escUriJsStr(item.fullUrl)}', '🔗 加密分享链接已复制')">📋 复制完整解密链接</button>
+                <a href="${deps.esc(item.fullUrl)}" target="_blank" rel="noopener" class="pill-action-btn" style="text-decoration:none;display:inline-flex;align-items:center;">🌐 打开</a>
+              </div>
+            </div>
+          `).join("")}
+          ${shares.length ? shares.slice(0, 20).map((s) => `
+            <div class="settings-item">
+              <div>
+                <div class="settings-item-title">${deps.esc(s.title || "加密会话回放")}</div>
+                <div class="settings-item-desc">来自 ${deps.esc(s.hostName || s.hostId || "远端电脑")} · ${deps.formatTime(s.createdAt)} · ${deps.formatBytes(s.sizeBytes || 0)}</div>
+              </div>
+              <button type="button" class="pill-action-btn" style="color:var(--red);" onclick="deleteShareRecord('${deps.escJsStr(s.id || s.shareId)}')">🗑️ 销毁</button>
+            </div>
+          `).join("") : `
+            <div class="settings-item">
+              <div class="settings-item-desc">暂无加密分享记录。可在任意会话右上角「⋯ → 生成 AES-256 端到端加密回放链接」创建。</div>
+            </div>
+          `}
+        </div>
+      </div>
+    `;
+	}
+	function renderCapabilitiesSubpageHtml() {
+		return `
+      <div class="settings-wrap settings-subpage-wrap" data-settings-subpage="capabilities">
+        ${renderSubpageHeaderHtml(SETTINGS_SUBPAGE_TITLES.capabilities)}
+        <div class="settings-card" style="padding:12px 14px;overflow-x:auto;">
+          <table style="width:100%;border-collapse:collapse;font-size:12px;text-align:center;">
+            <thead>
+              <tr style="border-bottom:1px solid var(--border);color:var(--muted);">
+                <th style="text-align:left;padding:6px 4px;">后端</th>
+                <th style="padding:6px 3px;">看会话</th>
+                <th style="padding:6px 3px;">发指令</th>
+                <th style="padding:6px 3px;">停止</th>
+                <th style="padding:6px 3px;">手机审批</th>
+                <th style="padding:6px 3px;">实时插话</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${deps.renderCapabilityMatrixRowsHtml()}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `;
+	}
+	function render(viewport, opts = {}) {
+		if (!viewport) return;
+		const state = deps.getState();
+		const voiceSummary = formatVoiceSummaryForSettings(getVoiceConfig());
+		const signature = buildSignature(state, voiceSummary);
+		if (signature === lastRenderedKey && viewport.querySelector(".settings-wrap")) {
+			syncPushSummaryBadge(state.cachedPushStatusText);
+			deps.refreshPushStatus?.();
+			return;
+		}
+		const prevScrollTop = viewport.scrollTop || 0;
+		lastRenderedKey = signature;
+		let html = "";
+		if (activeSubpage === "host_detail") html = renderHostDetailSubpageHtml(state);
+		else if (activeSubpage === "add_host") html = renderAddHostSubpageHtml();
+		else if (activeSubpage === "push") html = renderPushSubpageHtml(state);
+		else if (activeSubpage === "security") html = renderSecuritySubpageHtml(state);
+		else if (activeSubpage === "password") html = renderPasswordSubpageHtml();
+		else if (activeSubpage === "shares") html = renderSharesSubpageHtml(state);
+		else if (activeSubpage === "capabilities") html = renderCapabilitiesSubpageHtml();
+		else html = renderHomeHtml(state, voiceSummary);
+		viewport.innerHTML = html;
+		if (opts.scrollToTop) viewport.scrollTop = 0;
+		else if (opts.restoreHomeScroll) viewport.scrollTop = savedHomeScrollTop;
+		else if (prevScrollTop > 0) viewport.scrollTop = prevScrollTop;
+		if (state.langPref === "en" && typeof deps.applyLangToDom === "function") deps.applyLangToDom(viewport, state.langPref);
+		deps.refreshPushStatus?.();
+	}
+	return {
+		render,
+		invalidate,
+		openSubpage,
+		closeSubpage,
+		getActiveSubpage,
+		syncPushSummaryBadge
+	};
 }
 // hub/web/src/utils/markdown.ts
 var KNOWN_PLUGIN_DISPLAY_NAMES = {
@@ -7233,6 +7855,46 @@ var EXACT_ZH_TO_EN = {
 	"🎧 进入随行模式": "🎧 Open Walk Mode",
 	"⚙️ 语音设置": "⚙️ Voice Settings",
 	"🎙️ 随行语音设置": "🎙️ Voice Settings",
+	"🎙️ 边走边听 · Provider 配置": "🎙️ Walk Mode · Providers & Routing",
+	"🎛️ 默认分配（听 · 想 · 说）": "🎛️ Default Routing (Ear · Brain · Mouth)",
+	"👂 听（语音转文字）": "👂 Ear (Speech-to-Text)",
+	"🧠 想（语音大脑）": "🧠 Brain (LLM)",
+	"🗣️ 说（文字转语音）": "🗣️ Mouth (Text-to-Speech)",
+	"切回免费本机": "Use Free Native",
+	"＋ 添加": "+ Add",
+	"＋ 添加第一个 Provider": "+ Add First Provider",
+	"‹ 返回列表": "‹ Back to List",
+	"➕ 添加 Provider": "➕ Add Provider",
+	"✏️ 编辑 Provider": "✏️ Edit Provider",
+	"💾 保存 Provider": "💾 Save Provider",
+	"⚡ 设为默认": "⚡ Set Default",
+	"✅ 已为默认": "✅ Default",
+	"🔌 测试": "🔌 Test",
+	"✏️ 编辑": "✏️ Edit",
+	"电脑与连接": "Computers & Connections",
+	"模型与偏好": "Models & Preferences",
+	"安全与隐私": "Security & Privacy",
+	"关于与工具": "About & Tools",
+	"➕ 添加新电脑 / 手机扫码登录": "➕ Add Computer / Phone QR Login",
+	"📦 多电脑协同与一键迁移": "📦 Multi-Computer Migration",
+	"🎧 边走边听 · 语音总管": "🎧 Walk Mode · Voice Copilot",
+	"🎧 进入": "🎧 Open",
+	"🔔 手机锁屏通知": "🔔 Lock-Screen Push Alerts",
+	"🌐 界面语言": "🌐 Language",
+	"🎨 外观主题": "🎨 Appearance",
+	"🛡️ 设备审批与安全防护": "🛡️ Device Approval & Security",
+	"🔑 密码与配对登录": "🔑 Password & Pairing Login",
+	"🔐 加密分享记录": "🔐 Encrypted Share Links",
+	"📊 各 AI 工具能力说明": "📊 AI Tool Capabilities",
+	"🔄 强制刷新前端版本": "🔄 Force Reload App Version",
+	"‹ 设置": "‹ Settings",
+	"电脑详情与控制": "Computer Details",
+	"添加电脑与手机扫码": "Add Computer & QR Login",
+	"手机锁屏通知": "Lock-Screen Push Alerts",
+	"设备审批与安全防护": "Device Approval & Security",
+	"密码与配对登录": "Password & Pairing Login",
+	"加密分享记录": "Encrypted Share Links",
+	"各 AI 工具能力说明": "AI Tool Capabilities",
 	"🎛️ 自由混搭（听 · 想 · 说）": "🎛️ Custom Mix (Ear · Brain · Mouth)",
 	"① 密钥池": "① API Keys",
 	"② 方案与开关": "② Profiles",
@@ -18698,7 +19360,7 @@ function initHubController() {
 		lastRenderedSettingsKey = "";
 		renderSettingsTab();
 	}
-	function renderAddHostPanelHtml({ isEmptyState = false } = {}) {
+	function renderAddHostPanelHtml({ isEmptyState = false, forceExpanded = false } = {}) {
 		const enrollment = hubState.enrollment || {};
 		const code = enrollment.code || "正在生成...";
 		const expiresAt = Number(enrollment.expiresAt || 0);
@@ -18708,7 +19370,7 @@ function initHubController() {
 		const oneLineCmd = `curl -fsSL ${originUrl}/install.sh | bash -s -- --code ${code}`;
 		const localRepoCmd = `./connect-host.sh --url ${originUrl} --code ${code}`;
 		const hasHosts = (hubState.hosts || []).length > 0;
-		if (!(isEmptyState || !hasHosts || addHostPanelExpanded)) return `
+		if (!(forceExpanded || isEmptyState || !hasHosts || addHostPanelExpanded)) return `
           <div class="settings-card" style="padding:11px 13px;cursor:pointer;" onclick="toggleAddHostPanel()">
             <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
               <div style="min-width:0;flex:1;">
@@ -18747,7 +19409,7 @@ function initHubController() {
               <button class="pill-action-btn" style="font-size:11.5px;padding:4px 9px;" onclick="refreshEnrollmentCode()">
                 🔄 换码
               </button>
-              ${!isEmptyState && hasHosts ? `
+              ${!forceExpanded && !isEmptyState && hasHosts ? `
                 <button class="pill-action-btn" style="font-size:11.5px;padding:4px 9px;" onclick="toggleAddHostPanel()">
                   ▴ 收起
                 </button>
@@ -18853,483 +19515,50 @@ function initHubController() {
 			showToast("❌ 操作失败：" + (err && err.message || err));
 		}
 	}
-	function renderSettingsTab() {
-		const hosts = hubState.hosts || [];
-		const shares = hubState.shares || [];
-		const buildInfo = hubState.build || {};
-		const secSum = hubState.securitySummary || {
-			total24h: 0,
-			high24h: 0,
-			uniqueIps24h: 0,
-			recentEvents: []
-		};
-		const ac = hubState.accessControl || {
-			deviceApprovalEnabled: false,
-			trustedDevices: [],
-			pendingDeviceLogins: [],
-			pendingHosts: []
-		};
-		const currentTk = getToken();
-		const enrollmentCode = hubState.enrollment?.code || "";
-		`${location.origin}${enrollmentCode}`;
-		const settingsSignature = JSON.stringify({
+	const settingsPanel = createSettingsPanel({
+		getState: () => ({
+			hubState,
 			themePref,
 			langPref,
-			addHostPanelExpanded,
-			expandedHostCardIds,
-			tokenTail: currentTk.slice(-4),
-			enrollmentCode,
-			joinedCount: hubState.enrollment?.joinedCount || 0,
-			pushCount: (hubState.pushSubscriptions || []).length,
-			secSig: `${secSum.total24h}:${secSum.high24h}:${secSum.recentEvents?.[0]?.id || ""}`,
-			acSig: `${ac.deviceApprovalEnabled ? 1 : 0}:${(ac.trustedDevices || []).length}:${(ac.pendingDeviceLogins || []).map((x) => x.id).join(",")}:${(ac.pendingHosts || []).map((x) => x.hostId).join(",")}`,
-			build: buildInfo.uiBuild || buildInfo.version || "",
-			hosts: hosts.map((h) => ({
-				id: h.hostId,
-				name: h.hostName,
-				online: isHostLiveOnline(h),
-				trustStatus: h.trustStatus || h.trust?.status || "",
-				hasDedicatedToken: Boolean(h.hasDedicatedToken),
-				isFeishuActive: h.isFeishuActive,
-				remoteActive: h.remoteActive,
-				taskCount: (h.bridgeState?.tasks || []).length,
-				runningCount: h.runningCount || 0,
-				totalBytesBucket: expandedHostCardIds[h.hostId] ? Math.round((h.totalBytes || 0) / 10240) : 0,
-				agentVersion: h.bridgeState?.agentVersion || "",
-				upgrading: Boolean(upgradingHostMap[h.hostId] && Date.now() - upgradingHostMap[h.hostId] < 45e3),
-				turbo: h.bridgeState?.turbo?.engineLabel || "",
-				power: h.bridgeState?.systemTelemetry?.power?.shortLabel || "",
-				net: h.bridgeState?.systemTelemetry?.network?.kindLabel || "",
-				shareUrl: h.lastShareResult?.shareUrl || ""
-			})),
-			shares: shares.map((s) => ({
-				id: s.id || s.shareId,
-				at: s.createdAt
-			}))
-		});
-		const viewport = document.getElementById("mainViewport");
-		if (!viewport) return;
-		if (settingsSignature === lastRenderedSettingsKey && viewport.querySelector(".settings-wrap")) {
-			refreshPushStatus();
-			return;
+			cachedPushStatusText,
+			cachedPushStatusColor,
+			cachedPushDeviceListText,
+			upgradingHostMap,
+			currentDeviceId: getOrCreateClientDeviceId(),
+			tokenTail: getToken().slice(-4)
+		}),
+		getViewport: () => document.getElementById("mainViewport"),
+		isHostLiveOnline,
+		formatHostTelemetry,
+		compareSemver,
+		formatTime,
+		formatBytes,
+		renderHarnessBadgeHtml,
+		renderCapabilityMatrixRowsHtml,
+		renderAddHostPanelHtml,
+		esc: esc$1,
+		escJsStr: escJsStr$1,
+		escUriJsStr,
+		refreshPushStatus,
+		applyLangToDom
+	});
+	window.addEventListener("dsh:voice-config", () => {
+		lastRenderedSettingsKey = "";
+		settingsPanel.invalidate();
+		if (currentTab === "settings") renderSettingsTab();
+	});
+	function openSettingsSubpage(page, param = "") {
+		settingsPanel.openSubpage(page, param);
+	}
+	function closeSettingsSubpage() {
+		settingsPanel.closeSubpage();
+	}
+	function renderSettingsTab() {
+		if (!lastRenderedSettingsKey) {
+			settingsPanel.invalidate();
+			lastRenderedSettingsKey = "delegated";
 		}
-		const prevScrollTop = viewport.scrollTop;
-		lastRenderedSettingsKey = settingsSignature;
-		const latestShareResults = hosts.filter((h) => h.lastShareResult && h.lastShareResult.shareUrl).map((h) => {
-			const rawUrl = h.lastShareResult.shareUrl;
-			const fullUrl = rawUrl.startsWith("http") ? rawUrl : location.origin + rawUrl;
-			return {
-				hostName: h.hostName,
-				shareId: h.lastShareResult.shareId || "",
-				fullUrl,
-				at: h.lastShareResult.at || 0
-			};
-		});
-		viewport.innerHTML = `
-        <div class="settings-wrap">
-          <div>
-            <div class="settings-group-title">添加电脑与手机扫码登录</div>
-            ${renderAddHostPanelHtml({ isEmptyState: false })}
-          </div>
-
-          <div>
-            <div class="settings-group-title">已接入电脑 (${hosts.length} 台 · 点击卡片展开详情)</div>
-            <div class="host-visual-grid">
-              ${hosts.map((h) => {
-			const isRevoked = (h.trustStatus || h.trust?.status) === "revoked";
-			const isCardExpanded = Boolean(expandedHostCardIds[h.hostId]);
-			const tm = formatHostTelemetry(h);
-			const sessCount = (h.bridgeState?.tasks || []).length;
-			const runCount = h.runningCount || 0;
-			const turboShort = h.bridgeState?.turbo?.enabled ? "⚡ 极速" : "🐢 轮询";
-			const shortFp = (h.fingerprint || "已锁定").slice(0, 14);
-			const hubVer = String(buildInfo.version || "0.5.1");
-			const hostVer = String(h.bridgeState?.agentVersion || "");
-			const isHostLive = isHostLiveOnline(h);
-			const isUpgradingHost = Boolean(upgradingHostMap[h.hostId] && Date.now() - upgradingHostMap[h.hostId] < 45e3);
-			const isHostOutdated = Boolean(isHostLive && !isRevoked && (!hostVer || compareSemver(hostVer, hubVer) < 0));
-			const versionBadgeHtml = isUpgradingHost ? `<span style="font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:999px;background:var(--amber-soft);color:#d97706;">⏳ 正在升级重启...</span>` : isHostOutdated ? `<span style="font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:999px;background:var(--amber-soft);color:#d97706;">⬆️ 可升 v${esc$1(hubVer)} (${hostVer ? "当前 v" + esc$1(hostVer) : "旧版"})</span>` : hostVer ? `<span style="font-size:10.5px;font-weight:600;padding:2px 7px;border-radius:999px;background:var(--green-soft);color:var(--green);">v${esc$1(hostVer)} 最新</span>` : "";
-			return `
-                <div class="host-visual-card ${h.isFeishuActive ? "active-feishu" : ""}" style="padding:12px 14px;${isHostLive ? "" : "opacity:0.78;"}">
-                  <div
-                    style="display:flex;align-items:center;justify-content:space-between;gap:8px;cursor:pointer;user-select:none;"
-                    onclick="toggleHostSettingsCard('${escJsStr$1(h.hostId)}')"
-                  >
-                    <div style="min-width:0;flex:1;">
-                      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
-                        <span class="status-dot ${isHostLive && !isRevoked ? "" : "offline"}"></span>
-                        <span style="font-size:14.5px;font-weight:700;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:170px;">${esc$1(h.hostName)}</span>
-                        ${h.isFeishuActive ? `<span style="font-size:10.5px;font-weight:700;padding:2px 6px;border-radius:999px;background:var(--primary-soft);color:var(--primary);">🎯 主控</span>` : ""}
-                        ${isRevoked ? `<span style="font-size:10.5px;font-weight:700;padding:2px 6px;border-radius:999px;background:var(--red-soft);color:var(--red);">🚫 已吊销</span>` : ""}
-                        ${versionBadgeHtml}
-                      </div>
-                      <div style="font-size:11.5px;color:var(--muted);margin-top:4px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
-                        <span>${isHostLive ? `${tm.powerIcon} ${esc$1(tm.powerShort)}` : `⚪ 已离线 (${formatTime(h.lastSeen)})`}</span>
-                        <span>·</span>
-                        <span>${tm.netIcon} ${esc$1(tm.netShort)}</span>
-                        <span>·</span>
-                        <span>💬 ${sessCount} 会话${isHostLive && runCount > 0 ? ` (<strong style="color:var(--green);">${runCount} 运行中</strong>)` : ""}</span>
-                        <span>·</span>
-                        <span>${turboShort}</span>
-                      </div>
-                    </div>
-                    <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
-                      ${isHostOutdated && !isUpgradingHost ? `
-                        <button
-                          class="pill-action-btn primary"
-                          style="padding:4px 9px;font-size:11.5px;"
-                          onclick="event.stopPropagation(); upgradeHostTurbo('${escJsStr$1(h.hostId)}', '${escJsStr$1(h.hostName)}')"
-                        >🔄 一键升级</button>
-                      ` : ""}
-                      <span style="font-size:11.5px;font-weight:600;color:var(--text-secondary);padding:4px 8px;border-radius:999px;background:var(--subtle);">
-                        ${isCardExpanded ? "▴ 收起" : "▾ 详情"}
-                      </span>
-                    </div>
-                  </div>
-
-                  ${isCardExpanded ? `
-                    <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--hairline);display:flex;flex-direction:column;gap:10px;">
-                      <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;font-size:12px;">
-                        <div style="padding:8px 10px;border-radius:10px;background:${tm.lowBattery ? "var(--amber-soft)" : "var(--subtle)"};border:1px solid ${tm.lowBattery ? "#fde68a" : "var(--border)"};">
-                          <div style="font-size:11px;color:var(--muted);">供电与电量</div>
-                          <div style="font-weight:700;color:var(--text);margin-top:2px;">${tm.powerIcon} ${esc$1(tm.powerDetail)}${tm.lowBattery ? " ⚠️" : ""}</div>
-                        </div>
-                        <div style="padding:8px 10px;border-radius:10px;background:var(--subtle);border:1px solid var(--border);">
-                          <div style="font-size:11px;color:var(--muted);">网络与延迟</div>
-                          <div style="font-weight:700;color:var(--text);margin-top:2px;">${tm.netIcon} ${esc$1(tm.netDetail)}</div>
-                        </div>
-                        <div style="padding:8px 10px;border-radius:10px;background:var(--subtle);border:1px solid var(--border);">
-                          <div style="font-size:11px;color:var(--muted);">会话与存储</div>
-                          <div style="font-weight:700;color:var(--text);margin-top:2px;">${sessCount} 条 · ${runCount} 运行 · ${formatBytes(h.totalBytes)}</div>
-                        </div>
-                        <div style="padding:8px 10px;border-radius:10px;background:var(--subtle);border:1px solid var(--border);">
-                          <div style="font-size:11px;color:var(--muted);">同步与系统</div>
-                          <div style="font-weight:700;color:var(--text);margin-top:2px;">${esc$1(h.platform || "macOS")} ${esc$1(h.arch || "")} · ${turboShort}</div>
-                        </div>
-                      </div>
-
-                      <div style="display:flex;flex-wrap:wrap;gap:6px;font-size:11.5px;">
-                        <span style="display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border-radius:999px;background:var(--subtle);color:var(--text);">${renderHarnessBadgeHtml("dsh", "inline")} DSH · ✅ 远控+审批</span>
-                        <span style="display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border-radius:999px;background:var(--subtle);color:var(--text);">${renderHarnessBadgeHtml("antigravity-ide", "inline")} Antigravity · ✅ 远控+审批</span>
-                        ${(h.bridgeState?.harnesses || []).map((ad) => {
-				const canApproveNow = Boolean(ad.capabilities?.canApprove || ad.id === "codex" || ad.id === "workbuddy");
-				const isObserveAdapter = ad.capabilities?.canPrompt === false || ad.id === "doubao";
-				const statusTag = !ad.installed && !ad.hasBinary ? "⚪ 未安装" : isObserveAdapter ? "👀 仅观测" : ad.hasBinary ? canApproveNow ? "✅ 远控+审批" : "🔵 看会话/发指令" : "👀 观察模式";
-				return `
-                          <span style="display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border-radius:999px;background:var(--subtle);color:var(--text);">
-                            ${renderHarnessBadgeHtml(ad.id, "inline")} ${esc$1(ad.label || ad.id)} · ${statusTag}
-                          </span>
-                        `;
-			}).join("")}
-                      </div>
-
-                      <div style="font-size:11.5px;color:var(--muted);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px;">
-                        <span>🔒 指纹 <code>${esc$1(shortFp)}</code> · ${h.hasDedicatedToken ? `🔑 独立凭证 (${esc$1(h.hostTokenPreview)})` : "🔑 管理员凭证"}</span>
-                        <span>${h.syncMeta?.seq ? `同步序号 #${h.syncMeta.seq}` : ""}</span>
-                      </div>
-
-                      <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;flex-wrap:wrap;padding-top:4px;">
-                        <div style="display:flex;gap:6px;flex-wrap:wrap;">
-                          <button class="pill-action-btn ${h.isFeishuActive ? "primary" : ""}" style="padding:5px 10px;font-size:11.5px;" onclick="activateFeishuHost('${escJsStr$1(h.hostId)}')">
-                            ${h.isFeishuActive ? "🎯 飞书当前主控" : "切飞书到这台"}
-                          </button>
-                          <button class="pill-action-btn ${h.remoteActive ? "primary" : ""}" style="padding:5px 10px;font-size:11.5px;" onclick="toggleHostRemoteMode('${escJsStr$1(h.hostId)}', ${!h.remoteActive})">
-                            ${h.remoteActive ? "🔔 飞书通知: 开" : "🔕 飞书通知: 关"}
-                          </button>
-                          <button class="pill-action-btn" style="padding:5px 10px;font-size:11.5px;" onclick="openTurboGuideSheet()">
-                            ${h.bridgeState?.turbo?.enabled ? "⚡ 极速详情" : "🚀 一键提速"}
-                          </button>
-                          <button class="pill-action-btn ${isHostOutdated ? "primary" : ""}" style="padding:5px 10px;font-size:11.5px;" onclick="upgradeHostTurbo('${escJsStr$1(h.hostId)}', '${escJsStr$1(h.hostName)}')" ${isUpgradingHost ? "disabled" : ""}>
-                            ${isUpgradingHost ? "⏳ 正在升级重启..." : isHostOutdated ? `🔄 一键升级 (v${esc$1(hubVer)})` : "🔄 检查/重装更新"}
-                          </button>
-                        </div>
-                        <div>
-                          ${isRevoked ? `
-                            <button class="pill-action-btn" style="padding:5px 10px;font-size:11.5px;" onclick="unrevokeHostCredential('${escJsStr$1(h.hostId)}', '${escJsStr$1(h.hostName)}')">恢复接入</button>
-                          ` : `
-                            <button class="pill-action-btn" style="padding:5px 10px;font-size:11.5px;color:var(--red);" onclick="revokeHostCredential('${escJsStr$1(h.hostId)}', '${escJsStr$1(h.hostName)}')">🚫 吊销凭证</button>
-                          `}
-                        </div>
-                      </div>
-                    </div>
-                  ` : ""}
-                </div>
-              `;
-		}).join("") || `<div style="padding:24px;text-align:center;color:var(--muted);">暂未检测到在线电脑，请复制上方「添加电脑」命令在终端执行</div>`}
-            </div>
-          </div>
-
-          <div>
-            <div class="settings-group-title">各后端功能边界（诚实矩阵）</div>
-            <div class="settings-card" style="padding:12px 14px;overflow-x:auto;">
-              <table style="width:100%;border-collapse:collapse;font-size:12px;text-align:center;">
-                <thead>
-                  <tr style="border-bottom:1px solid var(--border);color:var(--muted);">
-                    <th style="text-align:left;padding:6px 4px;">后端</th>
-                    <th style="padding:6px 3px;">看会话</th>
-                    <th style="padding:6px 3px;">发指令</th>
-                    <th style="padding:6px 3px;">停止</th>
-                    <th style="padding:6px 3px;">手机审批</th>
-                    <th style="padding:6px 3px;">实时插话</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${renderCapabilityMatrixRowsHtml()}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          <div>
-            <div class="settings-group-title">外观与显示模式</div>
-            <div class="settings-card">
-              <div class="settings-item" style="gap:8px;">
-                <div style="min-width:0;flex:1;">
-                  <div class="settings-item-title" style="white-space:nowrap;">界面语言 / Language</div>
-                  <div class="settings-item-desc" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">自动识别浏览器语言或手动切换</div>
-                </div>
-                <div class="theme-seg-group">
-                  <button class="theme-seg-btn ${langPref === "zh" ? "active" : ""}" onclick="setLangPreference('zh')">🇨🇳 中文</button>
-                  <button class="theme-seg-btn ${langPref === "en" ? "active" : ""}" onclick="setLangPreference('en')">🇺🇸 English</button>
-                </div>
-              </div>
-              <div class="settings-item" style="gap:8px;">
-                <div style="min-width:0;flex:1;">
-                  <div class="settings-item-title" style="white-space:nowrap;">深色 / 浅色主题</div>
-                  <div class="settings-item-desc" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">自动或手动切换外观</div>
-                </div>
-                <div class="theme-seg-group">
-                  <button class="theme-seg-btn ${themePref === "system" ? "active" : ""}" onclick="setThemePreference('system')">跟随系统</button>
-                  <button class="theme-seg-btn ${themePref === "light" ? "active" : ""}" onclick="setThemePreference('light')">☀️ 浅色</button>
-                  <button class="theme-seg-btn ${themePref === "dark" ? "active" : ""}" onclick="setThemePreference('dark')">🌙 深色</button>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div>
-            <div class="settings-group-title">随行耳机语音总管（试用）</div>
-            <div class="settings-card">
-              <div class="settings-item" style="flex-direction:column;align-items:stretch;gap:10px;">
-                <div>
-                  <div class="settings-item-title">🎧 边走路边戴耳机控制所有 AI 任务（试用）</div>
-                  <div class="settings-item-desc">默认免费开箱即用；贴 1 把 API Key 自动配好智能语音，也支持火山豆包 + DeepSeek 自由混搭</div>
-                </div>
-                <div style="display:flex;gap:8px;flex-wrap:wrap;">
-                  <button class="pill-action-btn primary" onclick="openWalkMode()">🎧 进入随行模式（试用）</button>
-                  <button class="pill-action-btn" onclick="openVoiceLab('simple')">⚙️ 语音设置</button>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div>
-            <div class="settings-group-title">多电脑协同与一键迁移</div>
-            <div class="settings-card">
-              <div class="settings-item">
-                <div>
-                  <div class="settings-item-title">跨电脑一键迁移会话</div>
-                  <div class="settings-item-desc">将源电脑 ~/.dsh 会话打包同步至目标电脑并可选清理源机</div>
-                </div>
-                <button class="pill-action-btn primary" onclick="openMigrateWizard()">📦 打开迁移向导</button>
-              </div>
-            </div>
-          </div>
-
-          <div>
-            <div class="settings-group-title">端到端加密分享记录 (${shares.length})</div>
-            <div class="settings-card">
-              ${latestShareResults.map((item) => `
-                <div class="settings-item" style="flex-direction:column;align-items:stretch;gap:8px;">
-                  <div style="display:flex;justify-content:space-between;align-items:center;">
-                    <div class="settings-item-title">🔐 最近生成（来自 ${esc$1(item.hostName)}）</div>
-                    <span style="font-size:11.5px;color:var(--muted);">${formatTime(item.at)}</span>
-                  </div>
-                  <div style="font-size:11.5px;color:var(--muted);font-family:var(--mono);word-break:break-all;background:var(--subtle);padding:6px 8px;border-radius:8px;">
-                    ${esc$1(item.fullUrl)}
-                  </div>
-                  <div style="display:flex;gap:8px;">
-                    <button class="pill-action-btn primary" onclick="copyCodeText('${escUriJsStr(item.fullUrl)}', '🔗 加密分享链接已复制')">📋 复制完整解密链接</button>
-                    <a href="${esc$1(item.fullUrl)}" target="_blank" rel="noopener" class="pill-action-btn" style="text-decoration:none;display:inline-flex;align-items:center;">🌐 打开</a>
-                  </div>
-                </div>
-              `).join("")}
-              ${shares.length ? shares.slice(0, 8).map((s) => `
-                <div class="settings-item">
-                  <div>
-                    <div class="settings-item-title">${esc$1(s.title || "加密会话回放")}</div>
-                    <div class="settings-item-desc">来自 ${esc$1(s.hostName || s.hostId || "远端电脑")} · ${formatTime(s.createdAt)} · ${formatBytes(s.sizeBytes || 0)}</div>
-                  </div>
-                  <button class="pill-action-btn" style="color:var(--red);" onclick="deleteShareRecord('${escJsStr$1(s.id || s.shareId)}')">🗑️ 销毁</button>
-                </div>
-              `).join("") : `
-                <div class="settings-item">
-                  <div class="settings-item-desc">暂无加密分享记录。可在任意会话右上角「⋯ → 生成 AES-256 端到端加密回放链接」创建。</div>
-                </div>
-              `}
-            </div>
-          </div>
-
-          <div>
-            <div class="settings-group-title">🛡️ 接入审批保护与入侵告警</div>
-            <div class="settings-card">
-              <div class="settings-item">
-                <div>
-                  <div class="settings-item-title">
-                    🔐 新设备 / 新电脑接入需我手机审批
-                    <span style="margin-left:6px;font-size:10.5px;padding:2px 7px;border-radius:999px;background:${ac.deviceApprovalEnabled ? "var(--green-soft)" : "var(--amber-soft)"};color:${ac.deviceApprovalEnabled ? "var(--green)" : "#d97706"};">
-                      ${ac.deviceApprovalEnabled ? "已开启保护" : "未开启"}
-                    </span>
-                  </div>
-                  <div class="settings-item-desc">
-                    开启后，即使有人拿到管理员密码，新浏览器登录或新电脑接入都必须先经你这台手机点击「允许」，否则一律拦截，看不到任何对话与文件。
-                  </div>
-                </div>
-                <button
-                  class="pill-action-btn ${ac.deviceApprovalEnabled ? "" : "primary"}"
-                  onclick="toggleDeviceApprovalGuard(${ac.deviceApprovalEnabled ? "false" : "true"})"
-                >
-                  ${ac.deviceApprovalEnabled ? "关闭保护" : "立即开启"}
-                </button>
-              </div>
-
-              ${(ac.trustedDevices || []).length > 0 ? `
-                <div class="settings-item" style="display:block;">
-                  <div class="settings-item-title">📱 已信任的手机 / 浏览器 (${(ac.trustedDevices || []).length})</div>
-                  <div style="margin-top:8px;display:flex;flex-direction:column;gap:6px;">
-                    ${(ac.trustedDevices || []).map((dev) => `
-                      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;border-radius:10px;background:var(--subtle);border:1px solid var(--border);font-size:12px;">
-                        <div style="min-width:0;flex:1;">
-                          <div style="font-weight:700;color:var(--text);">
-                            ${esc$1(dev.name || "已信任设备")}
-                            ${dev.isCurrent || dev.id === hubState.currentDeviceId || dev.id === getOrCreateClientDeviceId() ? `<span style="margin-left:4px;font-size:10.5px;padding:1px 6px;border-radius:999px;background:var(--primary-soft);color:var(--primary);">本机</span>` : ""}
-                          </div>
-                          <div style="font-size:11px;color:var(--muted);margin-top:2px;">
-                            IP: <code>${esc$1(dev.ip || "-")}</code> · 最近活跃 ${formatTime(dev.lastSeen || dev.approvedAt)}
-                          </div>
-                        </div>
-                        <button class="pill-action-btn" style="color:var(--red);padding:4px 8px;font-size:11px;" onclick="revokeTrustedDeviceById('${escJsStr$1(dev.id)}')">🚫 踢出</button>
-                      </div>
-                    `).join("")}
-                  </div>
-                </div>
-              ` : ""}
-
-              <div class="settings-item" style="display:block;">
-                <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
-                  <div class="settings-item-title">
-                    ${secSum.total24h > 0 ? `<span style="color:var(--red);">🚨 近 24 小时已拦截 ${secSum.total24h} 次异常探测（${secSum.uniqueIps24h} 个来源 IP）</span>` : `<span style="color:var(--green);">🟢 运行安全 · 近 24 小时 0 次攻击探测</span>`}
-                  </div>
-                </div>
-                <div class="settings-item-desc" style="margin-top:4px;">
-                  监测伪造 <code>hst_</code> 令牌、敏感路径探测（403）、密码爆破（429）与未审批设备直连，命中后立即推送到你的 iPhone 锁屏。
-                </div>
-                <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
-                  <button class="pill-action-btn" onclick="sendTestSecurityAlert()">🚨 演练告警</button>
-                  ${(secSum.recentEvents || []).length > 0 ? `<button class="pill-action-btn" onclick="clearSecurityAlerts()">🧹 清空日志</button>` : ""}
-                </div>
-                ${(secSum.recentEvents || []).length > 0 ? `
-                  <div style="margin-top:10px;display:flex;flex-direction:column;gap:6px;max-height:220px;overflow-y:auto;">
-                    ${(secSum.recentEvents || []).slice(0, 12).map((ev) => {
-			const badge = {
-				forged_host_token: "伪造令牌",
-				sensitive_path_probe: "敏感路径",
-				auth_bruteforce: "密码爆破",
-				unauth_api_scan: "异常直连"
-			}[ev.kind] || ev.kind || "异常";
-			return `
-                        <div style="padding:8px 10px;border-radius:10px;background:var(--subtle);border:1px solid var(--border);font-size:11.5px;line-height:1.45;">
-                          <div style="display:flex;justify-content:space-between;gap:6px;align-items:center;flex-wrap:wrap;">
-                            <span>
-                              <strong style="color:${ev.severity === "high" ? "var(--red)" : "#d97706"};">[${esc$1(badge)} · ${esc$1(String(ev.status || 401))}]</strong>
-                              <code style="margin-left:4px;">${esc$1(ev.ip || "unknown")}</code>
-                            </span>
-                            <span style="color:var(--muted);">${formatTime(ev.at)}</span>
-                          </div>
-                          <div style="color:var(--text-secondary);font-family:var(--mono);font-size:11px;margin-top:3px;word-break:break-all;">
-                            ${esc$1(ev.method || "GET")} ${esc$1(ev.path || "")}
-                          </div>
-                          ${ev.detail ? `<div style="color:var(--muted);margin-top:2px;">${esc$1(ev.detail)}</div>` : ""}
-                        </div>
-                      `;
-		}).join("")}
-                  </div>
-                ` : ""}
-              </div>
-            </div>
-          </div>
-
-          <div>
-            <div class="settings-group-title">手机锁屏通知 (iOS 16.4+ Web Push)</div>
-            <div class="settings-card">
-              <div class="settings-item" style="display:block;">
-                <div class="settings-item-title">启用 iPhone 锁屏实时推送</div>
-                <div class="settings-item-desc">当任意电脑有待审批、任务完成或异常时直接弹窗</div>
-                <div id="pushLocalStatus" style="margin-top:9px;font-size:12.5px;font-weight:600;color:${esc$1(cachedPushStatusColor || "var(--primary)")};">
-                  ${esc$1(cachedPushStatusText || "正在检测本机推送状态…")}
-                </div>
-                <div id="pushDeviceList" style="margin-top:4px;font-size:12px;color:var(--muted);line-height:1.55;">${esc$1(cachedPushDeviceListText || "")}</div>
-                <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
-                  <button class="pill-action-btn primary" onclick="subscribeIphonePush()">📲 开启推送</button>
-                  <button class="pill-action-btn" onclick="sendTestPush()">🔔 测试</button>
-                  <button class="pill-action-btn" style="color:var(--red);" onclick="disableIphonePush()">关闭本机推送</button>
-                </div>
-                <div class="settings-item-desc" style="margin-top:8px;">
-                  iPhone 需先在 Safari「分享 → 添加到主屏幕」，再从桌面图标打开本页开启，才能收到锁屏通知
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div>
-            <div class="settings-group-title">隐私与访问密码保护</div>
-            <div class="settings-card">
-              <div class="settings-item">
-                <div>
-                  <div class="settings-item-title">添加新手机（6 位免密配对码）</div>
-                  <div class="settings-item-desc">生成 3 分钟有效的一次性 6 位字母/数字配对码，新手机免输长密码直接解锁</div>
-                </div>
-                <button class="pill-action-btn primary" onclick="openPairingCodeSheet()">📱 生成配对码</button>
-              </div>
-              <div class="settings-item">
-                <div>
-                  <div class="settings-item-title">修改总控台访问密码</div>
-                  <div class="settings-item-desc">随时更换访问密钥，防止未授权访问</div>
-                </div>
-                <button class="pill-action-btn" onclick="promptChangePassword()">🔑 修改密码</button>
-              </div>
-              <div class="settings-item">
-                <div>
-                  <div class="settings-item-title">锁定当前浏览器</div>
-                  <div class="settings-item-desc">清除本机浏览器缓存的登录凭证</div>
-                </div>
-                <button class="pill-action-btn" style="color:var(--red);" onclick="lockAndLogout()">🔒 立即锁定</button>
-              </div>
-            </div>
-          </div>
-
-          <div style="text-align:center;padding:8px 12px 20px;">
-            <div style="margin-bottom:10px;">
-              <button
-                type="button"
-                class="pill-action-btn"
-                style="font-size:12px;padding:6px 14px;"
-                onclick="forceHardUpgradeReload()"
-              >
-                🔄 强制刷新前端版本（清缓存重载）
-              </button>
-            </div>
-            <div
-              style="font-size:11.5px;color:var(--muted);cursor:pointer;user-select:none;"
-              onclick="copyCodeText('${escUriJsStr(`DSH Hub v${buildInfo.version || "0.2.0"} (${buildInfo.uiBuild || "dev"}) · started ${buildInfo.startedAt ? new Date(buildInfo.startedAt).toISOString() : ""}`)}', '📋 版本信息已复制')"
-            >
-              DSH 远控总控台 v${esc$1(buildInfo.version || "0.2.0")} · 构建 <code>${esc$1(buildInfo.uiBuild || "dev")}</code>${buildInfo.startedAt ? " · 云端启动于 " + formatTime(buildInfo.startedAt) : ""}
-            </div>
-          </div>
-        </div>
-      `;
-		if (prevScrollTop > 0) viewport.scrollTop = prevScrollTop;
-		refreshPushStatus();
+		settingsPanel.render(document.getElementById("mainViewport"));
 	}
 	function getSubServerKeyBase64Url(sub) {
 		try {
@@ -19383,7 +19612,8 @@ function initHubController() {
 	async function refreshPushStatus(manual = false) {
 		const statusEl = document.getElementById("pushLocalStatus");
 		const listEl = document.getElementById("pushDeviceList");
-		if (!statusEl) return;
+		const summaryBadgeEl = document.getElementById("settingsPushSummaryBadge");
+		if (!statusEl && !summaryBadgeEl) return;
 		const subs = hubState.pushSubscriptions || [];
 		if (listEl) {
 			if (!subs.length) cachedPushDeviceListText = "还没有设备登记推送";
@@ -19396,19 +19626,23 @@ function initHubController() {
 			}
 			listEl.textContent = cachedPushDeviceListText;
 		}
-		if (!manual && cachedPushStatusText && Date.now() - lastPushStatusAt < 1e4) {
-			statusEl.textContent = cachedPushStatusText;
-			if (cachedPushStatusColor) statusEl.style.color = cachedPushStatusColor;
+		const applyPushUi = () => {
+			if (statusEl) {
+				statusEl.textContent = cachedPushStatusText;
+				if (cachedPushStatusColor) statusEl.style.color = cachedPushStatusColor;
+			}
+			settingsPanel.syncPushSummaryBadge(cachedPushStatusText);
 			if (langPref === "en") applyLangToDom(document.body, langPref);
+		};
+		if (!manual && cachedPushStatusText && Date.now() - lastPushStatusAt < 1e4) {
+			applyPushUi();
 			return;
 		}
 		lastPushStatusAt = Date.now();
 		if (!("serviceWorker" in navigator) || !("PushManager" in window) || typeof Notification === "undefined") {
 			cachedPushStatusText = "本机：当前浏览器不支持锁屏推送（iPhone 需从主屏幕 App 打开）";
 			cachedPushStatusColor = "#d97706";
-			statusEl.textContent = cachedPushStatusText;
-			statusEl.style.color = cachedPushStatusColor;
-			if (langPref === "en") applyLangToDom(document.body, langPref);
+			applyPushUi();
 			return;
 		}
 		try {
@@ -19435,16 +19669,12 @@ function initHubController() {
 				cachedPushStatusText = "本机：未开启（点下方「开启推送」）";
 				cachedPushStatusColor = "#d97706";
 			}
-			statusEl.textContent = cachedPushStatusText;
-			statusEl.style.color = cachedPushStatusColor;
-			if (langPref === "en") applyLangToDom(document.body, langPref);
+			applyPushUi();
 			if (manual) showToast("已刷新推送状态");
 		} catch (err) {
 			cachedPushStatusText = "本机：状态读取失败（" + (err && err.message || err) + "）";
 			cachedPushStatusColor = "#dc2626";
-			statusEl.textContent = cachedPushStatusText;
-			statusEl.style.color = cachedPushStatusColor;
-			if (langPref === "en") applyLangToDom(document.body, langPref);
+			applyPushUi();
 		}
 	}
 	async function disableIphonePush() {
@@ -19704,6 +19934,10 @@ function initHubController() {
 		renderAll();
 	}
 	function switchTab(tab) {
+		if (tab === "settings" && currentTab === "settings" && settingsPanel.getActiveSubpage() !== "home") {
+			settingsPanel.closeSubpage();
+			return;
+		}
 		currentTab = tab;
 		document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
 		document.getElementById("tab-" + tab).classList.add("active");
@@ -21788,6 +22022,8 @@ function initHubController() {
 		jumpToSessionFiles,
 		deleteTargetSession,
 		renderSettingsTab,
+		openSettingsSubpage,
+		closeSettingsSubpage,
 		refreshPushStatus,
 		disableIphonePush,
 		activateFeishuHost,
