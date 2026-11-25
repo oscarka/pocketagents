@@ -149,8 +149,11 @@ void pa_ui_init(void)
     s_dash_banner_lbl = lv_label_create(s_dash_banner);
     lv_obj_set_style_text_font(s_dash_banner_lbl, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(s_dash_banner_lbl, lv_color_hex(COL_MUTED), 0);
+    lv_label_set_long_mode(s_dash_banner_lbl, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(s_dash_banner_lbl, 204);
+    lv_obj_set_style_text_align(s_dash_banner_lbl, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_center(s_dash_banner_lbl);
-    lv_label_set_text(s_dash_banner_lbl, "Connecting to Hub...");
+    lv_label_set_text(s_dash_banner_lbl, "Connecting Wi-Fi...");
 
     // 4 compact task rows
     for (int i = 0; i < 4; i++) {
@@ -282,13 +285,15 @@ void pa_ui_init(void)
     lv_obj_center(s_toast_lbl);
     lv_obj_add_flag(s_toast_box, LV_OBJ_FLAG_HIDDEN);
 
-    // --- Footer keybar (inset for 30px curved bottom corners) ---
-    (void)make_clean_box(s_scr, 18, 280, 204, 1, COL_BORDER, 0, 0, 0);
+    // --- Footer keybar (well clear of 30px curved bottom corners) ---
+    (void)make_clean_box(s_scr, 22, 274, 196, 1, COL_BORDER, 0, 0, 0);
     s_footer_lbl = lv_label_create(s_scr);
     lv_obj_set_style_text_font(s_footer_lbl, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(s_footer_lbl, lv_color_hex(COL_MUTED), 0);
-    lv_obj_align(s_footer_lbl, LV_ALIGN_BOTTOM_MID, 0, -14);
-    lv_label_set_text(s_footer_lbl, "OK: SYNC  HOLD: VOICE");
+    lv_obj_set_width(s_footer_lbl, 196);
+    lv_obj_set_style_text_align(s_footer_lbl, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_align(s_footer_lbl, LV_ALIGN_BOTTOM_MID, 0, -22);
+    lv_label_set_text(s_footer_lbl, "OK:SYNC  HOLD:VOICE");
 
     lv_screen_load(s_scr);
 }
@@ -325,7 +330,7 @@ static void render_dashboard(const pa_state_t *st)
     } else if (st->digest.pending_count > 0) {
         lv_obj_set_style_bg_color(s_dash_banner, lv_color_hex(0x3B2A0Au), 0);
         lv_obj_set_style_text_color(s_dash_banner_lbl, lv_color_hex(COL_AMBER), 0);
-        lv_label_set_text_fmt(s_dash_banner_lbl, "%d APPROVALS WAITING - PRESS OK", st->digest.pending_count);
+        lv_label_set_text_fmt(s_dash_banner_lbl, "%d PENDING - PRESS OK", st->digest.pending_count);
     } else {
         lv_obj_set_style_bg_color(s_dash_banner, lv_color_hex(0x0B2B22u), 0);
         lv_obj_set_style_text_color(s_dash_banner_lbl, lv_color_hex(COL_EMERALD), 0);
@@ -359,9 +364,9 @@ static void render_dashboard(const pa_state_t *st)
     }
 
     if (st->digest.pending_count > 0) {
-        lv_label_set_text(s_footer_lbl, "OK: TRIAGE  HOLD: VOICE");
+        lv_label_set_text(s_footer_lbl, "OK:TRIAGE  HOLD:VOICE");
     } else {
-        lv_label_set_text(s_footer_lbl, "UP/DN: LIST  HOLD: VOICE");
+        lv_label_set_text(s_footer_lbl, "UP/DN:LIST  HOLD:VOICE");
     }
 }
 
@@ -413,7 +418,7 @@ static void render_approval(const pa_state_t *st)
             lv_label_set_text(s_opt_lbls[i], line);
         }
         lv_obj_add_flag(s_l2_banner, LV_OBJ_FLAG_HIDDEN);
-        lv_label_set_text(s_footer_lbl, "UP/DN:OPT  OK:PICK  2xUP:BACK");
+        lv_label_set_text(s_footer_lbl, "UP/DN:OPT  OK:PICK");
     } else {
         lv_obj_add_flag(s_opt_box, LV_OBJ_FLAG_HIDDEN);
         lv_obj_remove_flag(s_app_cmd_lbl, LV_OBJ_FLAG_HIDDEN);
@@ -424,13 +429,13 @@ static void render_approval(const pa_state_t *st)
             lv_obj_remove_flag(s_l2_banner, LV_OBJ_FLAG_HIDDEN);
             lv_label_set_text_fmt(s_l2_banner_lbl, "PIN %s - HOLD OK",
                                   st->l2_pin_code[0] ? st->l2_pin_code : "---");
-            lv_label_set_text(s_footer_lbl, "HOLD OK: SAY PIN  2xOK: DENY");
+            lv_label_set_text(s_footer_lbl, "HOLD:PIN  2xOK:DENY");
         } else {
             lv_obj_add_flag(s_l2_banner, LV_OBJ_FLAG_HIDDEN);
             if (a->risk == PA_RISK_L2) {
                 lv_label_set_text(s_footer_lbl, "OK:GET PIN  2xOK:DENY");
             } else {
-                lv_label_set_text(s_footer_lbl, "OK:ALLOW  2xOK:DENY  DN:NEXT");
+                lv_label_set_text(s_footer_lbl, "OK:ALLOW  2xOK:DENY");
             }
         }
     }

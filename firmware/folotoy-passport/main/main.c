@@ -19,6 +19,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 static const char *TAG = "pa_main";
 
@@ -34,8 +35,11 @@ typedef struct {
 } net_job_t;
 
 static pa_state_t s_state;
+static pa_state_t s_ui_snap;      // Kept static (off FreeRTOS task stacks!)
+static pa_digest_t s_net_digest;  // Kept static (off FreeRTOS task stacks!)
 static pa_net_config_t s_cfg;
 static SemaphoreHandle_t s_state_mux;
+static SemaphoreHandle_t s_ui_snap_mux;
 static QueueHandle_t s_btn_queue;
 static QueueHandle_t s_net_queue;
 static QueueHandle_t s_chime_queue;
@@ -54,15 +58,19 @@ static void enqueue_chime(pa_chime_t ch)
 
 static void refresh_ui_now(void)
 {
-    pa_state_t snap;
-    if (xSemaphoreTake(s_state_mux, pdMS_TO_TICKS(100)) != pdTRUE) return;
-    snap = s_state;
+    if (!s_ui_snap_mux || xSemaphoreTake(s_ui_snap_mux, pdMS_TO_TICKS(300)) != pdTRUE) return;
+    if (xSemaphoreTake(s_state_mux, pdMS_TO_TICKS(100)) != pdTRUE) {
+        xSemaphoreGive(s_ui_snap_mux);
+        return;
+    }
+    s_ui_snap = s_state;
     xSemaphoreGive(s_state_mux);
 
     if (bsp_lvgl_lock(250)) {
-        pa_ui_render(&snap);
+        pa_ui_render(&s_ui_snap);
         bsp_lvgl_unlock();
     }
+    xSemaphoreGive(s_ui_snap_mux);
 }
 
 // Button callback runs in shared esp_timer context -> enqueue only!
@@ -89,12 +97,13 @@ static void console_worker_task(void *arg)
     char line[280];
     size_t pos = 0;
     while (true) {
-        int ch = getchar();
-        if (ch == EOF) {
-            clearerr(stdin);
+        unsigned char byte = 0;
+        ssize_t r = read(STDIN_FILENO, &byte, 1);
+        if (r <= 0) {
             vTaskDelay(pdMS_TO_TICKS(40));
             continue;
         }
+        int ch = (int)byte;
         if (ch == '\r' || ch == '\n') {
             if (pos > 0) {
                 line[pos] = '\0';
@@ -269,21 +278,21 @@ static void net_worker_task(void *arg)
             continue;
         }
 
-        pa_digest_t digest;
-        int status = pa_net_fetch_digest(&s_cfg, last_rev, &digest);
-        if (status == 200 && digest.ok) {
-            if (!digest.unchanged) {
+        int status = pa_net_fetch_digest(&s_cfg, last_rev, &s_net_digest);
+        if (status == 200 && s_net_digest.ok) {
+            if (!s_net_digest.unchanged) {
                 ESP_LOGI(TAG, "[PA] digest rev=%s hosts=%d run=%d pending=%d",
-                         digest.rev, digest.hosts_online, digest.running_count, digest.pending_count);
+                         s_net_digest.rev, s_net_digest.hosts_online,
+                         s_net_digest.running_count, s_net_digest.pending_count);
             }
-            snprintf(last_rev, sizeof(last_rev), "%s", digest.rev);
+            snprintf(last_rev, sizeof(last_rev), "%s", s_net_digest.rev);
             pa_chime_t ch = PA_CHIME_NONE;
             if (xSemaphoreTake(s_state_mux, pdMS_TO_TICKS(100)) == pdTRUE) {
-                ch = pa_state_apply_digest(&s_state, &digest, now_ms());
+                ch = pa_state_apply_digest(&s_state, &s_net_digest, now_ms());
                 xSemaphoreGive(s_state_mux);
             }
             if (ch != PA_CHIME_NONE) enqueue_chime(ch);
-            if (!digest.unchanged) refresh_ui_now();
+            if (!s_net_digest.unchanged) refresh_ui_now();
         } else {
             last_rev[0] = '\0';
             if (xSemaphoreTake(s_state_mux, pdMS_TO_TICKS(100)) == pdTRUE) {
@@ -313,6 +322,7 @@ void app_main(void)
     bsp_display_backlight(100);
 
     s_state_mux = xSemaphoreCreateMutex();
+    s_ui_snap_mux = xSemaphoreCreateMutex();
     s_btn_queue = xQueueCreate(12, sizeof(raw_btn_msg_t));
     s_net_queue = xQueueCreate(6, sizeof(net_job_t));
     s_chime_queue = xQueueCreate(6, sizeof(pa_chime_t));
