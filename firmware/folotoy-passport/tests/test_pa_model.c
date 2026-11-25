@@ -136,8 +136,11 @@ static void test_l2_pin_guard_and_ptt_voice(void)
     act = pa_state_on_key(&st, PA_KEY_OK, PA_KEY_EV_CLICK, 3000);
     assert(st.screen == PA_SCREEN_APPROVAL);
 
-    // Double-click OK denies
+    // Double-click OK or Long-press DOWN denies
     act = pa_state_on_key(&st, PA_KEY_OK, PA_KEY_EV_DOUBLE, 3100);
+    assert(act.cmd == PA_CMD_DENY);
+    st.busy = false;
+    act = pa_state_on_key(&st, PA_KEY_DOWN, PA_KEY_EV_LONG, 3200);
     assert(act.cmd == PA_CMD_DENY);
 
     // Console provisioning command parser

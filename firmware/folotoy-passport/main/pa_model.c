@@ -860,7 +860,8 @@ pa_dispatch_t pa_state_on_key(pa_state_t *st, pa_key_t key, pa_key_ev_t ev, uint
                 out.ui_dirty = true;
                 return out;
             }
-            if (ev == PA_KEY_EV_DOUBLE && key == PA_KEY_OK) {
+            if ((ev == PA_KEY_EV_DOUBLE && key == PA_KEY_OK) ||
+                (ev == PA_KEY_EV_LONG && key == PA_KEY_DOWN)) {
                 st->busy = true;
                 out.cmd = PA_CMD_DENY;
                 out.slot = cur->slot;

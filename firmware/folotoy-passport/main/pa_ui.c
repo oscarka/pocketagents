@@ -221,9 +221,9 @@ void pa_ui_init(void)
     lv_label_set_text(s_app_cmd_lbl, "");
 
     // Multi-choice options container inside card
-    s_opt_box = make_clean_box(s_app_card, 8, 48, 200, 122, COL_CARD, 0, 0, 0);
+    s_opt_box = make_clean_box(s_app_card, 8, 54, 200, 118, COL_CARD, 0, 0, 0);
     for (int i = 0; i < PA_MAX_OPTIONS; i++) {
-        s_opt_rows[i] = make_clean_box(s_opt_box, 0, i * 30, 200, 26, COL_CARD_ALT, 6, COL_BORDER, 1);
+        s_opt_rows[i] = make_clean_box(s_opt_box, 0, i * 29, 200, 26, COL_CARD_ALT, 6, COL_BORDER, 1);
         s_opt_lbls[i] = lv_label_create(s_opt_rows[i]);
         lv_obj_set_style_text_font(s_opt_lbls[i], &s_font_cjk, 0);
         lv_obj_set_style_text_color(s_opt_lbls[i], lv_color_hex(COL_TEXT), 0);
@@ -429,13 +429,13 @@ static void render_approval(const pa_state_t *st)
             lv_obj_remove_flag(s_l2_banner, LV_OBJ_FLAG_HIDDEN);
             lv_label_set_text_fmt(s_l2_banner_lbl, "PIN %s - HOLD OK",
                                   st->l2_pin_code[0] ? st->l2_pin_code : "---");
-            lv_label_set_text(s_footer_lbl, "HOLD:PIN  2xOK:DENY");
+            lv_label_set_text(s_footer_lbl, "HOLD OK:PIN  DN:DENY");
         } else {
             lv_obj_add_flag(s_l2_banner, LV_OBJ_FLAG_HIDDEN);
             if (a->risk == PA_RISK_L2) {
-                lv_label_set_text(s_footer_lbl, "OK:GET PIN  2xOK:DENY");
+                lv_label_set_text(s_footer_lbl, "OK:PIN  HOLD DN:DENY");
             } else {
-                lv_label_set_text(s_footer_lbl, "OK:ALLOW  2xOK:DENY");
+                lv_label_set_text(s_footer_lbl, "OK:ALLOW  HOLD DN:NO");
             }
         }
     }
@@ -491,7 +491,12 @@ void pa_ui_render(const pa_state_t *st)
         render_voice(st);
     }
 
-    if (st->toast[0] != '\0') {
+    bool l2_banner_visible = (st->screen == PA_SCREEN_APPROVAL && st->l2_pin_active &&
+                              st->digest.approval_count > 0 &&
+                              st->selected_approval < st->digest.approval_count &&
+                              strcmp(st->l2_target_code, st->digest.approvals[st->selected_approval].code) == 0);
+
+    if (st->toast[0] != '\0' && !l2_banner_visible) {
         lv_obj_remove_flag(s_toast_box, LV_OBJ_FLAG_HIDDEN);
         lv_obj_set_style_bg_color(s_toast_box, lv_color_hex(st->toast_is_error ? COL_CRIMSON : COL_EMERALD), 0);
         lv_obj_set_style_text_color(s_toast_lbl,
