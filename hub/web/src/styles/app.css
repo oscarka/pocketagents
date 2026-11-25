@@ -25,6 +25,31 @@
       --safe-bottom: env(safe-area-inset-bottom, 0px);
     }
 
+    /* Native iOS shell v1.0.0 OTA safe-area protection (auto-disabled on v1.0.1+ where SwiftUI manages safe areas) */
+    :root.ios-native-shell-v1 .top-bar,
+    :root.ios-native-shell-v1 .chat-navbar {
+      height: calc(54px + var(--safe-top));
+      padding-top: var(--safe-top);
+    }
+
+    :root.ios-native-shell-v1 .walk-mode-overlay {
+      padding-top: calc(var(--safe-top) + 12px);
+      padding-bottom: calc(var(--safe-bottom) + 18px);
+    }
+
+    :root.ios-native-shell-v1 #triageDeckOverlay {
+      padding-top: var(--safe-top);
+      padding-bottom: var(--safe-bottom);
+    }
+
+    :root.ios-native-shell-v1 #htmlPreviewOverlay > div:first-child {
+      padding-top: max(10px, var(--safe-top)) !important;
+    }
+
+    :root.ios-native-shell-v1 .sheet-panel {
+      max-height: calc(100dvh - var(--safe-top) - 10px);
+    }
+
     :root[data-theme="dark"] {
       --bg: #0b1120;
       --surface: #0f172a;

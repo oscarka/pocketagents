@@ -830,3 +830,13 @@ test('v0.9.31 full English i18n coverage for Settings Home, subpages, VoiceProvi
   assert.equal(translateZhStringToEn('Provider 列表 (3)'), 'Providers (3)');
   assert.equal(translateZhStringToEn('🔒 后台常驻'), '🔒 Background Active');
 });
+
+test('v0.9.32 native iOS shell v1.0.0 OTA safe-area fallback prevents Dynamic Island top-bar overlap', async () => {
+  const fs = await import('node:fs');
+  const ctrlSrc = fs.readFileSync(new URL('../../hub/web/src/controller.js', import.meta.url), 'utf8');
+  const cssSrc = fs.readFileSync(new URL('../../hub/web/src/styles/app.css', import.meta.url), 'utf8');
+  assert.match(ctrlSrc, /ios-native-shell-v1/);
+  assert.match(ctrlSrc, /safeAreaManaged/);
+  assert.match(cssSrc, /:root\.ios-native-shell-v1 \.top-bar/);
+  assert.match(cssSrc, /:root\.ios-native-shell-v1 \.chat-navbar/);
+});

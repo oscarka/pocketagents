@@ -730,6 +730,23 @@ export function initHubController() {
   }
   applyTheme(themePref);
 
+  // Instant OTA safe-area fallback for v1.0.0 native iOS shell builds whose SwiftUI wrapper
+  // ignored safe areas before v1.0.1 (`safeAreaManaged: true`), preventing Dynamic Island overlap.
+  if (
+    typeof window !== 'undefined' &&
+    typeof document !== 'undefined' &&
+    window.__dshNativeShell?.platform === 'ios-native' &&
+    !window.__dshNativeShell?.safeAreaManaged
+  ) {
+    const root = document.documentElement;
+    root.classList.add('ios-native-shell-v1');
+    const maxDim = Math.max(window.screen?.height || 0, window.screen?.width || 0);
+    const topInset = maxDim >= 852 ? 59 : maxDim >= 812 ? 47 : 20;
+    const bottomInset = maxDim >= 812 ? 28 : 0;
+    root.style.setProperty('--safe-top', `max(env(safe-area-inset-top, 0px), ${topInset}px)`);
+    root.style.setProperty('--safe-bottom', `max(env(safe-area-inset-bottom, 0px), ${bottomInset}px)`);
+  }
+
   // 界面语言偏好 (zh | en)：支持 ?lang=en|zh、localStorage 与浏览器自动识别
   let langPref = getLangPref();
   function updateDemoBannerCopy() {
