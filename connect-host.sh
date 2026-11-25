@@ -401,6 +401,10 @@ if [ "$(uname -s)" = "Darwin" ] && mkdir -p "$PLIST_DIR" 2>/dev/null; then
   <dict>
     <key>PATH</key>
     <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>LANG</key>
+    <string>en_US.UTF-8</string>
+    <key>LC_CTYPE</key>
+    <string>UTF-8</string>
     <key>HOME</key>
     <string>${XML_HOME}</string>
     <key>DSH_HOME</key>

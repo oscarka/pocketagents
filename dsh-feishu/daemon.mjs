@@ -13,6 +13,13 @@ for (const k of [
 ]) {
   delete process.env[k]
 }
+// Ensure UTF-8 locale under macOS LaunchAgent / Linux systemd so pbcopy, osascript, and CLI tools never corrupt CJK text
+if (!process.env.LANG || !/utf-?8/i.test(process.env.LANG)) {
+  process.env.LANG = 'en_US.UTF-8'
+}
+if (!process.env.LC_CTYPE || !/utf-?8/i.test(process.env.LC_CTYPE)) {
+  process.env.LC_CTYPE = 'UTF-8'
+}
 import { resolveConfig, loadSettings } from './lib/config.js'
 import { acquireDaemonLock } from './lib/daemon-lock.js'
 import { FeishuBridge } from './lib/bridge.js'

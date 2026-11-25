@@ -709,3 +709,41 @@ test('v0.9.29 native iOS shell audio bridge hooks and background SSE keepalive e
   assert.match(voiceSheetsSrc, /🔒 后台常驻/);
   assert.match(controllerSrc, /__dshWalkKeepAliveActive/);
 });
+
+test('v0.9.30 Antigravity pbcopy/osascript fallback & daemon enforce UTF-8 locale to prevent LaunchAgent CJK mojibake', async () => {
+  const fs = await import('node:fs');
+  const { executeAntigravityIdeAction } = await import('../lib/antigravity-ide.js');
+  const calls = [];
+  const res = await executeAntigravityIdeAction(
+    {
+      type: 'prompt',
+      agentId: 'agy-ide:11111111-2222-3333-4444-555555555555',
+      text: '继续4a',
+    },
+    {
+      home: '/nonexistent-home-v0930',
+      fetchImpl: null,
+      execImpl: async (bin, args, opts) => {
+        calls.push({ bin, args, opts });
+        if (bin === 'ps') return { stdout: '' };
+        return { stdout: '' };
+      },
+    },
+  );
+  assert.equal(res.ok, true);
+  assert.equal(res.method, 'applescript');
+  const pbcopyCall = calls.find(c => c.bin === 'pbcopy');
+  const osascriptCall = calls.find(c => c.bin === 'osascript');
+  assert.ok(pbcopyCall, 'expected pbcopy call in applescript fallback');
+  assert.equal(pbcopyCall.opts?.input, '继续4a');
+  assert.match(String(pbcopyCall.opts?.env?.LANG || ''), /UTF-8/i);
+  assert.match(String(pbcopyCall.opts?.env?.LC_CTYPE || ''), /UTF-8/i);
+  assert.ok(osascriptCall, 'expected osascript call');
+  assert.match(String(osascriptCall.opts?.env?.LANG || ''), /UTF-8/i);
+
+  const daemonSrc = fs.readFileSync(new URL('../daemon.mjs', import.meta.url), 'utf8');
+  const connectSrc = fs.readFileSync(new URL('../../connect-host.sh', import.meta.url), 'utf8');
+  assert.match(daemonSrc, /process\.env\.LANG = 'en_US\.UTF-8'/);
+  assert.match(daemonSrc, /process\.env\.LC_CTYPE = 'UTF-8'/);
+  assert.match(connectSrc, /<key>LANG<\/key>/);
+});

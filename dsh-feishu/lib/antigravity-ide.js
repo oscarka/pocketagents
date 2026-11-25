@@ -9,6 +9,18 @@ import { cleanForChat, redactText } from './redact.js'
 
 const execFileAsync = promisify(execFile)
 const sessionParseCache = new Map()
+const UTF8_CHILD_ENV = {
+  LANG: 'en_US.UTF-8',
+  LC_ALL: 'en_US.UTF-8',
+  LC_CTYPE: 'UTF-8',
+}
+
+function withUtf8Env(baseEnv = process.env) {
+  return {
+    ...(baseEnv && typeof baseEnv === 'object' ? baseEnv : {}),
+    ...UTF8_CHILD_ENV,
+  }
+}
 
 function isSafeAntigravityConvId(id) {
   const s = String(id ?? '').trim()
@@ -33,9 +45,10 @@ function isTrustedAgyBinPath(binPath = '', home = homedir()) {
 
 async function copyTextToClipboardSafe(text, execImpl = execFileAsync) {
   const str = String(text ?? '')
+  const env = withUtf8Env()
   if (execImpl !== execFileAsync) {
     try {
-      await execImpl('pbcopy', [], { input: str, timeout: 3000 })
+      await execImpl('pbcopy', [], { input: str, timeout: 3000, env })
     } catch {
       // ignore pbcopy failure in test environments
     }
@@ -52,7 +65,9 @@ async function copyTextToClipboardSafe(text, execImpl = execFileAsync) {
     const timer = setTimeout(done, 3000)
     timer.unref?.()
     try {
-      const child = spawn('pbcopy', [], { stdio: ['pipe', 'ignore', 'ignore'] })
+      // Force UTF-8 locale so macOS LaunchAgent (which lacks LANG/LC_CTYPE) never runs pbcopy
+      // in C/GB18030 fallback encoding (which turns "继续4a" into "缁х画4a").
+      const child = spawn('pbcopy', [], { stdio: ['pipe', 'ignore', 'ignore'], env })
       child.on('error', done)
       child.on('close', done)
       child.stdin.on('error', done)
@@ -2785,6 +2800,8 @@ function buildCleanAgentApiEnv(hub) {
   else delete env.ANTIGRAVITY_LS_ADDRESS
   if (hub?.csrfToken) env.ANTIGRAVITY_CSRF_TOKEN = hub.csrfToken
   else delete env.ANTIGRAVITY_CSRF_TOKEN
+  if (!env.LANG || !/utf-?8/i.test(env.LANG)) env.LANG = 'en_US.UTF-8'
+  if (!env.LC_CTYPE || !/utf-?8/i.test(env.LC_CTYPE)) env.LC_CTYPE = 'UTF-8'
   return env
 }
 
@@ -3070,7 +3087,7 @@ export async function executeAntigravityIdeAction(action, {
 
   const runAppleScript = async script => {
     try {
-      await execImpl('osascript', ['-e', script], { timeout: 5000 })
+      await execImpl('osascript', ['-e', script], { timeout: 5000, env: withUtf8Env() })
       return { ok: true }
     } catch (error) {
       return { ok: false, error: error?.message || String(error) }
