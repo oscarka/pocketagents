@@ -1189,15 +1189,27 @@ export class VoiceCopilotEngine {
     }
 
     if (provider === 'volcengine_asr') {
-      const url = cred.baseUrl || 'https://openspeech.bytedance.com/api/v3/auc/bigmodel/recognize/flash'
-      const resourceId = stageCfg?.model || cred.resourceId || 'volc.bigasr.auc_turbo'
+      const rawUrl = cred.baseUrl || 'https://openspeech.bytedance.com/api/v3/auc/bigmodel/recognize/flash'
+      const resourceId = String(stageCfg?.model || cred.resourceId || 'volc.bigasr.auc_turbo').trim() || 'volc.bigasr.auc_turbo'
       const headers = {
         ...buildVolcHeaders(cred, resourceId, 'volcengine_asr'),
         'X-Api-Sequence': '-1',
       }
+      const audioFormat = /mp4|m4a/i.test(mimeType)
+        ? 'mp4'
+        : /mp3|mpeg/i.test(mimeType)
+          ? 'mp3'
+          : /ogg/i.test(mimeType)
+            ? 'ogg'
+            : 'wav'
+      const isAsyncStandardAuc =
+        resourceId === 'volc.seedasr.auc'
+        || resourceId === 'volc.bigasr.auc'
+        || /\/auc\/bigmodel\/submit\/?$/i.test(rawUrl)
+
       const reqBody = {
         user: { uid: 'pocketagents-walk' },
-        audio: { data: cleanB64 },
+        audio: isAsyncStandardAuc ? { data: cleanB64, format: audioFormat } : { data: cleanB64 },
         request: {
           model_name: 'bigmodel',
           enable_itn: true,
@@ -1207,7 +1219,85 @@ export class VoiceCopilotEngine {
             : {}),
         },
       }
-      const resp = await fetchWithTimeout(this.fetch, url, {
+
+      if (isAsyncStandardAuc) {
+        const submitUrl = /\/recognize\/flash\/?$/i.test(rawUrl)
+          ? rawUrl.replace(/\/recognize\/flash\/?$/i, '/submit')
+          : /\/submit\/?$/i.test(rawUrl)
+            ? rawUrl
+            : 'https://openspeech.bytedance.com/api/v3/auc/bigmodel/submit'
+        const queryUrl = submitUrl.replace(/\/submit\/?$/i, '/query')
+
+        const subResp = await fetchWithTimeout(this.fetch, submitUrl, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(reqBody),
+        })
+        const subCode = String(subResp.headers?.get?.('x-api-status-code') || '').trim()
+        const subMsg = String(subResp.headers?.get?.('x-api-message') || '').trim()
+        const subData = await subResp.json().catch(() => ({}))
+        if (!subResp.ok || (subCode && subCode !== '20000000')) {
+          const hdrCode = subData?.header?.code ? ` (${subData.header.code})` : ''
+          const hdrMsg = subData?.header?.message ? `${subData.header.message}${hdrCode}` : ''
+          return {
+            ok: false,
+            provider,
+            model: resourceId,
+            credId: cred.id,
+            latencyMs: this.now() - t0,
+            error: subMsg || hdrMsg || subData?.message || subData?.error || `Volcengine ASR submit HTTP ${subResp.status} (${subCode || 'err'})`,
+          }
+        }
+
+        // Poll /query using the exact same X-Api-Request-Id (short utterances typically finish in 300-900ms)
+        const queryHeaders = { ...headers }
+        delete queryHeaders['X-Api-Sequence']
+        const isMockFetch = this.fetch !== globalThis.fetch
+        const maxPolls = 40
+        for (let attempt = 0; attempt < maxPolls; attempt++) {
+          const waitMs = isMockFetch ? 0 : (attempt < 3 ? 250 : 400)
+          if (waitMs > 0) await new Promise(r => setTimeout(r, waitMs))
+          const qResp = await fetchWithTimeout(this.fetch, queryUrl, {
+            method: 'POST',
+            headers: queryHeaders,
+            body: '{}',
+          })
+          const qCode = String(qResp.headers?.get?.('x-api-status-code') || '').trim()
+          const qMsg = String(qResp.headers?.get?.('x-api-message') || '').trim()
+          if (qCode === '20000001' || qCode === '20000002') {
+            continue
+          }
+          const latencyMs = this.now() - t0
+          if (qCode === '20000003') {
+            return { ok: true, text: '', silence: true, provider, model: resourceId, credId: cred.id, latencyMs }
+          }
+          const qData = await qResp.json().catch(() => ({}))
+          if (!qResp.ok || (qCode && qCode !== '20000000')) {
+            const hdrCode = qData?.header?.code ? ` (${qData.header.code})` : ''
+            const hdrMsg = qData?.header?.message ? `${qData.header.message}${hdrCode}` : ''
+            return {
+              ok: false,
+              provider,
+              model: resourceId,
+              credId: cred.id,
+              latencyMs,
+              error: qMsg || hdrMsg || qData?.message || qData?.error || `Volcengine ASR query HTTP ${qResp.status} (${qCode || 'err'})`,
+            }
+          }
+          const text = String(qData?.result?.text || qData?.text || '').trim()
+          return { ok: true, text, silence: !text, provider, model: resourceId, credId: cred.id, latencyMs }
+        }
+        return {
+          ok: false,
+          provider,
+          model: resourceId,
+          credId: cred.id,
+          latencyMs: this.now() - t0,
+          error: '火山标准版语音识别查询超时，请稍后重试',
+        }
+      }
+
+      const resp = await fetchWithTimeout(this.fetch, rawUrl, {
         method: 'POST',
         headers,
         body: JSON.stringify(reqBody),
@@ -2351,12 +2441,15 @@ export class VoiceCopilotEngine {
       }
       return `密钥格式不对或未授权：请检查 API Key 是否复制完整（${msg}）`
     }
+    if (/resourceid.*not allowed/i.test(lower) && provider === 'volcengine_asr') {
+      return `Resource ID 不正确（不要填控制台里的「实例 ID」）：豆包 2.0 标准版请填 volc.seedasr.auc，极速版请填 volc.bigasr.auc_turbo（${msg}）`
+    }
     if (/403|forbidden|permission|not granted|not enabled|resource.*not|45000000|55000000|requested resource/i.test(lower)) {
       if (provider === 'volcengine_tts') {
         return `该火山密钥可能尚未开通「语音合成 Seed-TTS 2.0」权限：可在火山控制台开通，或播报先改用手机自带免费（${msg}）`
       }
       if (provider === 'volcengine_asr') {
-        return `该火山密钥可能尚未开通「大模型录音文件极速识别」权限，或 Resource ID 不匹配（${msg}）`
+        return `该火山密钥未开通当前 Resource ID 的权限：如果你开通的是「2.0 标准版」，请把 Resource ID 改为 volc.seedasr.auc；如果是「极速版」，请填 volc.bigasr.auc_turbo（${msg}）`
       }
       return `无权限访问该接口或模型：请检查账号权限与余额（${msg}）`
     }

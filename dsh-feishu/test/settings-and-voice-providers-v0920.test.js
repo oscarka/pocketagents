@@ -553,4 +553,58 @@ test('v0.9.23 VoiceCopilot testCredential supports unsaved draft testing, SSRF &
   assert.equal(capturedHeaders['X-Api-App-Id'], '99887766');
   assert.equal(capturedHeaders['X-Api-App-Key'], undefined, 'TTS uses X-Api-App-Id, not X-Api-App-Key');
   assert.equal(capturedHeaders['X-Api-Access-Key'], 'real-volc-token');
+
+  // 7. v0.9.25 Volcengine Seed ASR 2.0 Standard (volc.seedasr.auc) uses async /submit + /query polling automatically
+  const asyncCalls = [];
+  let queryStep = 0;
+  const asyncAsrCopilot = new VoiceCopilotEngine({
+    vault,
+    hub: null,
+    fetchImpl: async (url, init) => {
+      const u = String(url);
+      asyncCalls.push({ url: u, rid: init?.headers?.['X-Api-Resource-Id'], reqId: init?.headers?.['X-Api-Request-Id'] });
+      if (u.endsWith('/submit')) {
+        return {
+          ok: true,
+          status: 200,
+          headers: { get: k => (k.toLowerCase() === 'x-api-status-code' ? '20000000' : '') },
+          json: async () => ({}),
+        };
+      }
+      if (u.endsWith('/query')) {
+        queryStep += 1;
+        const code = queryStep === 1 ? '20000001' : '20000000';
+        return {
+          ok: true,
+          status: 200,
+          headers: { get: k => (k.toLowerCase() === 'x-api-status-code' ? code : '') },
+          json: async () => ({ result: { text: '放行第一条审批' } }),
+        };
+      }
+      throw new Error(`Unexpected URL: ${u}`);
+    },
+  });
+  const stdRes = await asyncAsrCopilot.runSingleStt(
+    { provider: 'volcengine_asr', model: 'volc.seedasr.auc' },
+    {
+      audioBase64: Buffer.from('fakewav').toString('base64'),
+      mimeType: 'audio/wav',
+      credOverride: {
+        id: 'cred_std',
+        provider: 'volcengine_asr',
+        baseUrl: 'https://openspeech.bytedance.com/api/v3/auc/bigmodel/recognize/flash',
+        resourceId: 'volc.seedasr.auc',
+        appId: '1554603190',
+        accessToken: 'tok-std',
+      },
+    },
+  );
+  assert.equal(stdRes.ok, true);
+  assert.equal(stdRes.text, '放行第一条审批');
+  assert.equal(asyncCalls.length, 3);
+  assert.ok(asyncCalls[0].url.endsWith('/api/v3/auc/bigmodel/submit'));
+  assert.ok(asyncCalls[1].url.endsWith('/api/v3/auc/bigmodel/query'));
+  assert.ok(asyncCalls[2].url.endsWith('/api/v3/auc/bigmodel/query'));
+  assert.equal(asyncCalls[0].reqId, asyncCalls[1].reqId, 'query must reuse exact submit X-Api-Request-Id');
+  assert.equal(asyncCalls[0].rid, 'volc.seedasr.auc');
 });

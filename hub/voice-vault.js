@@ -56,7 +56,7 @@ export const VOICE_PROVIDER_CATALOG = [
     defaultBaseUrl: 'https://openspeech.bytedance.com/api/v3/auc/bigmodel/recognize/flash',
     defaultResourceId: 'volc.bigasr.auc_turbo',
     sampleModels: {
-      stt: ['volc.bigasr.auc_turbo'],
+      stt: ['volc.seedasr.auc', 'volc.bigasr.auc_turbo', 'volc.bigasr.auc'],
     },
     sampleVoices: [],
     hint: '支持 API Key 或 AppID + Access Token 鉴权，16kHz WAV 极速识别（静音自动返回 20000003）',

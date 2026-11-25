@@ -2732,12 +2732,42 @@ function VoiceProviderSheet(props) {
 		id: "vpResourceIdInput",
 		class: "vp-input",
 		value: draft.resourceId,
-		placeholder: draft.provider === "volcengine_asr" ? "volc.bigasr.auc_turbo" : "seed-tts-2.0",
-		onInput: (e) => setDraft({
-			...draft,
-			resourceId: e.target.value
-		})
-	})), (draft.provider === "volcengine_tts" || draft.provider === "gemini") && /* @__PURE__ */ k$1("div", { class: "vp-field" }, /* @__PURE__ */ k$1("label", { class: "vp-field-label" }, "播报音色（可选）"), /* @__PURE__ */ k$1("input", {
+		placeholder: draft.provider === "volcengine_asr" ? "volc.seedasr.auc 或 volc.bigasr.auc_turbo" : "seed-tts-2.0",
+		onInput: (e) => {
+			setDraftTestRes(null);
+			setDraft({
+				...draft,
+				resourceId: e.target.value
+			});
+		}
+	}), draft.provider === "volcengine_asr" && /* @__PURE__ */ k$1(M, null, /doubao_|\d{12,}/i.test(draft.resourceId) && /* @__PURE__ */ k$1("div", { class: "vp-field-warn" }, "这看起来是控制台的「实例 ID」，不是 Resource ID：2.0 标准版请点下方「2.0 标准版」，极速版请点「极速版」"), /* @__PURE__ */ k$1("div", {
+		class: "voice-chip-row",
+		style: "margin-top:6px;"
+	}, [
+		{
+			label: "2.0 标准版 (volc.seedasr.auc)",
+			value: "volc.seedasr.auc"
+		},
+		{
+			label: "极速版 (volc.bigasr.auc_turbo)",
+			value: "volc.bigasr.auc_turbo"
+		},
+		{
+			label: "1.0 标准版 (volc.bigasr.auc)",
+			value: "volc.bigasr.auc"
+		}
+	].map((item) => /* @__PURE__ */ k$1("button", {
+		key: item.value,
+		type: "button",
+		class: `voice-quick-chip ${draft.resourceId === item.value ? "active" : ""}`,
+		onClick: () => {
+			setDraftTestRes(null);
+			setDraft({
+				...draft,
+				resourceId: item.value
+			});
+		}
+	}, item.label))))), (draft.provider === "volcengine_tts" || draft.provider === "gemini") && /* @__PURE__ */ k$1("div", { class: "vp-field" }, /* @__PURE__ */ k$1("label", { class: "vp-field-label" }, "播报音色（可选）"), /* @__PURE__ */ k$1("input", {
 		class: "vp-input",
 		value: draft.defaultVoice,
 		placeholder: draft.provider === "volcengine_tts" ? "zh_female_vv_uranus_bigtts" : "Kore",
