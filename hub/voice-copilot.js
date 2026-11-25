@@ -1,6 +1,6 @@
 import { randomInt, randomUUID } from 'node:crypto'
 import { basename } from 'node:path'
-import { assertSafeVoiceTargetUrl } from './voice-vault.js'
+import { assertSafeVoiceTargetUrl, isBlockedVoiceBaseUrl } from './voice-vault.js'
 
 const DEFAULT_HTTP_TIMEOUT_MS = 25_000
 const PIN_DEFAULT_TTL_MS = 30_000
@@ -1157,7 +1157,7 @@ export class VoiceCopilotEngine {
     }
   }
 
-  async runSingleStt(stageCfg, { audioBase64, mimeType = 'audio/wav', language = 'zh-CN', hotwords = [] } = {}) {
+  async runSingleStt(stageCfg, { audioBase64, mimeType = 'audio/wav', language = 'zh-CN', hotwords = [], credOverride = null } = {}) {
     const t0 = this.now()
     const provider = String(stageCfg?.provider || 'native').toLowerCase()
     if (provider === 'native') {
@@ -1168,7 +1168,7 @@ export class VoiceCopilotEngine {
         latencyMs: this.now() - t0,
       }
     }
-    const cred = this.vault.resolveCredential({ provider, credId: stageCfg?.credId })
+    const cred = credOverride || this.vault.resolveCredential({ provider, credId: stageCfg?.credId })
     if (!cred) {
       return {
         ok: false,
@@ -1364,10 +1364,10 @@ export class VoiceCopilotEngine {
     }
   }
 
-  async _callBrainModel(stageCfg, { systemPrompt, history = [], userText = '' } = {}) {
+  async _callBrainModel(stageCfg, { systemPrompt, history = [], userText = '', credOverride = null } = {}) {
     const t0 = this.now()
     const provider = String(stageCfg?.provider || 'native').toLowerCase()
-    const cred = this.vault.resolveCredential({ provider, credId: stageCfg?.credId })
+    const cred = credOverride || this.vault.resolveCredential({ provider, credId: stageCfg?.credId })
     if (!cred) {
       return {
         ok: false,
@@ -2057,7 +2057,7 @@ export class VoiceCopilotEngine {
     return { ok: false, error: `不支持的播报类型：${kind}`, latencyMs: this.now() - t0 }
   }
 
-  async runTts({ text = '', profileId = '', stageOverride = null, voice = '', speed = null } = {}) {
+  async runTts({ text = '', profileId = '', stageOverride = null, voice = '', speed = null, credOverride = null } = {}) {
     const t0 = this.now()
     const cleanText = String(text || '').trim()
     if (!cleanText) {
@@ -2078,7 +2078,7 @@ export class VoiceCopilotEngine {
       }
     }
 
-    const cred = this.vault.resolveCredential({ provider, credId: stageCfg.credId })
+    const cred = credOverride || this.vault.resolveCredential({ provider, credId: stageCfg.credId })
     if (!cred) {
       return {
         ok: false,
@@ -2117,6 +2117,7 @@ export class VoiceCopilotEngine {
       const contentType = String(resp.headers?.get?.('content-type') || '').toLowerCase()
       if (!resp.ok) {
         const errText = await resp.text().catch(() => '')
+        const rawErr = errText.slice(0, 200) || `Volcengine TTS HTTP ${resp.status}`
         return {
           ok: false,
           provider,
@@ -2124,7 +2125,7 @@ export class VoiceCopilotEngine {
           voice: speaker,
           credId: cred.id,
           latencyMs,
-          error: errText.slice(0, 200) || `Volcengine TTS HTTP ${resp.status}`,
+          error: this._explainVoiceError(rawErr, provider),
         }
       }
       if (contentType.startsWith('audio/')) {
@@ -2160,6 +2161,7 @@ export class VoiceCopilotEngine {
         }
       }
       if (audioParts.length === 0) {
+        const rawErr = apiError || '火山 TTS 未返回音频数据'
         return {
           ok: false,
           provider,
@@ -2167,7 +2169,9 @@ export class VoiceCopilotEngine {
           voice: speaker,
           credId: cred.id,
           latencyMs,
-          error: apiError || '火山 TTS 未返回音频数据（请检查该 AppID 是否已开通 Seed-TTS 资源权限）',
+          error: apiError
+            ? this._explainVoiceError(rawErr, provider)
+            : '火山 TTS 未返回音频数据（请检查该账号是否已开通 Seed-TTS 2.0 权限，或播报先改用手机自带免费）',
         }
       }
       const merged = Buffer.concat(audioParts)
@@ -2318,26 +2322,211 @@ export class VoiceCopilotEngine {
     return { ok: false, provider, error: `不支持的 TTS 服务商：${provider}`, latencyMs: this.now() - t0 }
   }
 
-  async testCredential({ credId = '', stage = '' } = {}) {
-    const cred = this.vault.resolveCredential({ credId })
-    if (!cred) {
-      return { ok: false, error: '未找到要测试的密钥' }
+  _explainVoiceError(rawErr = '', provider = '') {
+    const raw = String(rawErr || '').trim()
+    if (!raw) return '调用失败，请检查接口地址、密钥与模型名'
+    if (raw.includes('（') && raw.includes('）')) return raw
+    const msg = raw.replace(/\s*Request id:\s*[A-Za-z0-9_-]+/gi, '').trim().slice(0, 140) || raw.slice(0, 140)
+    const lower = msg.toLowerCase()
+    if (/401|unauthorized|invalid.*api.?key|incorrect api key|api.?key.*(incorrect|invalid|format|malformed|missing|wrong)|authentication|access denied|auth/i.test(lower)) {
+      if (provider.startsWith('volcengine_')) {
+        return `密钥无效或未授权：请确认填的是火山「语音技术」密钥，不是「火山方舟」大模型密钥；旧版应用请切到 AppID + Token（${msg}）`
+      }
+      return `密钥格式不对或未授权：请检查 API Key 是否复制完整（${msg}）`
     }
-    const provider = cred.provider
-    if (provider === 'volcengine_asr') {
-      // Send a tiny 0.3s silent 16kHz WAV to verify real Volcengine Flash ASR auth & latency
-      const silentWav = encodePcm16ToWav(Buffer.alloc(16000 * 2 * 0.3), 16000, 1)
-      const res = await this.runSingleStt(
-        { provider, credId: cred.id, model: cred.resourceId || 'volc.bigasr.auc_turbo' },
-        { audioBase64: silentWav.toString('base64'), mimeType: 'audio/wav' },
-      )
-      return {
-        ...res,
-        summary: res.ok
-          ? `✅ 连通正常 (${res.latencyMs}ms${res.silence ? ' · 静音探测 20000003 正常' : ''})`
-          : `❌ ${res.error}`,
+    if (/403|forbidden|permission|not granted|not enabled|resource.*not|45000000|55000000|requested resource/i.test(lower)) {
+      if (provider === 'volcengine_tts') {
+        return `该火山密钥可能尚未开通「语音合成 Seed-TTS 2.0」权限：可在火山控制台开通，或播报先改用手机自带免费（${msg}）`
+      }
+      if (provider === 'volcengine_asr') {
+        return `该火山密钥可能尚未开通「大模型录音文件极速识别」权限，或 Resource ID 不匹配（${msg}）`
+      }
+      return `无权限访问该接口或模型：请检查账号权限与余额（${msg}）`
+    }
+    if (/404|not found/i.test(lower)) {
+      if (provider === 'openai_compat') {
+        return `接口地址或模型 ID 不存在：请检查 Base URL 是否漏了 /v1 或模型名是否拼错（${msg}）`
+      }
+      return `接口地址或模型不存在（${msg}）`
+    }
+    if (/429|rate limit|quota|insufficient|balance/i.test(lower)) {
+      return `额度不足或触发限流：请检查账户余额（${msg}）`
+    }
+    if (/timeout|aborted|econnrefused|enotfound|fetch failed/i.test(lower)) {
+      return `连接超时或地址不可达：请检查 Base URL 是否正确（${msg}）`
+    }
+    return msg
+  }
+
+  _resolveDraftTestCred(draft = {}) {
+    const provider = String(draft?.provider || '').trim().toLowerCase()
+    if (!['openai_compat', 'gemini', 'volcengine_asr', 'volcengine_tts'].includes(provider)) {
+      return { ok: false, error: `不支持的协议类型：${provider || '(空)'}` }
+    }
+    const existingId = String(draft?.id || '').trim()
+    const existing = existingId ? this.vault.resolveCredential({ credId: existingId }) : null
+
+    const defaultBaseUrlMap = {
+      openai_compat: '',
+      gemini: 'https://generativelanguage.googleapis.com/v1beta',
+      volcengine_asr: 'https://openspeech.bytedance.com/api/v3/auc/bigmodel/recognize/flash',
+      volcengine_tts: 'https://openspeech.bytedance.com/api/v3/tts/unidirectional',
+    }
+    const baseUrlRaw = String(draft?.baseUrl ?? '').trim() || existing?.baseUrl || defaultBaseUrlMap[provider] || ''
+    if (provider === 'openai_compat' && !baseUrlRaw) {
+      return { ok: false, error: '请先填写接口地址（Base URL），例如 https://ark.cn-beijing.volces.com/api/v3' }
+    }
+    if (baseUrlRaw && isBlockedVoiceBaseUrl(baseUrlRaw)) {
+      return { ok: false, error: '安全策略拦截：不支持指向云内网元数据或非法地址' }
+    }
+    const cleanBaseUrl = baseUrlRaw.replace(/\/+$/, '')
+
+    // Security invariant: only reuse existing stored secret if editing the SAME host (zero secret exfiltration)
+    let canReuseStoredSecret = false
+    if (existing && existing.provider === provider) {
+      try {
+        const oldHost = existing.baseUrl ? new URL(existing.baseUrl).host.toLowerCase() : ''
+        const newHost = cleanBaseUrl ? new URL(cleanBaseUrl).host.toLowerCase() : ''
+        canReuseStoredSecret = Boolean(oldHost && newHost && oldHost === newHost)
+      } catch {
+        canReuseStoredSecret = false
       }
     }
+
+    const rawApiKey = String(draft?.apiKey || '').trim()
+    const rawAppId = String(draft?.appId || '').trim()
+    const rawAccessToken = String(draft?.accessToken || '').trim()
+
+    const apiKey = rawApiKey || (canReuseStoredSecret ? existing.apiKey : '')
+    const appId = rawAppId || (canReuseStoredSecret ? existing.appId : '')
+    const accessToken = rawAccessToken || (canReuseStoredSecret ? existing.accessToken : '')
+
+    if (provider === 'volcengine_asr' || provider === 'volcengine_tts') {
+      if (!apiKey && !(appId && accessToken)) {
+        return {
+          ok: false,
+          error: existing && !canReuseStoredSecret
+            ? '修改接口地址后，请重新填写密钥再测试'
+            : '请先填写 API Key，或切换并填写 AppID 与 Access Token',
+        }
+      }
+    } else if (!apiKey) {
+      return {
+        ok: false,
+        error: existing && !canReuseStoredSecret
+          ? '修改接口地址后，请重新填写 API Key 再测试'
+          : '请先填写 API Key 再测试连通性',
+      }
+    }
+
+    return {
+      ok: true,
+      cred: {
+        id: existing?.id || `draft_${provider}`,
+        provider,
+        label: String(draft?.label || provider).trim().slice(0, 80),
+        baseUrl: cleanBaseUrl,
+        apiKey,
+        appId,
+        accessToken,
+        resourceId: String(draft?.resourceId || existing?.resourceId || '').trim().slice(0, 80),
+        defaultModel: String(draft?.defaultModel || '').trim().slice(0, 120),
+        defaultVoice: String(draft?.defaultVoice || '').trim().slice(0, 120),
+        enabled: true,
+        active: true,
+      },
+    }
+  }
+
+  async testCredential({ credId = '', stage = '', draft = null } = {}) {
+    let cred = null
+    if (draft && typeof draft === 'object') {
+      const resolved = this._resolveDraftTestCred(draft)
+      if (!resolved.ok) return { ok: false, error: resolved.error, summary: resolved.error }
+      cred = resolved.cred
+    } else {
+      cred = this.vault.resolveCredential({ credId })
+    }
+    if (!cred) {
+      return { ok: false, error: '未找到要测试的密钥', summary: '未找到要测试的密钥' }
+    }
+    const provider = cred.provider
+
+    if (provider === 'volcengine_asr') {
+      const silentWav = encodePcm16ToWav(Buffer.alloc(16000 * 2 * 0.3), 16000, 1)
+      const asrRes = await this.runSingleStt(
+        { provider, credId: cred.id, model: cred.resourceId || 'volc.bigasr.auc_turbo' },
+        { audioBase64: silentWav.toString('base64'), mimeType: 'audio/wav', credOverride: cred },
+      )
+      const asrErr = asrRes.ok ? '' : this._explainVoiceError(asrRes.error, 'volcengine_asr')
+
+      // Optional paired TTS check when configuring Volcengine ASR + TTS together in the editor
+      if (draft && draft.alsoTestTts) {
+        const ttsCred = {
+          ...cred,
+          id: `${cred.id}_tts`,
+          provider: 'volcengine_tts',
+          baseUrl: 'https://openspeech.bytedance.com/api/v3/tts/unidirectional',
+          resourceId: String(draft.pairedTtsResourceId || 'seed-tts-2.0').trim() || 'seed-tts-2.0',
+          defaultVoice: String(draft.pairedTtsVoice || 'zh_female_vv_uranus_bigtts').trim() || 'zh_female_vv_uranus_bigtts',
+        }
+        const ttsRes = await this.runTts({
+          text: '测试成功',
+          stageOverride: {
+            provider: 'volcengine_tts',
+            credId: ttsCred.id,
+            model: ttsCred.resourceId,
+            voice: ttsCred.defaultVoice,
+          },
+          credOverride: ttsCred,
+        })
+        const ttsErr = ttsRes.ok ? '' : this._explainVoiceError(ttsRes.error, 'volcengine_tts')
+        if (asrRes.ok && ttsRes.ok) {
+          return {
+            ok: true,
+            provider,
+            latencyMs: asrRes.latencyMs,
+            audioBase64: ttsRes.audioBase64 || '',
+            mimeType: ttsRes.mimeType || 'audio/mpeg',
+            asrOk: true,
+            ttsOk: true,
+            summary: `听写连通 (${asrRes.latencyMs}ms) · 播报连通 (${ttsRes.latencyMs}ms)`,
+          }
+        }
+        if (asrRes.ok && !ttsRes.ok) {
+          return {
+            ok: false,
+            partialOk: true,
+            provider,
+            latencyMs: asrRes.latencyMs,
+            asrOk: true,
+            ttsOk: false,
+            error: ttsErr,
+            summary: `听写连通 (${asrRes.latencyMs}ms)，但播报失败：${ttsErr}`,
+          }
+        }
+        return {
+          ok: false,
+          provider,
+          latencyMs: asrRes.latencyMs,
+          asrOk: false,
+          ttsOk: Boolean(ttsRes.ok),
+          error: asrErr,
+          summary: ttsRes.ok
+            ? `播报连通 (${ttsRes.latencyMs}ms)，但听写失败：${asrErr}`
+            : `听写失败：${asrErr}`,
+        }
+      }
+
+      return {
+        ...asrRes,
+        error: asrErr || undefined,
+        summary: asrRes.ok
+          ? `听写连通正常 (${asrRes.latencyMs}ms${asrRes.silence ? ' · 静音校验通过' : ''})`
+          : asrErr,
+      }
+    }
+
     if (provider === 'volcengine_tts') {
       const res = await this.runTts({
         text: '测试成功',
@@ -2347,19 +2536,24 @@ export class VoiceCopilotEngine {
           model: cred.resourceId || 'seed-tts-2.0',
           voice: cred.defaultVoice || 'zh_female_vv_uranus_bigtts',
         },
+        credOverride: cred,
       })
+      const niceErr = res.ok ? '' : this._explainVoiceError(res.error, 'volcengine_tts')
       return {
         ok: res.ok,
         provider,
         model: res.model,
         latencyMs: res.latencyMs,
         byteLength: res.byteLength || 0,
-        error: res.error,
+        audioBase64: res.audioBase64 || '',
+        mimeType: res.mimeType || 'audio/mpeg',
+        error: niceErr || undefined,
         summary: res.ok
-          ? `✅ 合成连通正常 (${res.latencyMs}ms · ${Math.round((res.byteLength || 0) / 1024)} KB MP3)`
-          : `❌ ${res.error}`,
+          ? `播报连通正常 (${res.latencyMs}ms · ${Math.max(1, Math.round((res.byteLength || 0) / 1024))} KB)`
+          : niceErr,
       }
     }
+
     if (stage === 'tts') {
       const res = await this.runTts({
         text: '测试成功',
@@ -2369,17 +2563,22 @@ export class VoiceCopilotEngine {
           model: cred.defaultModel || (provider === 'gemini' ? 'gemini-2.5-flash-preview-tts' : 'gpt-4o-mini-tts'),
           voice: cred.defaultVoice || (provider === 'gemini' ? 'Kore' : 'alloy'),
         },
+        credOverride: cred,
       })
+      const niceErr = res.ok ? '' : this._explainVoiceError(res.error, provider)
       return {
         ok: res.ok,
         provider,
         model: res.model,
         latencyMs: res.latencyMs,
         byteLength: res.byteLength || 0,
-        error: res.error,
-        summary: res.ok ? `✅ TTS 连通正常 (${res.latencyMs}ms)` : `❌ ${res.error}`,
+        audioBase64: res.audioBase64 || '',
+        mimeType: res.mimeType || 'audio/mpeg',
+        error: niceErr || undefined,
+        summary: res.ok ? `播报连通正常 (${res.latencyMs}ms)` : niceErr,
       }
     }
+
     // Brain / general connectivity probe (Gemini or OpenAI-compatible)
     const model = cred.defaultModel || (provider === 'gemini' ? 'gemini-2.5-flash' : 'gpt-4o-mini')
     const res = await this._callBrainModel(
@@ -2387,15 +2586,17 @@ export class VoiceCopilotEngine {
       {
         systemPrompt: '只返回 JSON：{"ok":true,"spokenReply":"ok"}',
         userText: 'ping',
+        credOverride: cred,
       },
     )
+    const niceErr = res.ok ? '' : this._explainVoiceError(res.error, provider)
     return {
       ok: res.ok,
       provider,
       model: res.model || model,
       latencyMs: res.latencyMs,
-      error: res.error,
-      summary: res.ok ? `✅ 连通正常 (${res.latencyMs}ms · ${res.model || model})` : `❌ ${res.error}`,
+      error: niceErr || undefined,
+      summary: res.ok ? `连通正常 (${res.latencyMs}ms · ${res.model || model})` : niceErr,
     }
   }
 }

@@ -17,6 +17,7 @@ import {
   createSettingsPanel,
 } from '../../hub/web/src/settings/settings-panel.js';
 import { VoiceVault } from '../../hub/voice-vault.js';
+import { VoiceCopilotEngine } from '../../hub/voice-copilot.js';
 
 test('v0.9.20 provider-routing: multiple arbitrary OpenAI-compatible providers route independently by credId', () => {
   const creds = [
@@ -391,4 +392,112 @@ test('v0.9.20 computePushBadgeMeta maps all local push statuses accurately', () 
   assert.deepEqual(computePushBadgeMeta('本机：未开启（点下方「开启推送」）'), { text: '未开启', tone: 'amber' });
   assert.deepEqual(computePushBadgeMeta('本机：通知权限被拒绝'), { text: '权限被拒', tone: 'red' });
   assert.deepEqual(computePushBadgeMeta('本机：当前浏览器不支持锁屏推送'), { text: '需主屏幕', tone: 'amber' });
+});
+
+test('v0.9.23 VoiceCopilot testCredential supports unsaved draft testing, SSRF & host-change secret guard, and dual ASR+TTS diagnosis', async () => {
+  const vault = new VoiceVault({ vaultFile: '' });
+  await vault.init();
+  const saved = await vault.upsertCredential({
+    provider: 'openai_compat',
+    label: '火山方舟',
+    baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
+    apiKey: 'sk-saved-secret-key',
+    defaultModel: 'doubao-seed-2-0-lite-260215',
+  });
+  assert.equal(saved.ok, true);
+
+  let lastAuthSeen = '';
+  const mockFetch = async (url, init) => {
+    const u = String(url);
+    lastAuthSeen = init?.headers?.Authorization || init?.headers?.['x-api-key'] || '';
+    if (u.includes('recognize/flash')) {
+      return {
+        ok: true,
+        status: 200,
+        headers: { get: k => (k.toLowerCase() === 'x-api-status-code' ? '20000003' : '') },
+        json: async () => ({}),
+        text: async () => '',
+      };
+    }
+    if (u.includes('tts/unidirectional')) {
+      return {
+        ok: false,
+        status: 403,
+        headers: { get: () => 'application/json' },
+        text: async () => 'resource seed-tts-2.0 not granted (45000000)',
+      };
+    }
+    return {
+      ok: true,
+      status: 200,
+      headers: { get: () => 'application/json' },
+      json: async () => ({ choices: [{ message: { content: '{"ok":true,"spokenReply":"ok"}' } }] }),
+      text: async () => '',
+    };
+  };
+
+  const copilot = new VoiceCopilotEngine({ vault, fetchImpl: mockFetch, hub: null });
+
+  // 1. Unsaved draft OpenAI-compat probe succeeds directly
+  const okDraft = await copilot.testCredential({
+    draft: {
+      provider: 'openai_compat',
+      baseUrl: 'https://api.deepseek.com/v1',
+      apiKey: 'sk-draft-live-test',
+      defaultModel: 'deepseek-chat',
+    },
+  });
+  assert.equal(okDraft.ok, true);
+  assert.equal(lastAuthSeen, 'Bearer sk-draft-live-test');
+  assert.match(okDraft.summary, /连通正常/);
+
+  // 2. Editing saved cred on SAME host reuses stored key safely
+  const sameHost = await copilot.testCredential({
+    draft: {
+      id: saved.credential.id,
+      provider: 'openai_compat',
+      baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
+      defaultModel: 'deepseek-v3-250324',
+    },
+  });
+  assert.equal(sameHost.ok, true);
+  assert.equal(lastAuthSeen, 'Bearer sk-saved-secret-key');
+
+  // 3. Changing host while leaving apiKey blank MUST refuse to send stored key to new host!
+  const changedHost = await copilot.testCredential({
+    draft: {
+      id: saved.credential.id,
+      provider: 'openai_compat',
+      baseUrl: 'https://evil-exfil.example.com/v1',
+      defaultModel: 'gpt-4o-mini',
+    },
+  });
+  assert.equal(changedHost.ok, false);
+  assert.match(changedHost.error, /重新填写/);
+
+  // 4. SSRF blocked metadata host rejected immediately
+  const ssrf = await copilot.testCredential({
+    draft: {
+      provider: 'openai_compat',
+      baseUrl: 'http://169.254.169.254/latest/meta-data',
+      apiKey: 'sk-x',
+    },
+  });
+  assert.equal(ssrf.ok, false);
+  assert.match(ssrf.error, /安全策略拦截/);
+
+  // 5. Volcengine dual ASR+TTS draft check surfaces partial success clearly when ASR works but TTS lacks permission
+  const volcDual = await copilot.testCredential({
+    draft: {
+      provider: 'volcengine_asr',
+      apiKey: 'volc-key-test',
+      alsoTestTts: true,
+    },
+  });
+  assert.equal(volcDual.ok, false);
+  assert.equal(volcDual.partialOk, true);
+  assert.equal(volcDual.asrOk, true);
+  assert.equal(volcDual.ttsOk, false);
+  assert.match(volcDual.summary, /听写连通/);
+  assert.match(volcDual.summary, /Seed-TTS 2\.0/);
 });

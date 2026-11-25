@@ -351,9 +351,36 @@ export class WalkWavRecorder {
 export class WalkSpeechPlayer {
   private runId = 0;
   private activeAudio: HTMLAudioElement | null = null;
+  private activeSource: AudioBufferSourceNode | null = null;
+  private playbackCtx: AudioContext | null = null;
   private activeObjectUrl = '';
   private abortCtrl: AbortController | null = null;
   private playing = false;
+
+  /**
+   * Call synchronously inside a user tap/click handler BEFORE any async fetch()
+   * so iOS Safari / Home-Screen PWA unlocks audio playback reliably across async TTS calls.
+   */
+  unlockAudio(): void {
+    try {
+      const Ctor = (window as any).AudioContext || (window as any).webkitAudioContext;
+      if (!Ctor) return;
+      if (!this.playbackCtx || this.playbackCtx.state === 'closed') {
+        this.playbackCtx = new Ctor();
+      }
+      if (this.playbackCtx.state === 'suspended') {
+        void this.playbackCtx.resume().catch(() => {});
+      }
+      // 1-sample silent buffer unlock for iOS WebKit
+      const buf = this.playbackCtx.createBuffer(1, 1, 22050);
+      const src = this.playbackCtx.createBufferSource();
+      src.buffer = buf;
+      src.connect(this.playbackCtx.destination);
+      src.start(0);
+    } catch {
+      // ignore unlock errors on unsupported browsers
+    }
+  }
 
   isPlaying(): boolean {
     return this.playing;
@@ -365,6 +392,14 @@ export class WalkSpeechPlayer {
     if (this.abortCtrl) {
       try { this.abortCtrl.abort(); } catch {}
       this.abortCtrl = null;
+    }
+    if (this.activeSource) {
+      try {
+        this.activeSource.onended = null;
+        this.activeSource.stop();
+        this.activeSource.disconnect();
+      } catch {}
+      this.activeSource = null;
     }
     if (this.activeAudio) {
       try {
@@ -389,6 +424,41 @@ export class WalkSpeechPlayer {
     const bin = atob(base64);
     const bytes = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
+
+    // Prefer unlocked Web Audio API (immune to iOS Safari async HTMLAudioElement autoplay block)
+    if (this.playbackCtx && this.playbackCtx.state !== 'closed') {
+      try {
+        if (this.playbackCtx.state === 'suspended') {
+          await this.playbackCtx.resume().catch(() => {});
+        }
+        const arrayBuf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+        const decoded = await new Promise<AudioBuffer>((resolve, reject) => {
+          const maybePromise = this.playbackCtx!.decodeAudioData(
+            arrayBuf,
+            b => resolve(b),
+            err => reject(err || new Error('decode failed')),
+          );
+          if (maybePromise && typeof (maybePromise as any).then === 'function') {
+            (maybePromise as Promise<AudioBuffer>).then(resolve, reject);
+          }
+        });
+        if (this.runId !== myRun) return false;
+        return await new Promise<boolean>(resolve => {
+          const src = this.playbackCtx!.createBufferSource();
+          src.buffer = decoded;
+          src.connect(this.playbackCtx!.destination);
+          this.activeSource = src;
+          src.onended = () => {
+            if (this.activeSource === src) this.activeSource = null;
+            resolve(this.runId === myRun);
+          };
+          src.start(0);
+        });
+      } catch {
+        // Fallback cleanly to HTMLAudioElement if decodeAudioData fails for a codec
+      }
+    }
+
     const blob = new Blob([bytes], { type: mimeType || 'audio/mpeg' });
     const url = URL.createObjectURL(blob);
     if (this.runId !== myRun) {

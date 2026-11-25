@@ -100,6 +100,8 @@ export interface VoiceProviderSheetProps {
   onConfigChange: (next: VoiceConfigState) => void;
   onUpdatePrefs: (patch: Partial<VoicePrefs>) => Promise<void>;
   onSoundCheck: () => Promise<void>;
+  onUnlockAudio?: () => void;
+  onPlayTestAudio?: (base64: string, mimeType?: string) => Promise<boolean>;
   soundChecking: boolean;
   soundCheckMsg: { ok: boolean; text: string } | null;
   onClearSoundCheckMsg: () => void;
@@ -184,6 +186,8 @@ export function VoiceProviderSheet(props: VoiceProviderSheetProps) {
     onConfigChange,
     onUpdatePrefs,
     onSoundCheck,
+    onUnlockAudio,
+    onPlayTestAudio,
     soundChecking,
     soundCheckMsg,
     onClearSoundCheckMsg,
@@ -205,6 +209,8 @@ export function VoiceProviderSheet(props: VoiceProviderSheetProps) {
   const [editingCredSummary, setEditingCredSummary] = useState('');
   const [savingEditor, setSavingEditor] = useState(false);
   const [editorError, setEditorError] = useState('');
+  const [testingDraft, setTestingDraft] = useState(false);
+  const [draftTestRes, setDraftTestRes] = useState<{ ok: boolean; partialOk?: boolean; text: string; ttsFailed?: boolean } | null>(null);
 
   const [routingSaving, setRoutingSaving] = useState(false);
   const [routingMsg, setRoutingMsg] = useState<{ ok: boolean; text: string } | null>(null);
@@ -308,6 +314,7 @@ export function VoiceProviderSheet(props: VoiceProviderSheetProps) {
   };
 
   const handleTestProvider = async (credId: string) => {
+    onUnlockAudio?.();
     setTestingCredId(credId);
     try {
       const res = await apiCall('/api/voice/test', {
@@ -315,6 +322,9 @@ export function VoiceProviderSheet(props: VoiceProviderSheetProps) {
         body: JSON.stringify({ credId }),
       });
       const data = await res.json().catch(() => ({ ok: false, error: `HTTP ${res.status}` }));
+      if (data?.ok && data.audioBase64) {
+        void onPlayTestAudio?.(data.audioBase64, data.mimeType);
+      }
       setTestResults(prev => ({
         ...prev,
         [credId]: {
@@ -329,6 +339,66 @@ export function VoiceProviderSheet(props: VoiceProviderSheetProps) {
       }));
     } finally {
       setTestingCredId('');
+    }
+  };
+
+  const handleTestDraft = async () => {
+    onUnlockAudio?.();
+    setEditorError('');
+    setDraftTestRes(null);
+    const isEdit = Boolean(draft.id);
+    const isVolc = draft.provider === 'volcengine_asr' || draft.provider === 'volcengine_tts';
+    if (draft.provider === 'openai_compat' && !draft.baseUrl.trim()) {
+      setEditorError('请先填写接口地址（Base URL），再点测试连通');
+      return;
+    }
+    if (!isEdit) {
+      if (isVolc && draft.volcAuthMode === 'appToken') {
+        if (!draft.appId.trim() || !draft.accessToken.trim()) {
+          setEditorError('请先填写 AppID 和 Access Token');
+          return;
+        }
+      } else if (!draft.apiKey.trim()) {
+        setEditorError('请先填写 API Key 再测试');
+        return;
+      }
+    }
+    setTestingDraft(true);
+    try {
+      const res = await apiCall('/api/voice/test', {
+        method: 'POST',
+        body: JSON.stringify({
+          draft: {
+            id: draft.id || '',
+            provider: draft.provider,
+            label: draft.label.trim(),
+            baseUrl: draft.baseUrl.trim(),
+            apiKey: isVolc && draft.volcAuthMode === 'appToken' ? '' : draft.apiKey.trim(),
+            appId: isVolc && draft.volcAuthMode === 'appToken' ? draft.appId.trim() : '',
+            accessToken: isVolc && draft.volcAuthMode === 'appToken' ? draft.accessToken.trim() : '',
+            defaultModel: draft.defaultModel.trim(),
+            defaultVoice: draft.defaultVoice.trim(),
+            resourceId: draft.resourceId.trim(),
+            alsoTestTts: !isEdit && draft.provider === 'volcengine_asr' && draft.alsoCreateTts,
+            pairedTtsVoice: draft.pairedTtsVoice.trim() || 'zh_female_vv_uranus_bigtts',
+            pairedTtsResourceId: draft.pairedTtsResourceId.trim() || 'seed-tts-2.0',
+          },
+        }),
+      });
+      const data = await res.json().catch(() => ({ ok: false, error: `HTTP ${res.status}` }));
+      if (data?.ok && data.audioBase64) {
+        void onPlayTestAudio?.(data.audioBase64, data.mimeType);
+      }
+      setDraftTestRes({
+        ok: Boolean(data?.ok),
+        partialOk: Boolean(data?.partialOk),
+        ttsFailed: Boolean(data?.asrOk && data?.ttsOk === false),
+        text: data?.summary || (data?.ok ? `连通正常 (${data.latencyMs ?? 0}ms)` : (data?.error || '测试失败，请检查配置')),
+      });
+    } catch (err: any) {
+      setDraftTestRes({ ok: false, text: err?.message || '网络异常，请重试' });
+    } finally {
+      setTestingDraft(false);
     }
   };
 
@@ -366,6 +436,7 @@ export function VoiceProviderSheet(props: VoiceProviderSheetProps) {
     setDraft(makeBlankDraft());
     setEditingCredSummary('');
     setEditorError('');
+    setDraftTestRes(null);
     setViewMode('editor');
   };
 
@@ -373,11 +444,13 @@ export function VoiceProviderSheet(props: VoiceProviderSheetProps) {
     setDraft(makeDraftFromCredential(cred));
     setEditingCredSummary(cred.authSummary || '');
     setEditorError('');
+    setDraftTestRes(null);
     setViewMode('editor');
   };
 
   const handleProtocolChange = (nextProv: ProviderDraft['provider']) => {
     setEditorError('');
+    setDraftTestRes(null);
     setDraft(prev => ({
       ...prev,
       provider: nextProv,
@@ -599,7 +672,11 @@ export function VoiceProviderSheet(props: VoiceProviderSheetProps) {
                     type="button"
                     class="vp-btn-ghost"
                     disabled={soundChecking}
-                    onClick={() => void onSoundCheck()}
+                    onClick={() => {
+                      setRoutingMsg(null);
+                      onUnlockAudio?.();
+                      void onSoundCheck();
+                    }}
                   >
                     {soundChecking ? '试音中…' : '试听'}
                   </button>
@@ -619,13 +696,14 @@ export function VoiceProviderSheet(props: VoiceProviderSheetProps) {
 
               {(soundCheckMsg || routingMsg) && (
                 <div
-                  class={`vp-inline-notice ${(routingMsg || soundCheckMsg)!.ok ? 'ok' : 'err'}`}
+                  id="vpHeroStatusBanner"
+                  class={`vp-inline-notice ${(soundCheckMsg || routingMsg)!.ok ? 'ok' : 'err'}`}
                   onClick={() => {
                     setRoutingMsg(null);
                     onClearSoundCheckMsg();
                   }}
                 >
-                  {(routingMsg || soundCheckMsg)!.text}
+                  {(soundCheckMsg || routingMsg)!.text}
                 </div>
               )}
             </div>
@@ -1018,8 +1096,21 @@ export function VoiceProviderSheet(props: VoiceProviderSheetProps) {
                         ? 'https://generativelanguage.googleapis.com/v1beta'
                         : 'https://api.example.com/v1'
                     }
-                    onInput={(e: any) => setDraft({ ...draft, baseUrl: e.target.value })}
+                    onInput={(e: any) => {
+                      setDraftTestRes(null);
+                      setDraft({ ...draft, baseUrl: e.target.value });
+                    }}
                   />
+                  {draft.provider === 'openai_compat' && /openspeech\.bytedance\.com/i.test(draft.baseUrl) && (
+                    <div class="vp-field-warn">
+                      这是火山专有语音地址，请在上方「对接协议」切换为「火山豆包听写 (ASR)」或「火山豆包播报 (TTS)」
+                    </div>
+                  )}
+                  {draft.baseUrl.trim() && !/^https?:\/\//i.test(draft.baseUrl.trim()) && (
+                    <div class="vp-field-warn">
+                      接口地址请以 https:// 或 http:// 开头
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -1035,22 +1126,27 @@ export function VoiceProviderSheet(props: VoiceProviderSheetProps) {
                 )}
 
                 {isVolcDraft && (
-                  <div class="vp-seg-pair">
-                    <button
-                      type="button"
-                      class={`vp-seg-opt ${draft.volcAuthMode === 'apiKey' ? 'active' : ''}`}
-                      onClick={() => setDraft({ ...draft, volcAuthMode: 'apiKey' })}
-                    >
-                      API Key
-                    </button>
-                    <button
-                      type="button"
-                      class={`vp-seg-opt ${draft.volcAuthMode === 'appToken' ? 'active' : ''}`}
-                      onClick={() => setDraft({ ...draft, volcAuthMode: 'appToken' })}
-                    >
-                      AppID + Token
-                    </button>
-                  </div>
+                  <Fragment>
+                    <div class="vp-field-hint" style="margin-top:0;margin-bottom:6px;">
+                      填火山「语音技术」密钥（非火山方舟大模型密钥）；填完可先点下方「测试连通」确认权限
+                    </div>
+                    <div class="vp-seg-pair">
+                      <button
+                        type="button"
+                        class={`vp-seg-opt ${draft.volcAuthMode === 'apiKey' ? 'active' : ''}`}
+                        onClick={() => setDraft({ ...draft, volcAuthMode: 'apiKey' })}
+                      >
+                        API Key
+                      </button>
+                      <button
+                        type="button"
+                        class={`vp-seg-opt ${draft.volcAuthMode === 'appToken' ? 'active' : ''}`}
+                        onClick={() => setDraft({ ...draft, volcAuthMode: 'appToken' })}
+                      >
+                        AppID + Token
+                      </button>
+                    </div>
+                  </Fragment>
                 )}
 
                 {isVolcDraft && draft.volcAuthMode === 'appToken' ? (
@@ -1174,21 +1270,55 @@ export function VoiceProviderSheet(props: VoiceProviderSheetProps) {
               </div>
             </div>
 
+            {draftTestRes && (
+              <div
+                id="vpDraftTestResult"
+                class={`vp-inline-notice ${draftTestRes.ok ? 'ok' : draftTestRes.partialOk ? 'warn' : 'err'}`}
+                style="margin-top:10px;"
+              >
+                <div>{draftTestRes.text}</div>
+                {draftTestRes.ttsFailed && draft.alsoCreateTts && !draft.id && (
+                  <button
+                    type="button"
+                    class="vp-inline-fix-btn"
+                    onClick={() => {
+                      setDraft(prev => ({ ...prev, alsoCreateTts: false }));
+                      setDraftTestRes({ ok: true, text: '已关闭「同时添加火山播报」，听写已验证通过，可直接保存（播报将用手机免费语音）' });
+                    }}
+                  >
+                    仅保留听写，播报用手机免费 ›
+                  </button>
+                )}
+              </div>
+            )}
+
             {editorError && (
               <div class="vp-inline-notice err" style="margin-top:10px;">
                 {editorError}
               </div>
             )}
 
-            <button
-              type="button"
-              id="vpSaveProviderBtn"
-              class="vp-submit-btn"
-              disabled={savingEditor}
-              onClick={() => void handleSaveProvider()}
-            >
-              {savingEditor ? '正在保存…' : '保存 Provider'}
-            </button>
+            <div class="vp-form-actions">
+              <button
+                type="button"
+                id="vpTestDraftBtn"
+                class="vp-test-draft-btn"
+                disabled={testingDraft || savingEditor}
+                onClick={() => void handleTestDraft()}
+              >
+                {testingDraft ? '测试中…' : '测试连通'}
+              </button>
+              <button
+                type="button"
+                id="vpSaveProviderBtn"
+                class="vp-submit-btn"
+                style="margin-top:0;flex:1;"
+                disabled={savingEditor || testingDraft}
+                onClick={() => void handleSaveProvider()}
+              >
+                {savingEditor ? '正在保存…' : '保存 Provider'}
+              </button>
+            </div>
           </div>
         )}
       </div>

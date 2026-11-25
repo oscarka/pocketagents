@@ -1417,9 +1417,28 @@ var WalkWavRecorder = class {
 var WalkSpeechPlayer = class {
 	runId = 0;
 	activeAudio = null;
+	activeSource = null;
+	playbackCtx = null;
 	activeObjectUrl = "";
 	abortCtrl = null;
 	playing = false;
+	/**
+	* Call synchronously inside a user tap/click handler BEFORE any async fetch()
+	* so iOS Safari / Home-Screen PWA unlocks audio playback reliably across async TTS calls.
+	*/
+	unlockAudio() {
+		try {
+			const Ctor = window.AudioContext || window.webkitAudioContext;
+			if (!Ctor) return;
+			if (!this.playbackCtx || this.playbackCtx.state === "closed") this.playbackCtx = new Ctor();
+			if (this.playbackCtx.state === "suspended") this.playbackCtx.resume().catch(() => {});
+			const buf = this.playbackCtx.createBuffer(1, 1, 22050);
+			const src = this.playbackCtx.createBufferSource();
+			src.buffer = buf;
+			src.connect(this.playbackCtx.destination);
+			src.start(0);
+		} catch {}
+	}
 	isPlaying() {
 		return this.playing;
 	}
@@ -1431,6 +1450,14 @@ var WalkSpeechPlayer = class {
 				this.abortCtrl.abort();
 			} catch {}
 			this.abortCtrl = null;
+		}
+		if (this.activeSource) {
+			try {
+				this.activeSource.onended = null;
+				this.activeSource.stop();
+				this.activeSource.disconnect();
+			} catch {}
+			this.activeSource = null;
 		}
 		if (this.activeAudio) {
 			try {
@@ -1454,6 +1481,26 @@ var WalkSpeechPlayer = class {
 		const bin = atob(base64);
 		const bytes = new Uint8Array(bin.length);
 		for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
+		if (this.playbackCtx && this.playbackCtx.state !== "closed") try {
+			if (this.playbackCtx.state === "suspended") await this.playbackCtx.resume().catch(() => {});
+			const arrayBuf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+			const decoded = await new Promise((resolve, reject) => {
+				const maybePromise = this.playbackCtx.decodeAudioData(arrayBuf, (b) => resolve(b), (err) => reject(err || /* @__PURE__ */ new Error("decode failed")));
+				if (maybePromise && typeof maybePromise.then === "function") maybePromise.then(resolve, reject);
+			});
+			if (this.runId !== myRun) return false;
+			return await new Promise((resolve) => {
+				const src = this.playbackCtx.createBufferSource();
+				src.buffer = decoded;
+				src.connect(this.playbackCtx.destination);
+				this.activeSource = src;
+				src.onended = () => {
+					if (this.activeSource === src) this.activeSource = null;
+					resolve(this.runId === myRun);
+				};
+				src.start(0);
+			});
+		} catch {}
 		const blob = new Blob([bytes], { type: mimeType || "audio/mpeg" });
 		const url = URL.createObjectURL(blob);
 		if (this.runId !== myRun) {
@@ -2044,12 +2091,14 @@ function makeDraftFromCredential(cred) {
 	};
 }
 function VoiceProviderSheet(props) {
-	const { open, onClose, config, loadingCfg, initialView = "list", onConfigChange, onUpdatePrefs, onSoundCheck, soundChecking, soundCheckMsg, onClearSoundCheckMsg, onRunBenchTurn, onToggleBenchVoice, benchDryRun, onSetBenchDryRun, benchText, onSetBenchText, benchRunning, benchRecording, benchReport, apiCall, toast } = props;
+	const { open, onClose, config, loadingCfg, initialView = "list", onConfigChange, onUpdatePrefs, onSoundCheck, onUnlockAudio, onPlayTestAudio, soundChecking, soundCheckMsg, onClearSoundCheckMsg, onRunBenchTurn, onToggleBenchVoice, benchDryRun, onSetBenchDryRun, benchText, onSetBenchText, benchRunning, benchRecording, benchReport, apiCall, toast } = props;
 	const [viewMode, setViewMode] = d("list");
 	const [draft, setDraft] = d(() => makeBlankDraft());
 	const [editingCredSummary, setEditingCredSummary] = d("");
 	const [savingEditor, setSavingEditor] = d(false);
 	const [editorError, setEditorError] = d("");
+	const [testingDraft, setTestingDraft] = d(false);
+	const [draftTestRes, setDraftTestRes] = d(null);
 	const [routingSaving, setRoutingSaving] = d(false);
 	const [routingMsg, setRoutingMsg] = d(null);
 	const [testingCredId, setTestingCredId] = d("");
@@ -2145,6 +2194,7 @@ function VoiceProviderSheet(props) {
 		toast(`已将「${cred.label}」设为默认`);
 	};
 	const handleTestProvider = async (credId) => {
+		onUnlockAudio?.();
 		setTestingCredId(credId);
 		try {
 			const res = await apiCall("/api/voice/test", {
@@ -2155,6 +2205,7 @@ function VoiceProviderSheet(props) {
 				ok: false,
 				error: `HTTP ${res.status}`
 			}));
+			if (data?.ok && data.audioBase64) onPlayTestAudio?.(data.audioBase64, data.mimeType);
 			setTestResults((prev) => ({
 				...prev,
 				[credId]: {
@@ -2172,6 +2223,67 @@ function VoiceProviderSheet(props) {
 			}));
 		} finally {
 			setTestingCredId("");
+		}
+	};
+	const handleTestDraft = async () => {
+		onUnlockAudio?.();
+		setEditorError("");
+		setDraftTestRes(null);
+		const isEdit = Boolean(draft.id);
+		const isVolc = draft.provider === "volcengine_asr" || draft.provider === "volcengine_tts";
+		if (draft.provider === "openai_compat" && !draft.baseUrl.trim()) {
+			setEditorError("请先填写接口地址（Base URL），再点测试连通");
+			return;
+		}
+		if (!isEdit) {
+			if (isVolc && draft.volcAuthMode === "appToken") {
+				if (!draft.appId.trim() || !draft.accessToken.trim()) {
+					setEditorError("请先填写 AppID 和 Access Token");
+					return;
+				}
+			} else if (!draft.apiKey.trim()) {
+				setEditorError("请先填写 API Key 再测试");
+				return;
+			}
+		}
+		setTestingDraft(true);
+		try {
+			const res = await apiCall("/api/voice/test", {
+				method: "POST",
+				body: JSON.stringify({ draft: {
+					id: draft.id || "",
+					provider: draft.provider,
+					label: draft.label.trim(),
+					baseUrl: draft.baseUrl.trim(),
+					apiKey: isVolc && draft.volcAuthMode === "appToken" ? "" : draft.apiKey.trim(),
+					appId: isVolc && draft.volcAuthMode === "appToken" ? draft.appId.trim() : "",
+					accessToken: isVolc && draft.volcAuthMode === "appToken" ? draft.accessToken.trim() : "",
+					defaultModel: draft.defaultModel.trim(),
+					defaultVoice: draft.defaultVoice.trim(),
+					resourceId: draft.resourceId.trim(),
+					alsoTestTts: !isEdit && draft.provider === "volcengine_asr" && draft.alsoCreateTts,
+					pairedTtsVoice: draft.pairedTtsVoice.trim() || "zh_female_vv_uranus_bigtts",
+					pairedTtsResourceId: draft.pairedTtsResourceId.trim() || "seed-tts-2.0"
+				} })
+			});
+			const data = await res.json().catch(() => ({
+				ok: false,
+				error: `HTTP ${res.status}`
+			}));
+			if (data?.ok && data.audioBase64) onPlayTestAudio?.(data.audioBase64, data.mimeType);
+			setDraftTestRes({
+				ok: Boolean(data?.ok),
+				partialOk: Boolean(data?.partialOk),
+				ttsFailed: Boolean(data?.asrOk && data?.ttsOk === false),
+				text: data?.summary || (data?.ok ? `连通正常 (${data.latencyMs ?? 0}ms)` : data?.error || "测试失败，请检查配置")
+			});
+		} catch (err) {
+			setDraftTestRes({
+				ok: false,
+				text: err?.message || "网络异常，请重试"
+			});
+		} finally {
+			setTestingDraft(false);
 		}
 	};
 	const handleDeleteProvider = async (cred) => {
@@ -2199,16 +2311,19 @@ function VoiceProviderSheet(props) {
 		setDraft(makeBlankDraft());
 		setEditingCredSummary("");
 		setEditorError("");
+		setDraftTestRes(null);
 		setViewMode("editor");
 	};
 	const openEditEditor = (cred) => {
 		setDraft(makeDraftFromCredential(cred));
 		setEditingCredSummary(cred.authSummary || "");
 		setEditorError("");
+		setDraftTestRes(null);
 		setViewMode("editor");
 	};
 	const handleProtocolChange = (nextProv) => {
 		setEditorError("");
+		setDraftTestRes(null);
 		setDraft((prev) => ({
 			...prev,
 			provider: nextProv,
@@ -2343,18 +2458,23 @@ function VoiceProviderSheet(props) {
 		type: "button",
 		class: "vp-btn-ghost",
 		disabled: soundChecking,
-		onClick: () => void onSoundCheck()
+		onClick: () => {
+			setRoutingMsg(null);
+			onUnlockAudio?.();
+			onSoundCheck();
+		}
 	}, soundChecking ? "试音中…" : "试听"))), missingStages.length > 0 && /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: "vp-alert-banner",
 		onClick: openAddEditor
 	}, /* @__PURE__ */ k$1("span", null, missingStages.join(" / "), " 密钥缺失"), /* @__PURE__ */ k$1("span", null, "去添加 ›")), (soundCheckMsg || routingMsg) && /* @__PURE__ */ k$1("div", {
-		class: `vp-inline-notice ${(routingMsg || soundCheckMsg).ok ? "ok" : "err"}`,
+		id: "vpHeroStatusBanner",
+		class: `vp-inline-notice ${(soundCheckMsg || routingMsg).ok ? "ok" : "err"}`,
 		onClick: () => {
 			setRoutingMsg(null);
 			onClearSoundCheckMsg();
 		}
-	}, (routingMsg || soundCheckMsg).text)), /* @__PURE__ */ k$1("div", { class: "vp-sec-head" }, /* @__PURE__ */ k$1("span", { class: "vp-sec-label" }, "默认分配"), activeProf.id !== "native" && /* @__PURE__ */ k$1("button", {
+	}, (soundCheckMsg || routingMsg).text)), /* @__PURE__ */ k$1("div", { class: "vp-sec-head" }, /* @__PURE__ */ k$1("span", { class: "vp-sec-label" }, "默认分配"), activeProf.id !== "native" && /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: "vp-sec-link",
 		disabled: routingSaving,
@@ -2531,14 +2651,20 @@ function VoiceProviderSheet(props) {
 		class: "vp-input",
 		value: draft.baseUrl,
 		placeholder: draft.provider === "gemini" ? "https://generativelanguage.googleapis.com/v1beta" : "https://api.example.com/v1",
-		onInput: (e) => setDraft({
-			...draft,
-			baseUrl: e.target.value
-		})
-	})), /* @__PURE__ */ k$1("div", { class: "vp-field" }, /* @__PURE__ */ k$1("label", {
+		onInput: (e) => {
+			setDraftTestRes(null);
+			setDraft({
+				...draft,
+				baseUrl: e.target.value
+			});
+		}
+	}), draft.provider === "openai_compat" && /openspeech\.bytedance\.com/i.test(draft.baseUrl) && /* @__PURE__ */ k$1("div", { class: "vp-field-warn" }, "这是火山专有语音地址，请在上方「对接协议」切换为「火山豆包听写 (ASR)」或「火山豆包播报 (TTS)」"), draft.baseUrl.trim() && !/^https?:\/\//i.test(draft.baseUrl.trim()) && /* @__PURE__ */ k$1("div", { class: "vp-field-warn" }, "接口地址请以 https:// 或 http:// 开头")), /* @__PURE__ */ k$1("div", { class: "vp-field" }, /* @__PURE__ */ k$1("label", {
 		class: "vp-field-label",
 		for: "vpApiKeyInput"
-	}, isVolcDraft ? "鉴权密钥" : "API Key"), draft.id && editingCredSummary && /* @__PURE__ */ k$1("div", { class: "vp-saved-key-note" }, "已加密保存 (", editingCredSummary, ") · 留空保持原密钥"), isVolcDraft && /* @__PURE__ */ k$1("div", { class: "vp-seg-pair" }, /* @__PURE__ */ k$1("button", {
+	}, isVolcDraft ? "鉴权密钥" : "API Key"), draft.id && editingCredSummary && /* @__PURE__ */ k$1("div", { class: "vp-saved-key-note" }, "已加密保存 (", editingCredSummary, ") · 留空保持原密钥"), isVolcDraft && /* @__PURE__ */ k$1(M, null, /* @__PURE__ */ k$1("div", {
+		class: "vp-field-hint",
+		style: "margin-top:0;margin-bottom:6px;"
+	}, "填火山「语音技术」密钥（非火山方舟大模型密钥）；填完可先点下方「测试连通」确认权限"), /* @__PURE__ */ k$1("div", { class: "vp-seg-pair" }, /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: `vp-seg-opt ${draft.volcAuthMode === "apiKey" ? "active" : ""}`,
 		onClick: () => setDraft({
@@ -2552,7 +2678,7 @@ function VoiceProviderSheet(props) {
 			...draft,
 			volcAuthMode: "appToken"
 		})
-	}, "AppID + Token")), isVolcDraft && draft.volcAuthMode === "appToken" ? /* @__PURE__ */ k$1("div", { class: "voice-two-col" }, /* @__PURE__ */ k$1("input", {
+	}, "AppID + Token"))), isVolcDraft && draft.volcAuthMode === "appToken" ? /* @__PURE__ */ k$1("div", { class: "voice-two-col" }, /* @__PURE__ */ k$1("input", {
 		class: "vp-input",
 		value: draft.appId,
 		placeholder: "AppID",
@@ -2641,16 +2767,40 @@ function VoiceProviderSheet(props) {
 			...draft,
 			setAsDefault: Boolean(e.target.checked)
 		})
-	}))), editorError && /* @__PURE__ */ k$1("div", {
+	}))), draftTestRes && /* @__PURE__ */ k$1("div", {
+		id: "vpDraftTestResult",
+		class: `vp-inline-notice ${draftTestRes.ok ? "ok" : draftTestRes.partialOk ? "warn" : "err"}`,
+		style: "margin-top:10px;"
+	}, /* @__PURE__ */ k$1("div", null, draftTestRes.text), draftTestRes.ttsFailed && draft.alsoCreateTts && !draft.id && /* @__PURE__ */ k$1("button", {
+		type: "button",
+		class: "vp-inline-fix-btn",
+		onClick: () => {
+			setDraft((prev) => ({
+				...prev,
+				alsoCreateTts: false
+			}));
+			setDraftTestRes({
+				ok: true,
+				text: "已关闭「同时添加火山播报」，听写已验证通过，可直接保存（播报将用手机免费语音）"
+			});
+		}
+	}, "仅保留听写，播报用手机免费 ›")), editorError && /* @__PURE__ */ k$1("div", {
 		class: "vp-inline-notice err",
 		style: "margin-top:10px;"
-	}, editorError), /* @__PURE__ */ k$1("button", {
+	}, editorError), /* @__PURE__ */ k$1("div", { class: "vp-form-actions" }, /* @__PURE__ */ k$1("button", {
+		type: "button",
+		id: "vpTestDraftBtn",
+		class: "vp-test-draft-btn",
+		disabled: testingDraft || savingEditor,
+		onClick: () => void handleTestDraft()
+	}, testingDraft ? "测试中…" : "测试连通"), /* @__PURE__ */ k$1("button", {
 		type: "button",
 		id: "vpSaveProviderBtn",
 		class: "vp-submit-btn",
-		disabled: savingEditor,
+		style: "margin-top:0;flex:1;",
+		disabled: savingEditor || testingDraft,
 		onClick: () => void handleSaveProvider()
-	}, savingEditor ? "正在保存…" : "保存 Provider"))));
+	}, savingEditor ? "正在保存…" : "保存 Provider")))));
 }
 // hub/web/src/components/VoiceCopilotSheets.tsx
 var DEFAULT_CONFIG = {
@@ -3380,6 +3530,7 @@ function VoiceCopilotSheets() {
 		}
 	};
 	const toggleWalkMic = async () => {
+		playerRef.current?.unlockAudio();
 		if (walkPhaseRef.current === "speaking") playerRef.current?.stop();
 		if (walkPhaseRef.current === "listening") {
 			if (recorderRef.current?.isRecording()) {
@@ -3426,6 +3577,7 @@ function VoiceCopilotSheets() {
 		} else toast(`❌ ${data?.error || "保存失败"}`);
 	};
 	const handleQuickSoundCheck = async () => {
+		playerRef.current?.unlockAudio();
 		const prof = configRef.current.activeProfile || DEFAULT_CONFIG.activeProfile;
 		const sampleLine = "你好，随行语音已就绪，戴上耳机随时说话。";
 		setSoundChecking(true);
@@ -3444,16 +3596,27 @@ function VoiceCopilotSheets() {
 					error: `HTTP ${res.status}`
 				}));
 				if (!res.ok || !data?.ok) {
+					const extraHint = prof.tts?.provider === "volcengine_tts" ? "（若该火山密钥仅开了听写未开播报，可先把上方「播报」切为「手机自带免费」）" : "";
+					const msg = `播报失败：${data?.error || "请检查密钥与权限"}${extraHint}`;
 					setSoundCheckMsg({
 						ok: false,
-						text: `❌ 播报失败：${data?.error || "请检查密钥与余额"}`
+						text: msg
 					});
+					toast(`❌ 播报失败：${data?.error || "请检查配置"}`);
 					return;
 				}
-				if (data.audioBase64) await playerRef.current?.playAudioBase64(data.audioBase64, data.mimeType);
+				if (data.audioBase64) {
+					if (!await playerRef.current?.playAudioBase64(data.audioBase64, data.mimeType)) {
+						setSoundCheckMsg({
+							ok: false,
+							text: `云端音频已返回 (${data.latencyMs ?? 0}ms)，但手机拦截了播放，请检查静音键或再点一次试听`
+						});
+						return;
+					}
+				}
 				setSoundCheckMsg({
 					ok: true,
-					text: `✅ 云端人声正常 (${data.latencyMs ?? 0}ms)`
+					text: `云端人声正常 (${data.latencyMs ?? 0}ms)`
 				});
 				return;
 			}
@@ -3474,24 +3637,30 @@ function VoiceCopilotSheets() {
 					}));
 					if (testRes.ok && testData?.ok) setSoundCheckMsg({
 						ok: true,
-						text: `✅ 手机播报正常 · 大脑已连通 (${testData.latencyMs ?? 0}ms)`
+						text: `手机播报正常 · 大脑已连通 (${testData.latencyMs ?? 0}ms)`
 					});
-					else setSoundCheckMsg({
-						ok: false,
-						text: `⚠️ 手机已出声，但大脑密钥异常：${testData?.error || "请检查 Key"}`
-					});
+					else {
+						const msg = `手机已播报，但大脑测试失败：${testData?.error || "请检查密钥或模型名"}`;
+						setSoundCheckMsg({
+							ok: false,
+							text: msg
+						});
+						toast(`⚠️ 大脑异常：${testData?.error || "请检查配置"}`);
+					}
 					return;
 				}
 			}
 			setSoundCheckMsg({
 				ok: true,
-				text: "✅ 免费本机播报已出声"
+				text: "免费本机播报已开始（请确保手机未静音）"
 			});
 		} catch (err) {
+			const msg = `试听异常：${err?.message || "网络失败"}`;
 			setSoundCheckMsg({
 				ok: false,
-				text: `❌ 试听异常：${err?.message || "网络失败"}`
+				text: msg
 			});
+			toast(`❌ ${msg}`);
 		} finally {
 			setSoundChecking(false);
 		}
@@ -3724,6 +3893,8 @@ function VoiceCopilotSheets() {
 		onConfigChange: handleConfigChange,
 		onUpdatePrefs: updatePrefPatch,
 		onSoundCheck: handleQuickSoundCheck,
+		onUnlockAudio: () => playerRef.current?.unlockAudio(),
+		onPlayTestAudio: (b64, mime) => playerRef.current?.playAudioBase64(b64, mime) ?? Promise.resolve(false),
 		soundChecking,
 		soundCheckMsg,
 		onClearSoundCheckMsg: () => setSoundCheckMsg(null),
@@ -7789,6 +7960,9 @@ var EXACT_ZH_TO_EN = {
 	"添加 Provider": "Add Provider",
 	"编辑 Provider": "Edit Provider",
 	"保存 Provider": "Save Provider",
+	"测试连通": "Test",
+	"测试中…": "Testing…",
+	"仅保留听写，播报用手机免费 ›": "Keep ASR Only, Use Free Native TTS ›",
 	"暂未添加 Provider": "No Providers Added",
 	"对接协议": "API Protocol",
 	"OpenAI 兼容（标准）": "OpenAI Compatible (Standard)",

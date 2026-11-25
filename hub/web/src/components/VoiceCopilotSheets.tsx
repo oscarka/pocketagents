@@ -837,6 +837,7 @@ export function VoiceCopilotSheets() {
   };
 
   const toggleWalkMic = async () => {
+    playerRef.current?.unlockAudio();
     // Instant Barge-in: tapping orb while speaking cuts off TTS immediately and starts listening!
     if (walkPhaseRef.current === 'speaking') {
       playerRef.current?.stop();
@@ -891,6 +892,8 @@ export function VoiceCopilotSheets() {
   };
 
   const handleQuickSoundCheck = async () => {
+    // Synchronously unlock iOS Safari / PWA Web Audio BEFORE any async fetch()
+    playerRef.current?.unlockAudio();
     const prof = configRef.current.activeProfile || DEFAULT_CONFIG.activeProfile;
     const sampleLine = '你好，随行语音已就绪，戴上耳机随时说话。';
     setSoundChecking(true);
@@ -904,13 +907,22 @@ export function VoiceCopilotSheets() {
         });
         const data = await res.json().catch(() => ({ ok: false, error: `HTTP ${res.status}` }));
         if (!res.ok || !data?.ok) {
-          setSoundCheckMsg({ ok: false, text: `❌ 播报失败：${data?.error || '请检查密钥与余额'}` });
+          const extraHint = prof.tts?.provider === 'volcengine_tts'
+            ? '（若该火山密钥仅开了听写未开播报，可先把上方「播报」切为「手机自带免费」）'
+            : '';
+          const msg = `播报失败：${data?.error || '请检查密钥与权限'}${extraHint}`;
+          setSoundCheckMsg({ ok: false, text: msg });
+          toast(`❌ 播报失败：${data?.error || '请检查配置'}`);
           return;
         }
         if (data.audioBase64) {
-          await playerRef.current?.playAudioBase64(data.audioBase64, data.mimeType);
+          const played = await playerRef.current?.playAudioBase64(data.audioBase64, data.mimeType);
+          if (!played) {
+            setSoundCheckMsg({ ok: false, text: `云端音频已返回 (${data.latencyMs ?? 0}ms)，但手机拦截了播放，请检查静音键或再点一次试听` });
+            return;
+          }
         }
-        setSoundCheckMsg({ ok: true, text: `✅ 云端人声正常 (${data.latencyMs ?? 0}ms)` });
+        setSoundCheckMsg({ ok: true, text: `云端人声正常 (${data.latencyMs ?? 0}ms)` });
         return;
       }
 
@@ -931,16 +943,20 @@ export function VoiceCopilotSheets() {
           });
           const testData = await testRes.json().catch(() => ({ ok: false, error: `HTTP ${testRes.status}` }));
           if (testRes.ok && testData?.ok) {
-            setSoundCheckMsg({ ok: true, text: `✅ 手机播报正常 · 大脑已连通 (${testData.latencyMs ?? 0}ms)` });
+            setSoundCheckMsg({ ok: true, text: `手机播报正常 · 大脑已连通 (${testData.latencyMs ?? 0}ms)` });
           } else {
-            setSoundCheckMsg({ ok: false, text: `⚠️ 手机已出声，但大脑密钥异常：${testData?.error || '请检查 Key'}` });
+            const msg = `手机已播报，但大脑测试失败：${testData?.error || '请检查密钥或模型名'}`;
+            setSoundCheckMsg({ ok: false, text: msg });
+            toast(`⚠️ 大脑异常：${testData?.error || '请检查配置'}`);
           }
           return;
         }
       }
-      setSoundCheckMsg({ ok: true, text: '✅ 免费本机播报已出声' });
+      setSoundCheckMsg({ ok: true, text: '免费本机播报已开始（请确保手机未静音）' });
     } catch (err: any) {
-      setSoundCheckMsg({ ok: false, text: `❌ 试听异常：${err?.message || '网络失败'}` });
+      const msg = `试听异常：${err?.message || '网络失败'}`;
+      setSoundCheckMsg({ ok: false, text: msg });
+      toast(`❌ ${msg}`);
     } finally {
       setSoundChecking(false);
     }
@@ -1261,6 +1277,8 @@ export function VoiceCopilotSheets() {
         onConfigChange={handleConfigChange}
         onUpdatePrefs={updatePrefPatch}
         onSoundCheck={handleQuickSoundCheck}
+        onUnlockAudio={() => playerRef.current?.unlockAudio()}
+        onPlayTestAudio={(b64, mime) => playerRef.current?.playAudioBase64(b64, mime) ?? Promise.resolve(false)}
         soundChecking={soundChecking}
         soundCheckMsg={soundCheckMsg}
         onClearSoundCheckMsg={() => setSoundCheckMsg(null)}
