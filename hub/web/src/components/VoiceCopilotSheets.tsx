@@ -814,6 +814,8 @@ export function VoiceCopilotSheets() {
       return;
     }
     try {
+      // Switch iOS Safari AudioSession BEFORE playing earcon or opening microphone
+      setWalkAudioSessionMode('play-and-record');
       playEarcon('listen');
       setWalkPhase('listening');
       await recorderRef.current!.start({
@@ -915,12 +917,18 @@ export function VoiceCopilotSheets() {
           toast(`❌ 播报失败：${data?.error || '请检查配置'}`);
           return;
         }
-        if (data.audioBase64) {
-          const played = await playerRef.current?.playAudioBase64(data.audioBase64, data.mimeType);
-          if (!played) {
-            setSoundCheckMsg({ ok: false, text: `云端音频已返回 (${data.latencyMs ?? 0}ms)，但手机拦截了播放，请检查静音键或再点一次试听` });
-            return;
-          }
+        if (data.useBrowserSpeech || !data.audioBase64) {
+          void playerRef.current?.speakChunksProgressive([sampleLine], {
+            useCloudTts: false,
+            speechRate: configRef.current.prefs.speechRate || 1.0,
+          });
+          setSoundCheckMsg({ ok: true, text: '免费本机播报已开始（请确保手机未静音）' });
+          return;
+        }
+        const played = await playerRef.current?.playAudioBase64(data.audioBase64, data.mimeType);
+        if (!played) {
+          setSoundCheckMsg({ ok: false, text: `云端音频已返回 (${data.latencyMs ?? 0}ms)，但手机拦截了播放，请检查静音键或再点一次试听` });
+          return;
         }
         setSoundCheckMsg({ ok: true, text: `云端人声正常 (${data.latencyMs ?? 0}ms)` });
         return;

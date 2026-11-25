@@ -199,16 +199,28 @@ export class WalkWavRecorder {
     if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
       throw new Error('当前浏览器不支持麦克风采集（需 HTTPS 或 localhost 环境）');
     }
-    const stream = await navigator.mediaDevices.getUserMedia({
+    // iOS Safari 16.4+/18+/26+: navigator.audioSession MUST be 'play-and-record' (or 'auto')
+    // BEFORE calling getUserMedia(); otherwise WebKit throws "AudioSession category is not compatible with audio capture."
+    setWalkAudioSessionMode('play-and-record');
+    const audioConstraints: MediaStreamConstraints = {
       audio: {
         channelCount: 1,
         echoCancellation: true,
         noiseSuppression: true,
         autoGainControl: true,
       },
-    });
-    // Lock iOS Safari audio routing to AirPods / Bluetooth hands-free AFTER getUserMedia initializes the route
-    setWalkAudioSessionMode('play-and-record');
+    };
+    let stream: MediaStream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia(audioConstraints);
+    } catch (err: any) {
+      if (/audiosession|category|compatible with audio capture/i.test(String(err?.message || ''))) {
+        setWalkAudioSessionMode('auto');
+        stream = await navigator.mediaDevices.getUserMedia(audioConstraints);
+      } else {
+        throw err;
+      }
+    }
     const Ctor = (window as any).AudioContext || (window as any).webkitAudioContext;
     if (!Ctor) {
       stream.getTracks().forEach(t => t.stop());

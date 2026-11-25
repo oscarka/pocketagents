@@ -1293,13 +1293,22 @@ var WalkWavRecorder = class {
 	async start(opts = {}) {
 		if (this.active) return;
 		if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) throw new Error("当前浏览器不支持麦克风采集（需 HTTPS 或 localhost 环境）");
-		const stream = await navigator.mediaDevices.getUserMedia({ audio: {
+		setWalkAudioSessionMode("play-and-record");
+		const audioConstraints = { audio: {
 			channelCount: 1,
 			echoCancellation: true,
 			noiseSuppression: true,
 			autoGainControl: true
-		} });
-		setWalkAudioSessionMode("play-and-record");
+		} };
+		let stream;
+		try {
+			stream = await navigator.mediaDevices.getUserMedia(audioConstraints);
+		} catch (err) {
+			if (/audiosession|category|compatible with audio capture/i.test(String(err?.message || ""))) {
+				setWalkAudioSessionMode("auto");
+				stream = await navigator.mediaDevices.getUserMedia(audioConstraints);
+			} else throw err;
+		}
 		const Ctor = window.AudioContext || window.webkitAudioContext;
 		if (!Ctor) {
 			stream.getTracks().forEach((t) => t.stop());
@@ -2077,7 +2086,7 @@ function makeDraftFromCredential(cred) {
 		provider: cred.provider || "openai_compat",
 		label: cred.label || "",
 		baseUrl: cred.baseUrl || "",
-		volcAuthMode: "apiKey",
+		volcAuthMode: !cred.hasApiKey && (cred.hasAppId || cred.hasAccessToken) ? "appToken" : "apiKey",
 		apiKey: "",
 		appId: "",
 		accessToken: "",
@@ -3550,6 +3559,7 @@ function VoiceCopilotSheets() {
 			return;
 		}
 		try {
+			setWalkAudioSessionMode("play-and-record");
 			playEarcon("listen");
 			setWalkPhase("listening");
 			await recorderRef.current.start({
@@ -3643,14 +3653,23 @@ function VoiceCopilotSheets() {
 					toast(`❌ 播报失败：${data?.error || "请检查配置"}`);
 					return;
 				}
-				if (data.audioBase64) {
-					if (!await playerRef.current?.playAudioBase64(data.audioBase64, data.mimeType)) {
-						setSoundCheckMsg({
-							ok: false,
-							text: `云端音频已返回 (${data.latencyMs ?? 0}ms)，但手机拦截了播放，请检查静音键或再点一次试听`
-						});
-						return;
-					}
+				if (data.useBrowserSpeech || !data.audioBase64) {
+					playerRef.current?.speakChunksProgressive([sampleLine], {
+						useCloudTts: false,
+						speechRate: configRef.current.prefs.speechRate || 1
+					});
+					setSoundCheckMsg({
+						ok: true,
+						text: "免费本机播报已开始（请确保手机未静音）"
+					});
+					return;
+				}
+				if (!await playerRef.current?.playAudioBase64(data.audioBase64, data.mimeType)) {
+					setSoundCheckMsg({
+						ok: false,
+						text: `云端音频已返回 (${data.latencyMs ?? 0}ms)，但手机拦截了播放，请检查静音键或再点一次试听`
+					});
+					return;
 				}
 				setSoundCheckMsg({
 					ok: true,

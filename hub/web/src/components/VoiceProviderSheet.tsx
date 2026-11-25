@@ -162,7 +162,7 @@ function makeDraftFromCredential(cred: PublicCredential): ProviderDraft {
     provider: (cred.provider as ProviderDraft['provider']) || 'openai_compat',
     label: cred.label || '',
     baseUrl: cred.baseUrl || '',
-    volcAuthMode: 'apiKey',
+    volcAuthMode: (!cred.hasApiKey && (cred.hasAppId || cred.hasAccessToken)) ? 'appToken' : 'apiKey',
     apiKey: '',
     appId: '',
     accessToken: '',
