@@ -30,7 +30,7 @@ docker run --rm \
   -v "${PWD}/firmware/folotoy-passport:/project" \
   -w /project \
   espressif/idf:v5.5.3 \
-  bash -c "idf.py set-target esp32c3 && idf.py build && idf.py merge-bin -o build/pocketagents-passport-merged.bin --fill-flash-size 8MB"
+  bash -c "idf.py set-target esp32c3 && idf.py build && idf.py merge-bin -o pocketagents-passport-merged.bin"
 ```
 
 ## Test in the Browser Hardware Simulator (Zero Physical Hardware Required)

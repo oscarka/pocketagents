@@ -86,7 +86,7 @@ jobs:
           rm -f sdkconfig
           idf.py set-target esp32c3
           idf.py build
-          idf.py merge-bin -o build/pocketagents-passport-merged.bin
+          idf.py merge-bin -o pocketagents-passport-merged.bin
           ls -lh build/pocketagents-passport-merged.bin
 
       - name: Upload merged firmware artifact
