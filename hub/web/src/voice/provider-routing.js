@@ -4,9 +4,9 @@
 export const PROTOCOL_LABELS = {
   native: '手机自带免费',
   openai_compat: 'OpenAI 兼容',
-  gemini: 'Google Gemini',
-  volcengine_asr: '火山豆包听写',
-  volcengine_tts: '火山豆包播报',
+  gemini: 'Gemini 原生',
+  volcengine_asr: '火山听写',
+  volcengine_tts: '火山播报',
 };
 
 export const STAGE_CAPABILITIES = {

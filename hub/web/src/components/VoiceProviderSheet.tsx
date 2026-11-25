@@ -3,12 +3,11 @@ import { useEffect, useState } from 'preact/hooks';
 import {
   PROTOCOL_LABELS,
   TTS_VOICE_OPTIONS,
-  VOICE_PROVIDER_PRESETS,
   buildRoutingProfilePayload,
   computeSelectionAfterDelete,
   computeSmartDefaultSelection,
   extractHostFromUrl,
-  formatVoiceSummaryForSettings,
+  formatVoiceCompactValue,
   getCredentialActiveRoles,
   getStageSelectValue,
   inferDefaultBrainModel,
@@ -76,7 +75,6 @@ export interface VoiceConfigState {
 
 interface ProviderDraft {
   id: string;
-  presetKey: string;
   provider: 'openai_compat' | 'gemini' | 'volcengine_asr' | 'volcengine_tts';
   label: string;
   baseUrl: string;
@@ -118,22 +116,38 @@ export interface VoiceProviderSheetProps {
   toast: (msg: string) => void;
 }
 
-function makeDraftFromPreset(presetKey = 'deepseek'): ProviderDraft {
-  const preset = VOICE_PROVIDER_PRESETS.find(p => p.key === presetKey) || VOICE_PROVIDER_PRESETS[0];
+const BackChevronSvg = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M15 18l-6-6 6-6" />
+  </svg>
+);
+
+const CloseSvg = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+    <path d="M18 6L6 18M6 6l12 12" />
+  </svg>
+);
+
+const PlusSvg = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+    <path d="M12 5v14M5 12h14" />
+  </svg>
+);
+
+function makeBlankDraft(): ProviderDraft {
   return {
     id: '',
-    presetKey: preset.key,
-    provider: preset.provider as ProviderDraft['provider'],
-    label: preset.label || '',
-    baseUrl: preset.baseUrl || '',
+    provider: 'openai_compat',
+    label: '',
+    baseUrl: '',
     volcAuthMode: 'apiKey',
     apiKey: '',
     appId: '',
     accessToken: '',
-    defaultModel: preset.defaultModel || '',
-    defaultVoice: preset.defaultVoice || '',
-    resourceId: preset.resourceId || '',
-    alsoCreateTts: Boolean((preset as any).alsoCreateTts),
+    defaultModel: '',
+    defaultVoice: '',
+    resourceId: '',
+    alsoCreateTts: true,
     pairedTtsVoice: 'zh_female_vv_uranus_bigtts',
     pairedTtsResourceId: 'seed-tts-2.0',
     setAsDefault: true,
@@ -143,7 +157,6 @@ function makeDraftFromPreset(presetKey = 'deepseek'): ProviderDraft {
 function makeDraftFromCredential(cred: PublicCredential): ProviderDraft {
   return {
     id: cred.id,
-    presetKey: 'custom',
     provider: (cred.provider as ProviderDraft['provider']) || 'openai_compat',
     label: cred.label || '',
     baseUrl: cred.baseUrl || '',
@@ -188,7 +201,7 @@ export function VoiceProviderSheet(props: VoiceProviderSheetProps) {
   } = props;
 
   const [viewMode, setViewMode] = useState<'list' | 'editor'>('list');
-  const [draft, setDraft] = useState<ProviderDraft>(() => makeDraftFromPreset('deepseek'));
+  const [draft, setDraft] = useState<ProviderDraft>(() => makeBlankDraft());
   const [editingCredSummary, setEditingCredSummary] = useState('');
   const [savingEditor, setSavingEditor] = useState(false);
   const [editorError, setEditorError] = useState('');
@@ -204,7 +217,7 @@ export function VoiceProviderSheet(props: VoiceProviderSheetProps) {
     setRoutingMsg(null);
     setEditorError('');
     if (initialView === 'add') {
-      setDraft(makeDraftFromPreset('deepseek'));
+      setDraft(makeBlankDraft());
       setEditingCredSummary('');
       setViewMode('editor');
     } else {
@@ -251,7 +264,7 @@ export function VoiceProviderSheet(props: VoiceProviderSheetProps) {
 
       if (plan.isNativeOnly) {
         await onUpdatePrefs({ activeProfileId: 'native' });
-        setRoutingMsg({ ok: true, text: successNotice || '✅ 已切换为免费本机语音' });
+        setRoutingMsg({ ok: true, text: successNotice || '已切换为免费本机语音' });
         return;
       }
 
@@ -262,14 +275,14 @@ export function VoiceProviderSheet(props: VoiceProviderSheetProps) {
       const data = await res.json().catch(() => null);
       if (!res.ok || !data?.ok || !data.config) {
         const errText = data?.error || '保存默认分配失败';
-        setRoutingMsg({ ok: false, text: `❌ ${errText}` });
-        toast(`❌ ${errText}`);
+        setRoutingMsg({ ok: false, text: errText });
+        toast(errText);
         return;
       }
       onConfigChange({ ...latestCfg, ...data.config });
-      setRoutingMsg({ ok: true, text: successNotice || `✅ 默认分配已生效：${plan.profilePayload.name}` });
+      setRoutingMsg({ ok: true, text: successNotice || `已生效：${plan.profilePayload.name}` });
     } catch (err: any) {
-      setRoutingMsg({ ok: false, text: `❌ ${err?.message || '保存失败'}` });
+      setRoutingMsg({ ok: false, text: err?.message || '保存失败' });
     } finally {
       setRoutingSaving(false);
     }
@@ -289,9 +302,9 @@ export function VoiceProviderSheet(props: VoiceProviderSheetProps) {
       nextSel.brainVal,
       nextSel.ttsVal,
       config,
-      `✅ 已将「${cred.label}」设为默认`,
+      `已将「${cred.label}」设为默认`,
     );
-    toast(`✅ 已将「${cred.label}」设为默认`);
+    toast(`已将「${cred.label}」设为默认`);
   };
 
   const handleTestProvider = async (credId: string) => {
@@ -306,13 +319,13 @@ export function VoiceProviderSheet(props: VoiceProviderSheetProps) {
         ...prev,
         [credId]: {
           ok: Boolean(data?.ok),
-          summary: data?.summary || (data?.ok ? `✅ 连通正常 (${data.latencyMs ?? 0}ms)` : `❌ ${data?.error || '测试失败'}`),
+          summary: data?.summary || (data?.ok ? `连通正常 (${data.latencyMs ?? 0}ms)` : (data?.error || '测试失败')),
         },
       }));
     } catch (err: any) {
       setTestResults(prev => ({
         ...prev,
-        [credId]: { ok: false, summary: `❌ ${err?.message || '网络异常'}` },
+        [credId]: { ok: false, summary: err?.message || '网络异常' },
       }));
     } finally {
       setTestingCredId('');
@@ -327,12 +340,12 @@ export function VoiceProviderSheet(props: VoiceProviderSheetProps) {
       const res = await apiCall(`/api/voice/credentials/${encodeURIComponent(cred.id)}`, { method: 'DELETE' });
       const data = await res.json().catch(() => null);
       if (!res.ok || !data?.ok || !data.config) {
-        toast(`❌ ${data?.error || '删除失败'}`);
+        toast(data?.error || '删除失败');
         return;
       }
       const nextCfg: VoiceConfigState = { ...config, ...data.config };
       onConfigChange(nextCfg);
-      toast(`🗑️ 已删除「${cred.label}」`);
+      toast(`已删除「${cred.label}」`);
 
       const fallback = computeSelectionAfterDelete(cred.id, config.activeProfile, nextCfg.credentials);
       if (fallback.affected) {
@@ -341,16 +354,16 @@ export function VoiceProviderSheet(props: VoiceProviderSheetProps) {
           fallback.nextSelection.brainVal,
           fallback.nextSelection.ttsVal,
           nextCfg,
-          `🗑️ 已删除「${cred.label}」，受影响环节已安全回退`,
+          `已删除「${cred.label}」，对应环节已回退`,
         );
       }
     } catch (err: any) {
-      toast(`❌ 删除失败：${err?.message || '网络异常'}`);
+      toast(`删除失败：${err?.message || '网络异常'}`);
     }
   };
 
-  const openAddEditor = (presetKey = 'deepseek') => {
-    setDraft(makeDraftFromPreset(presetKey));
+  const openAddEditor = () => {
+    setDraft(makeBlankDraft());
     setEditingCredSummary('');
     setEditorError('');
     setViewMode('editor');
@@ -363,6 +376,33 @@ export function VoiceProviderSheet(props: VoiceProviderSheetProps) {
     setViewMode('editor');
   };
 
+  const handleProtocolChange = (nextProv: ProviderDraft['provider']) => {
+    setEditorError('');
+    setDraft(prev => ({
+      ...prev,
+      provider: nextProv,
+      baseUrl: nextProv === 'gemini'
+        ? 'https://generativelanguage.googleapis.com/v1beta'
+        : nextProv === 'volcengine_asr'
+          ? 'https://openspeech.bytedance.com/api/v3/auc/bigmodel/recognize/flash'
+          : nextProv === 'volcengine_tts'
+            ? 'https://openspeech.bytedance.com/api/v3/tts/unidirectional'
+            : (prev.baseUrl && !prev.baseUrl.includes('bytedance') && !prev.baseUrl.includes('googleapis'))
+              ? prev.baseUrl
+              : '',
+      resourceId: nextProv === 'volcengine_asr'
+        ? 'volc.bigasr.auc_turbo'
+        : nextProv === 'volcengine_tts'
+          ? 'seed-tts-2.0'
+          : '',
+      defaultVoice: nextProv === 'volcengine_tts'
+        ? 'zh_female_vv_uranus_bigtts'
+        : nextProv === 'gemini'
+          ? 'Kore'
+          : '',
+    }));
+  };
+
   const handleSaveProvider = async () => {
     setEditorError('');
     const isEdit = Boolean(draft.id);
@@ -372,19 +412,19 @@ export function VoiceProviderSheet(props: VoiceProviderSheetProps) {
       || PROTOCOL_LABELS[draft.provider]
       || '自定义 Provider';
 
-    if ((draft.provider === 'openai_compat') && !draft.baseUrl.trim()) {
-      setEditorError('请填写接口地址（Base URL），例如 https://api.deepseek.com/v1');
+    if (draft.provider === 'openai_compat' && !draft.baseUrl.trim()) {
+      setEditorError('请填写接口地址（Base URL），例如 https://ark.cn-beijing.volces.com/api/v3');
       return;
     }
 
     if (!isEdit) {
       if (isVolc && draft.volcAuthMode === 'appToken') {
         if (!draft.appId.trim() || !draft.accessToken.trim()) {
-          setEditorError('请同时填写火山引擎 AppID 和 Access Token');
+          setEditorError('请同时填写 AppID 和 Access Token');
           return;
         }
       } else if (!draft.apiKey.trim()) {
-        setEditorError('请填写 API Key（会经 AES-256 加密保存，不会明文返回）');
+        setEditorError('请填写 API Key（加密保存，不会明文返回）');
         return;
       }
     }
@@ -397,7 +437,7 @@ export function VoiceProviderSheet(props: VoiceProviderSheetProps) {
         label: cleanLabel,
         baseUrl: draft.baseUrl.trim(),
         defaultModel: draft.defaultModel.trim(),
-        defaultVoice: draft.defaultVoice.trim(),
+        defaultVoice: draft.provider === 'volcengine_asr' ? '' : draft.defaultVoice.trim(),
         resourceId: draft.resourceId.trim(),
         active: true,
       };
@@ -414,7 +454,7 @@ export function VoiceProviderSheet(props: VoiceProviderSheetProps) {
       });
       const data = await res.json().catch(() => null);
       if (!res.ok || !data?.ok || !data.credential) {
-        setEditorError(data?.error || '保存 Provider 失败，请检查地址和密钥');
+        setEditorError(data?.error || '保存失败，请检查地址和密钥');
         return;
       }
 
@@ -422,21 +462,19 @@ export function VoiceProviderSheet(props: VoiceProviderSheetProps) {
       const savedCred: PublicCredential = data.credential;
       let pairedTtsCred: PublicCredential | null = null;
 
-      // Optional 1-click Volcengine TTS pairing when adding Volcengine ASR
       if (!isEdit && draft.provider === 'volcengine_asr' && draft.alsoCreateTts) {
-        const baseName = cleanLabel.replace(/\(ASR\)|识别/gi, '').trim() || '火山豆包';
-        const ttsPayload: Record<string, any> = {
-          provider: 'volcengine_tts',
-          label: `${baseName}播报 (TTS)`,
-          baseUrl: 'https://openspeech.bytedance.com/api/v3/tts/unidirectional',
-          cloneSecretFromCredId: savedCred.id,
-          resourceId: draft.pairedTtsResourceId.trim() || 'seed-tts-2.0',
-          defaultVoice: draft.pairedTtsVoice.trim() || 'zh_female_vv_uranus_bigtts',
-          active: true,
-        };
+        const baseName = cleanLabel.replace(/\(ASR\)|听写|识别/gi, '').trim() || '火山豆包';
         const ttsRes = await apiCall('/api/voice/credentials', {
           method: 'POST',
-          body: JSON.stringify(ttsPayload),
+          body: JSON.stringify({
+            provider: 'volcengine_tts',
+            label: `${baseName}播报`,
+            baseUrl: 'https://openspeech.bytedance.com/api/v3/tts/unidirectional',
+            cloneSecretFromCredId: savedCred.id,
+            resourceId: draft.pairedTtsResourceId.trim() || 'seed-tts-2.0',
+            defaultVoice: draft.pairedTtsVoice.trim() || 'zh_female_vv_uranus_bigtts',
+            active: true,
+          }),
         });
         const ttsData = await ttsRes.json().catch(() => null);
         if (ttsRes.ok && ttsData?.ok && ttsData.credential) {
@@ -448,7 +486,6 @@ export function VoiceProviderSheet(props: VoiceProviderSheetProps) {
       onConfigChange(latestCfg);
       setViewMode('list');
 
-      // Apply default routing if checked, OR refresh bound stage model/voice if editing a currently-bound Provider
       const curRoles = getCredentialActiveRoles(savedCred.id, latestCfg.activeProfile, latestCfg.credentials);
       if (draft.setAsDefault) {
         const nextSel = computeSmartDefaultSelection(
@@ -466,21 +503,20 @@ export function VoiceProviderSheet(props: VoiceProviderSheetProps) {
           nextSel.ttsVal,
           latestCfg,
           pairedTtsCred
-            ? `✅ 已添加「${savedCred.label}」与播报并设为默认`
-            : `✅ 已保存「${savedCred.label}」并设为默认`,
+            ? `已添加「${savedCred.label}」与播报并设为默认`
+            : `已保存「${savedCred.label}」并设为默认`,
         );
       } else if (isEdit && curRoles.length > 0) {
-        // Keep active profile stage model/voice in sync with updated Provider defaults
         await persistRouting(
           getStageSelectValue(latestCfg.activeProfile?.stt, latestCfg.credentials),
           getStageSelectValue(latestCfg.activeProfile?.brain, latestCfg.credentials),
           getStageSelectValue(latestCfg.activeProfile?.tts, latestCfg.credentials),
           latestCfg,
-          `✅ 已更新「${savedCred.label}」配置`,
+          `已更新「${savedCred.label}」`,
         );
       }
 
-      toast(isEdit ? `✅ 已更新「${savedCred.label}」` : `✅ 已添加 Provider「${savedCred.label}」`);
+      toast(isEdit ? `已更新「${savedCred.label}」` : `已添加「${savedCred.label}」`);
     } catch (err: any) {
       setEditorError(err?.message || '网络异常，请重试');
     } finally {
@@ -488,10 +524,9 @@ export function VoiceProviderSheet(props: VoiceProviderSheetProps) {
     }
   };
 
-  const activePreset = VOICE_PROVIDER_PRESETS.find(p => p.key === draft.presetKey);
   const voiceChips = TTS_VOICE_OPTIONS[draft.provider as keyof typeof TTS_VOICE_OPTIONS] || [];
   const isVolcDraft = draft.provider === 'volcengine_asr' || draft.provider === 'volcengine_tts';
-  const summaryLine = formatVoiceSummaryForSettings(config);
+  const compactSummary = formatVoiceCompactValue(config);
 
   return (
     <div
@@ -501,585 +536,519 @@ export function VoiceProviderSheet(props: VoiceProviderSheetProps) {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div class="sheet-panel voice-lab-panel">
+      <div class="sheet-panel voice-lab-panel vp-ios-sheet">
         <div class="sheet-handle"></div>
-        <div class="sheet-title" style="margin-bottom:10px;">
-          {viewMode === 'list' ? (
-            <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">🎙️ 边走边听 · Provider 配置</span>
-          ) : (
-            <div style="display:flex;align-items:center;gap:8px;min-width:0;">
+
+        {/* 顶部栏：Apple 极简导航栏 */}
+        <div class="vp-sheet-nav">
+          <div class="vp-sheet-nav-left">
+            {viewMode === 'editor' && (
               <button
                 type="button"
-                class="voice-back-btn"
+                class="vp-nav-back"
                 id="vpBackToListBtn"
                 onClick={() => {
                   setEditorError('');
                   setViewMode('list');
                 }}
               >
-                ‹ 返回列表
+                <BackChevronSvg />
+                <span>返回</span>
               </button>
-              <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
-                {draft.id ? '✏️ 编辑 Provider' : '➕ 添加 Provider'}
-              </span>
-            </div>
-          )}
-          <button
-            type="button"
-            aria-label="关闭语音配置"
-            style="border:none;background:transparent;color:var(--muted);font-size:18px;cursor:pointer;padding:4px 8px;"
-            onClick={onClose}
-          >
-            ✕
-          </button>
+            )}
+          </div>
+          <div class="vp-sheet-nav-title">
+            {viewMode === 'list' ? '边走边听' : draft.id ? '编辑 Provider' : '添加 Provider'}
+          </div>
+          <div class="vp-sheet-nav-right">
+            <button
+              type="button"
+              class="vp-nav-close"
+              aria-label="关闭语音配置"
+              onClick={onClose}
+            >
+              <CloseSvg />
+            </button>
+          </div>
         </div>
 
         {viewMode === 'list' ? (
-          <div class="voice-lab-body">
-            {loadingCfg && <div class="voice-muted-note">正在读取加密配置…</div>}
-            <div class="voice-tab-stack">
-              {/* 1. 顶部当前生效概览 + 一键试听 */}
-              <div class="voice-card voice-status-hero">
-                <div class="voice-status-hero-row">
-                  <div style="flex:1;min-width:0;">
-                    <div class="voice-status-hero-title">
-                      {activeProf.id === 'native' ? '🆓 当前：免费本机语音' : `✅ 当前：${activeProf.name}`}
-                    </div>
-                    <div class="voice-status-hero-sub">{summaryLine}</div>
-                  </div>
-                  <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
-                    <button
-                      type="button"
-                      class="voice-pill-btn primary"
-                      id="vpOpenWalkModeBtn"
-                      onClick={() => {
-                        onClose();
-                        (window as any).openWalkMode?.();
-                      }}
-                    >
-                      🎧 进入随行
-                    </button>
-                    <button
-                      type="button"
-                      class="voice-pill-btn"
-                      disabled={soundChecking}
-                      onClick={() => void onSoundCheck()}
-                    >
-                      {soundChecking ? '试音中…' : '🔊 试听'}
-                    </button>
-                  </div>
-                </div>
+          <div class="voice-lab-body vp-ios-body">
+            {loadingCfg && <div class="vp-subtle-note">正在读取配置…</div>}
 
-                {missingStages.length > 0 && (
+            {/* 1. 当前方案 + 进入随行 / 试听 */}
+            <div class="vp-ios-card vp-hero-card">
+              <div class="vp-hero-row">
+                <div class="vp-hero-info">
+                  <div class="vp-hero-k">当前生效</div>
+                  <div class="vp-hero-v">{compactSummary}</div>
+                </div>
+                <div class="vp-hero-actions">
                   <button
                     type="button"
-                    class="voice-missing-key-cta"
-                    style="margin-top:8px;"
-                    onClick={() => openAddEditor('deepseek')}
-                  >
-                    <span>⚠️ {missingStages.join(' / ')} 指向的密钥已缺失</span>
-                    <span>去添加 →</span>
-                  </button>
-                )}
-
-                {(soundCheckMsg || routingMsg) && (
-                  <div
-                    class={`voice-test-msg ${(routingMsg || soundCheckMsg)!.ok ? 'ok' : 'err'}`}
-                    style="margin-top:8px;"
+                    class="vp-btn-primary"
+                    id="vpOpenWalkModeBtn"
                     onClick={() => {
-                      setRoutingMsg(null);
-                      onClearSoundCheckMsg();
+                      onClose();
+                      (window as any).openWalkMode?.();
                     }}
                   >
-                    {(routingMsg || soundCheckMsg)!.text}
-                  </div>
-                )}
+                    进入随行
+                  </button>
+                  <button
+                    type="button"
+                    class="vp-btn-ghost"
+                    disabled={soundChecking}
+                    onClick={() => void onSoundCheck()}
+                  >
+                    {soundChecking ? '试音中…' : '试听'}
+                  </button>
+                </div>
               </div>
 
-              {/* 2. 默认角色分配（听 / 想 / 说） */}
-              <div class="voice-card">
-                <div class="voice-card-head" style="margin-bottom:6px;">
-                  <div class="voice-card-title" style="margin-bottom:0;">🎛️ 默认分配（听 · 想 · 说）</div>
-                  {activeProf.id !== 'native' && (
-                    <button
-                      type="button"
-                      class="voice-pill-btn"
-                      disabled={routingSaving}
-                      onClick={() => void persistRouting('native', 'native', 'native')}
-                    >
-                      切回免费本机
-                    </button>
+              {missingStages.length > 0 && (
+                <button
+                  type="button"
+                  class="vp-alert-banner"
+                  onClick={openAddEditor}
+                >
+                  <span>{missingStages.join(' / ')} 密钥缺失</span>
+                  <span>去添加 ›</span>
+                </button>
+              )}
+
+              {(soundCheckMsg || routingMsg) && (
+                <div
+                  class={`vp-inline-notice ${(routingMsg || soundCheckMsg)!.ok ? 'ok' : 'err'}`}
+                  onClick={() => {
+                    setRoutingMsg(null);
+                    onClearSoundCheckMsg();
+                  }}
+                >
+                  {(routingMsg || soundCheckMsg)!.text}
+                </div>
+              )}
+            </div>
+
+            {/* 2. 默认分配（听写 / 大脑 / 播报） */}
+            <div class="vp-sec-head">
+              <span class="vp-sec-label">默认分配</span>
+              {activeProf.id !== 'native' && (
+                <button
+                  type="button"
+                  class="vp-sec-link"
+                  disabled={routingSaving}
+                  onClick={() => void persistRouting('native', 'native', 'native')}
+                >
+                  恢复免费本机
+                </button>
+              )}
+            </div>
+            <div class="vp-ios-card">
+              <div class="vp-select-row">
+                <span class="vp-select-label">听写</span>
+                <select
+                  id="voiceStageSttSelect"
+                  class="vp-select-ctrl"
+                  disabled={routingSaving}
+                  value={sttVal}
+                  onChange={(e: any) => handleStageChange('stt', e.target.value)}
+                >
+                  <option value="native">手机自带免费</option>
+                  {sttVal.startsWith('missing:') && (
+                    <option value={sttVal}>密钥缺失</option>
                   )}
-                </div>
-                <div class="voice-muted-note" style="margin-bottom:8px;">
-                  从下方你的 Provider 列表里，自由指定哪一家负责听、想、说，改完自动生效。
-                </div>
-
-                <div class="vp-routing-list">
-                  <div class="vp-routing-row">
-                    <div class="vp-routing-label">
-                      <span class="vp-routing-title">👂 听（语音转文字）</span>
-                    </div>
-                    <select
-                      id="voiceStageSttSelect"
-                      class="vp-routing-select"
-                      disabled={routingSaving}
-                      value={sttVal}
-                      onChange={(e: any) => handleStageChange('stt', e.target.value)}
-                    >
-                      <option value="native">🆓 手机自带免费</option>
-                      {sttVal.startsWith('missing:') && (
-                        <option value={sttVal}>⚠️ 密钥缺失 ({PROTOCOL_LABELS[sttVal.slice(8) as keyof typeof PROTOCOL_LABELS] || sttVal.slice(8)})</option>
-                      )}
-                      {sttCreds.map(c => (
-                        <option key={c.id} value={`cred:${c.id}`}>
-                          {c.label} · {PROTOCOL_LABELS[c.provider as keyof typeof PROTOCOL_LABELS] || c.provider}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div class="vp-routing-row">
-                    <div class="vp-routing-label">
-                      <span class="vp-routing-title">🧠 想（语音大脑）</span>
-                    </div>
-                    <select
-                      id="voiceStageBrainSelect"
-                      class="vp-routing-select"
-                      disabled={routingSaving}
-                      value={brainVal}
-                      onChange={(e: any) => handleStageChange('brain', e.target.value)}
-                    >
-                      <option value="native">🆓 本地基础口令</option>
-                      {brainVal.startsWith('missing:') && (
-                        <option value={brainVal}>⚠️ 密钥缺失 ({PROTOCOL_LABELS[brainVal.slice(8) as keyof typeof PROTOCOL_LABELS] || brainVal.slice(8)})</option>
-                      )}
-                      {brainCreds.map(c => (
-                        <option key={c.id} value={`cred:${c.id}`}>
-                          {c.label} · {c.defaultModel || inferDefaultBrainModel(c)}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div class="vp-routing-row">
-                    <div class="vp-routing-label">
-                      <span class="vp-routing-title">🗣️ 说（文字转语音）</span>
-                    </div>
-                    <select
-                      id="voiceStageTtsSelect"
-                      class="vp-routing-select"
-                      disabled={routingSaving}
-                      value={ttsVal}
-                      onChange={(e: any) => handleStageChange('tts', e.target.value)}
-                    >
-                      <option value="native">🆓 手机自带免费</option>
-                      {ttsVal.startsWith('missing:') && (
-                        <option value={ttsVal}>⚠️ 密钥缺失 ({PROTOCOL_LABELS[ttsVal.slice(8) as keyof typeof PROTOCOL_LABELS] || ttsVal.slice(8)})</option>
-                      )}
-                      {ttsCreds.map(c => (
-                        <option key={c.id} value={`cred:${c.id}`}>
-                          {c.label} · {c.defaultVoice || PROTOCOL_LABELS[c.provider as keyof typeof PROTOCOL_LABELS] || c.provider}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
+                  {sttCreds.map(c => (
+                    <option key={c.id} value={`cred:${c.id}`}>
+                      {c.label}
+                    </option>
+                  ))}
+                </select>
               </div>
 
-              {/* 3. 我的 Provider 列表（DeepSeek Harness 风格，不限制固定服务商） */}
-              <div class="voice-card" id="voiceProviderListSection">
-                <div class="voice-card-head" style="margin-bottom:8px;">
-                  <div>
-                    <div class="voice-card-title" style="margin-bottom:2px;">
-                      🔌 我的 Provider 列表 ({creds.length})
-                    </div>
-                    <div class="voice-muted-note" style="margin:0;">
-                      支持任意中转站、OpenAI 兼容接口、DeepSeek、火山豆包、Gemini 等
-                    </div>
+              <div class="vp-select-row">
+                <span class="vp-select-label">大脑</span>
+                <select
+                  id="voiceStageBrainSelect"
+                  class="vp-select-ctrl"
+                  disabled={routingSaving}
+                  value={brainVal}
+                  onChange={(e: any) => handleStageChange('brain', e.target.value)}
+                >
+                  <option value="native">本地基础口令</option>
+                  {brainVal.startsWith('missing:') && (
+                    <option value={brainVal}>密钥缺失</option>
+                  )}
+                  {brainCreds.map(c => (
+                    <option key={c.id} value={`cred:${c.id}`}>
+                      {c.label} ({c.defaultModel || inferDefaultBrainModel(c)})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div class="vp-select-row">
+                <span class="vp-select-label">播报</span>
+                <select
+                  id="voiceStageTtsSelect"
+                  class="vp-select-ctrl"
+                  disabled={routingSaving}
+                  value={ttsVal}
+                  onChange={(e: any) => handleStageChange('tts', e.target.value)}
+                >
+                  <option value="native">手机自带免费</option>
+                  {ttsVal.startsWith('missing:') && (
+                    <option value={ttsVal}>密钥缺失</option>
+                  )}
+                  {ttsCreds.map(c => (
+                    <option key={c.id} value={`cred:${c.id}`}>
+                      {c.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* 3. Provider 列表（DSH 统一协议列表） */}
+            <div class="vp-sec-head" id="voiceProviderListHeader">
+              <span class="vp-sec-label">Provider 列表 ({creds.length})</span>
+              <button
+                type="button"
+                id="voiceAddProviderBtn"
+                class="vp-sec-add-btn"
+                onClick={openAddEditor}
+              >
+                <PlusSvg />
+                <span>添加</span>
+              </button>
+            </div>
+
+            <div class="vp-ios-card" id="voiceProviderListSection">
+              {creds.length === 0 ? (
+                <div class="vp-ios-empty">
+                  <div class="vp-empty-title">暂未添加 Provider</div>
+                  <div class="vp-empty-desc">
+                    统一支持 OpenAI 兼容接口（火山方舟、DeepSeek、OpenAI、中转站、Ollama）及原生语音接口
                   </div>
                   <button
                     type="button"
-                    id="voiceAddProviderBtn"
-                    class="voice-pill-btn primary"
-                    onClick={() => openAddEditor('deepseek')}
+                    class="vp-btn-primary"
+                    style="margin-top:12px;padding:8px 18px;"
+                    onClick={openAddEditor}
                   >
-                    ＋ 添加
+                    添加 Provider
                   </button>
                 </div>
+              ) : (
+                creds.map(cred => {
+                  const roles = getCredentialActiveRoles(cred.id, activeProf, creds);
+                  const host = extractHostFromUrl(cred.baseUrl);
+                  const modelOrRes = cred.defaultModel || cred.resourceId || '';
+                  const testRes = testResults[cred.id];
+                  const isPrimaryDefault = (cred.provider === 'gemini' && roles.length === 3)
+                    || (cred.provider === 'volcengine_asr' && roles.includes('stt'))
+                    || (cred.provider === 'volcengine_tts' && roles.includes('tts'))
+                    || (cred.provider === 'openai_compat' && roles.includes('brain'));
 
-                {creds.length === 0 ? (
-                  <div class="vp-empty-box">
-                    <div class="vp-empty-title">还没有添加任何 Provider</div>
-                    <div class="vp-empty-desc">
-                      点下方按钮添加你自己的服务商（支持自定义接口地址、模型名和 API Key），添加后即可在上方选为默认。
-                    </div>
-                    <button
-                      type="button"
-                      class="primary-block-btn"
-                      style="margin-top:10px;"
-                      onClick={() => openAddEditor('deepseek')}
-                    >
-                      ＋ 添加第一个 Provider
-                    </button>
-                  </div>
-                ) : (
-                  <div class="vp-list">
-                    {creds.map(cred => {
-                      const roles = getCredentialActiveRoles(cred.id, activeProf, creds);
-                      const host = extractHostFromUrl(cred.baseUrl);
-                      const modelOrRes = cred.defaultModel || cred.resourceId || '';
-                      const testRes = testResults[cred.id];
-                      const isPrimaryDefault = (cred.provider === 'gemini' && roles.length === 3)
-                        || (cred.provider === 'volcengine_asr' && roles.includes('stt'))
-                        || (cred.provider === 'volcengine_tts' && roles.includes('tts'))
-                        || (cred.provider === 'openai_compat' && roles.includes('brain'));
-
-                      return (
-                        <div key={cred.id} class={`vp-item ${roles.length > 0 ? 'is-active' : ''}`}>
-                          <div class="vp-item-top">
-                            <div class="vp-item-title-wrap">
-                              <span class="vp-item-name">{cred.label}</span>
-                              <span class="voice-prov-tag">
-                                {PROTOCOL_LABELS[cred.provider as keyof typeof PROTOCOL_LABELS] || cred.provider}
-                              </span>
-                            </div>
-                            {roles.length > 0 && (
-                              <div class="vp-role-badges">
-                                {roles.includes('stt') && <span class="vp-role-pill stt">👂 听</span>}
-                                {roles.includes('brain') && <span class="vp-role-pill brain">🧠 想</span>}
-                                {roles.includes('tts') && <span class="vp-role-pill tts">🗣️ 说</span>}
-                              </div>
-                            )}
-                          </div>
-
-                          <div class="vp-item-meta">
-                            {host && <span>{host}</span>}
-                            {modelOrRes && <span>· {modelOrRes}</span>}
-                            {cred.defaultVoice && cred.provider !== 'volcengine_asr' && <span>· 音色 {cred.defaultVoice}</span>}
-                            <span>· {cred.authSummary}</span>
-                          </div>
-
-                          {testRes && (
-                            <div class={`voice-test-msg ${testRes.ok ? 'ok' : 'err'}`} style="margin-top:6px;">
-                              {testRes.summary}
-                            </div>
-                          )}
-
-                          <div class="vp-item-actions">
-                            <button
-                              type="button"
-                              class={`voice-pill-btn ${isPrimaryDefault ? '' : 'primary'}`}
-                              disabled={routingSaving}
-                              onClick={() => void handleSetProviderDefault(cred)}
-                            >
-                              {isPrimaryDefault ? '✅ 已为默认' : '⚡ 设为默认'}
-                            </button>
-                            <button
-                              type="button"
-                              class="voice-pill-btn"
-                              disabled={testingCredId === cred.id}
-                              onClick={() => void handleTestProvider(cred.id)}
-                            >
-                              {testingCredId === cred.id ? '测试中…' : '🔌 测试'}
-                            </button>
-                            <button
-                              type="button"
-                              class="voice-pill-btn"
-                              onClick={() => openEditEditor(cred)}
-                            >
-                              ✏️ 编辑
-                            </button>
-                            <button
-                              type="button"
-                              class="voice-pill-btn danger"
-                              onClick={() => void handleDeleteProvider(cred)}
-                            >
-                              删除
-                            </button>
-                          </div>
+                  return (
+                    <div key={cred.id} class="vp-ios-item">
+                      <div class="vp-ios-item-top">
+                        <div class="vp-ios-item-title-wrap">
+                          <span class="vp-ios-item-name">{cred.label}</span>
+                          <span class="vp-proto-chip">
+                            {PROTOCOL_LABELS[cred.provider as keyof typeof PROTOCOL_LABELS] || cred.provider}
+                          </span>
                         </div>
-                      );
-                    })}
-                  </div>
-                )}
+                        {roles.length > 0 && (
+                          <div class="vp-role-badges">
+                            {roles.includes('stt') && <span class="vp-role-pill stt">听</span>}
+                            {roles.includes('brain') && <span class="vp-role-pill brain">想</span>}
+                            {roles.includes('tts') && <span class="vp-role-pill tts">说</span>}
+                          </div>
+                        )}
+                      </div>
+
+                      <div class="vp-ios-item-meta">
+                        {[
+                          host,
+                          modelOrRes,
+                          cred.defaultVoice && cred.provider !== 'volcengine_asr' ? cred.defaultVoice : '',
+                          cred.authSummary,
+                        ].filter(Boolean).join(' · ')}
+                      </div>
+
+                      {testRes && (
+                        <div class={`vp-inline-notice ${testRes.ok ? 'ok' : 'err'}`} style="margin-top:6px;">
+                          {testRes.summary}
+                        </div>
+                      )}
+
+                      <div class="vp-ios-item-actions">
+                        <button
+                          type="button"
+                          class={`vp-text-act ${isPrimaryDefault ? 'muted' : 'primary'}`}
+                          disabled={routingSaving}
+                          onClick={() => void handleSetProviderDefault(cred)}
+                        >
+                          {isPrimaryDefault ? '已默认' : '设为默认'}
+                        </button>
+                        <button
+                          type="button"
+                          class="vp-text-act"
+                          disabled={testingCredId === cred.id}
+                          onClick={() => void handleTestProvider(cred.id)}
+                        >
+                          {testingCredId === cred.id ? '测试中…' : '测试'}
+                        </button>
+                        <button
+                          type="button"
+                          class="vp-text-act"
+                          onClick={() => openEditEditor(cred)}
+                        >
+                          编辑
+                        </button>
+                        <button
+                          type="button"
+                          class="vp-text-act danger"
+                          onClick={() => void handleDeleteProvider(cred)}
+                        >
+                          删除
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            {/* 4. 行为与安全 */}
+            <div class="vp-sec-head">
+              <span class="vp-sec-label">行为与安全</span>
+            </div>
+            <div class="vp-ios-card">
+              <div class="vp-select-row">
+                <span class="vp-select-label">高危操作确认</span>
+                <select
+                  class="vp-select-ctrl"
+                  value={config.prefs.l2Policy}
+                  onChange={(e: any) => void onUpdatePrefs({ l2Policy: e.target.value })}
+                >
+                  <option value="pin">念 3 位确认码</option>
+                  <option value="screen_only">仅点手机屏幕</option>
+                </select>
               </div>
 
-              {/* 4. 日常必用开关 */}
-              <div class="voice-card">
-                <div class="voice-toggle-row">
-                  <div>
-                    <div class="voice-row-main">🛡️ 高危操作二次确认</div>
-                    <div class="voice-row-sub">删文件 / 强推 / 部署等危险指令时的保护方式</div>
-                  </div>
-                  <select
-                    class="voice-mini-select"
-                    value={config.prefs.l2Policy}
-                    onChange={(e: any) => void onUpdatePrefs({ l2Policy: e.target.value })}
-                  >
-                    <option value="pin">🔢 念 3 位确认码</option>
-                    <option value="screen_only">📱 仅点手机屏幕</option>
-                  </select>
+              <div class="vp-switch-row">
+                <div>
+                  <div class="vp-switch-title">播报后自动开麦</div>
+                  <div class="vp-switch-sub">念完选项后自动听 5.5 秒</div>
                 </div>
+                <input
+                  type="checkbox"
+                  class="voice-switch"
+                  checked={config.prefs.autoListenAfterBriefing}
+                  onChange={(e: any) => void onUpdatePrefs({ autoListenAfterBriefing: e.target.checked })}
+                />
+              </div>
+            </div>
 
-                <div class="voice-toggle-row">
+            {/* 5. 高级与延迟压测 */}
+            <details
+              class="vp-ios-details"
+              open={geekOpen}
+              onToggle={(e: any) => setGeekOpen(Boolean(e.currentTarget?.open))}
+            >
+              <summary>高级选项与延迟压测</summary>
+              <div class="vp-ios-card" style="margin-top:8px;">
+                <div class="vp-switch-row">
                   <div>
-                    <div class="voice-row-main">🎙️ 播报完自动开麦听我回答</div>
-                    <div class="voice-row-sub">念完选项后自动听 5.5 秒；边听歌时自动压低背景音乐</div>
+                    <div class="vp-switch-title">听歌时压低背景音乐</div>
+                    <div class="vp-switch-sub">播报时自动降低音量，说完恢复</div>
                   </div>
                   <input
                     type="checkbox"
                     class="voice-switch"
-                    checked={config.prefs.autoListenAfterBriefing}
-                    onChange={(e: any) => void onUpdatePrefs({ autoListenAfterBriefing: e.target.checked })}
+                    checked={config.prefs.duckMusicMode}
+                    onChange={(e: any) => void onUpdatePrefs({ duckMusicMode: e.target.checked })}
                   />
                 </div>
-              </div>
-
-              {/* 5. 折叠的高级选项与延迟压测 */}
-              <details
-                class="voice-adv-details"
-                open={geekOpen}
-                onToggle={(e: any) => setGeekOpen(Boolean(e.currentTarget?.open))}
-              >
-                <summary>🔧 高级选项与延迟压测（聊天页复用 / 试跑排障）</summary>
-                <div class="voice-adv-body" style="display:flex;flex-direction:column;gap:10px;">
+                <div class="vp-switch-row">
                   <div>
-                    <div class="voice-toggle-row">
-                      <div>
-                        <div class="voice-row-main">🎵 边听歌边播报（压低背景音乐）</div>
-                        <div class="voice-row-sub">播报时自动压低音乐音量，说完自动恢复</div>
-                      </div>
-                      <input
-                        type="checkbox"
-                        class="voice-switch"
-                        checked={config.prefs.duckMusicMode}
-                        onChange={(e: any) => void onUpdatePrefs({ duckMusicMode: e.target.checked })}
-                      />
-                    </div>
-                    <div class="voice-toggle-row">
-                      <div>
-                        <div class="voice-row-main">聊天页「🔊 播报」复用云端声音</div>
-                        <div class="voice-row-sub">默认用免费系统语音；开启后用上方选好的「说」服务</div>
-                      </div>
-                      <input
-                        type="checkbox"
-                        class="voice-switch"
-                        checked={config.prefs.useByokForChatTts}
-                        onChange={(e: any) => void onUpdatePrefs({ useByokForChatTts: e.target.checked })}
-                      />
-                    </div>
-                    <div class="voice-toggle-row">
-                      <div>
-                        <div class="voice-row-main">聊天页语音输入复用云端听写</div>
-                        <div class="voice-row-sub">默认用免费系统听写；开启后用上方选好的「听」服务</div>
-                      </div>
-                      <input
-                        type="checkbox"
-                        class="voice-switch"
-                        checked={config.prefs.useByokForChatStt}
-                        onChange={(e: any) => void onUpdatePrefs({ useByokForChatStt: e.target.checked })}
-                      />
-                    </div>
+                    <div class="vp-switch-title">聊天页朗读复用云端播报</div>
                   </div>
+                  <input
+                    type="checkbox"
+                    class="voice-switch"
+                    checked={config.prefs.useByokForChatTts}
+                    onChange={(e: any) => void onUpdatePrefs({ useByokForChatTts: e.target.checked })}
+                  />
+                </div>
+                <div class="vp-switch-row">
+                  <div>
+                    <div class="vp-switch-title">聊天页语音输入复用云端听写</div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    class="voice-switch"
+                    checked={config.prefs.useByokForChatStt}
+                    onChange={(e: any) => void onUpdatePrefs({ useByokForChatStt: e.target.checked })}
+                  />
+                </div>
 
-                  <div style="border-top:1px solid var(--border);padding-top:8px;">
-                    <div class="voice-toggle-row" style="padding-top:0;">
-                      <div>
-                        <div class="voice-row-main">🧪 安全试跑压测 (Dry-Run)</div>
-                        <div class="voice-row-sub">排查哪一步慢或报错，绝不会真的遥控电脑</div>
-                      </div>
-                      <input
-                        type="checkbox"
-                        class="voice-switch"
-                        checked={benchDryRun}
-                        onChange={(e: any) => onSetBenchDryRun(e.target.checked)}
-                      />
+                <div class="vp-bench-block">
+                  <div class="vp-switch-row" style="padding:0 0 8px;border:none;">
+                    <div>
+                      <div class="vp-switch-title">安全试跑压测（不操作电脑）</div>
                     </div>
                     <input
-                      class="voice-field-input"
-                      value={benchText}
-                      onInput={(e: any) => onSetBenchText(e.target.value)}
-                      placeholder="输入一句测试口令..."
+                      type="checkbox"
+                      class="voice-switch"
+                      checked={benchDryRun}
+                      onChange={(e: any) => onSetBenchDryRun(e.target.checked)}
                     />
-                    <div style="display:flex;gap:8px;margin-top:6px;">
-                      <button
-                        type="button"
-                        class="voice-pill-btn primary"
-                        style="flex:1;padding:8px 10px;"
-                        disabled={benchRunning}
-                        onClick={() => void onRunBenchTurn()}
-                      >
-                        {benchRunning ? '⏳ 测速中…' : '🚀 跑一轮延迟压测'}
-                      </button>
-                      <button
-                        type="button"
-                        class={`voice-pill-btn ${benchRecording ? 'danger' : ''}`}
-                        style="padding:8px 10px;"
-                        disabled={benchRunning}
-                        onClick={() => void onToggleBenchVoice()}
-                      >
-                        {benchRecording ? '⏹ 停止' : '🎙️ 录真声'}
-                      </button>
-                    </div>
-                    {benchReport && (
-                      <div style="margin-top:8px;">
-                        <div class="voice-metrics-grid">
-                          {benchReport.stt && (
-                            <div class="voice-metric-box">
-                              <div class="voice-metric-k">听写</div>
-                              <div class="voice-metric-v">{benchReport.stt.latencyMs ?? 0}ms</div>
-                            </div>
-                          )}
-                          {benchReport.turn && (
-                            <div class="voice-metric-box">
-                              <div class="voice-metric-k">大脑</div>
-                              <div class="voice-metric-v">{benchReport.turn.latencyMs ?? 0}ms</div>
-                            </div>
-                          )}
-                          {benchReport.tts && (
-                            <div class="voice-metric-box">
-                              <div class="voice-metric-k">播报</div>
-                              <div class="voice-metric-v">{benchReport.tts.latencyMs ?? 0}ms</div>
-                            </div>
-                          )}
-                        </div>
-                        {(benchReport.stt?.error || benchReport.turn?.error || benchReport.tts?.error) && (
-                          <div class="voice-test-msg err" style="margin-top:6px;">
-                            {benchReport.stt?.error || benchReport.turn?.error || benchReport.tts?.error}
+                  </div>
+                  <input
+                    class="vp-input"
+                    value={benchText}
+                    onInput={(e: any) => onSetBenchText(e.target.value)}
+                    placeholder="输入一句测试口令…"
+                  />
+                  <div style="display:flex;gap:8px;margin-top:8px;">
+                    <button
+                      type="button"
+                      class="vp-btn-primary"
+                      style="flex:1;"
+                      disabled={benchRunning}
+                      onClick={() => void onRunBenchTurn()}
+                    >
+                      {benchRunning ? '测速中…' : '跑一轮压测'}
+                    </button>
+                    <button
+                      type="button"
+                      class={`vp-btn-ghost ${benchRecording ? 'danger' : ''}`}
+                      disabled={benchRunning}
+                      onClick={() => void onToggleBenchVoice()}
+                    >
+                      {benchRecording ? '停止' : '录真声'}
+                    </button>
+                  </div>
+                  {benchReport && (
+                    <div style="margin-top:10px;">
+                      <div class="voice-metrics-grid">
+                        {benchReport.stt && (
+                          <div class="voice-metric-box">
+                            <div class="voice-metric-k">听写</div>
+                            <div class="voice-metric-v">{benchReport.stt.latencyMs ?? 0}ms</div>
                           </div>
                         )}
-                        {benchReport.turn?.spokenReply && (
-                          <div class="voice-bench-reply" style="margin-top:6px;">
-                            {benchReport.turn.spokenReply}
+                        {benchReport.turn && (
+                          <div class="voice-metric-box">
+                            <div class="voice-metric-k">大脑</div>
+                            <div class="voice-metric-v">{benchReport.turn.latencyMs ?? 0}ms</div>
+                          </div>
+                        )}
+                        {benchReport.tts && (
+                          <div class="voice-metric-box">
+                            <div class="voice-metric-k">播报</div>
+                            <div class="voice-metric-v">{benchReport.tts.latencyMs ?? 0}ms</div>
                           </div>
                         )}
                       </div>
-                    )}
-                  </div>
+                      {(benchReport.stt?.error || benchReport.turn?.error || benchReport.tts?.error) && (
+                        <div class="vp-inline-notice err" style="margin-top:6px;">
+                          {benchReport.stt?.error || benchReport.turn?.error || benchReport.tts?.error}
+                        </div>
+                      )}
+                      {benchReport.turn?.spokenReply && (
+                        <div class="voice-bench-reply" style="margin-top:6px;">
+                          {benchReport.turn.spokenReply}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
-              </details>
-            </div>
+              </div>
+            </details>
           </div>
         ) : (
-          /* 编辑 / 新增 Provider 表单视图 */
-          <div class="voice-lab-body" id="voiceProviderEditor">
-            <div class="voice-tab-stack">
-              {!draft.id && (
-                <div class="voice-card" style="padding:10px 11px;">
-                  <div class="voice-card-title" style="margin-bottom:7px;">⚡ 选一个模板快填（也可以选「完全自定义」）</div>
-                  <div class="vp-preset-grid">
-                    {VOICE_PROVIDER_PRESETS.map(p => (
-                      <button
-                        key={p.key}
-                        type="button"
-                        data-preset-key={p.key}
-                        class={`vp-preset-chip ${draft.presetKey === p.key ? 'active' : ''}`}
-                        onClick={() => {
-                          setEditorError('');
-                          setDraft(makeDraftFromPreset(p.key));
-                        }}
-                      >
-                        <span class="vp-preset-title">{p.icon} {p.title}</span>
-                        <span class="vp-preset-sub">{p.sub}</span>
-                      </button>
-                    ))}
+          /* DSH 风格：统一协议标准表单（零品牌墙、直接开填） */
+          <div class="voice-lab-body vp-ios-body" id="voiceProviderEditor">
+            <div class="vp-ios-card vp-form-card">
+              <div class="vp-field">
+                <label class="vp-field-label" for="vpProviderTypeSelect">对接协议</label>
+                <select
+                  id="vpProviderTypeSelect"
+                  class="vp-input"
+                  disabled={Boolean(draft.id)}
+                  value={draft.provider}
+                  onChange={(e: any) => handleProtocolChange(e.target.value)}
+                >
+                  <option value="openai_compat">OpenAI 兼容（标准）</option>
+                  <option value="gemini">Google Gemini 原生</option>
+                  <option value="volcengine_asr">火山豆包听写（ASR）</option>
+                  <option value="volcengine_tts">火山豆包播报（TTS）</option>
+                </select>
+                {draft.provider === 'openai_compat' && (
+                  <div class="vp-field-hint">
+                    火山方舟、DeepSeek、OpenAI、智谱、硅基流动、OpenRouter、中转站、Ollama 均走此标准协议
                   </div>
+                )}
+              </div>
+
+              <div class="vp-field">
+                <label class="vp-field-label" for="vpLabelInput">名称</label>
+                <input
+                  id="vpLabelInput"
+                  class="vp-input"
+                  value={draft.label}
+                  placeholder="如：火山方舟 / DeepSeek / 我的中转"
+                  onInput={(e: any) => setDraft({ ...draft, label: e.target.value })}
+                />
+              </div>
+
+              {!isVolcDraft && (
+                <div class="vp-field">
+                  <label class="vp-field-label" for="vpBaseUrlInput">接口地址 (Base URL)</label>
+                  <input
+                    id="vpBaseUrlInput"
+                    class="vp-input"
+                    value={draft.baseUrl}
+                    placeholder={
+                      draft.provider === 'gemini'
+                        ? 'https://generativelanguage.googleapis.com/v1beta'
+                        : 'https://api.example.com/v1'
+                    }
+                    onInput={(e: any) => setDraft({ ...draft, baseUrl: e.target.value })}
+                  />
                 </div>
               )}
 
-              <div class="voice-card">
-                <label class="voice-field-label" style="margin-top:0;">显示名称（自己好认就行）</label>
-                <input
-                  id="vpLabelInput"
-                  class="voice-field-input"
-                  value={draft.label}
-                  placeholder="例：我的中转站 / DeepSeek-V3 / 火山豆包"
-                  onInput={(e: any) => setDraft({ ...draft, label: e.target.value })}
-                />
-
-                <label class="voice-field-label">接口协议类型</label>
-                <select
-                  id="vpProviderTypeSelect"
-                  class="voice-field-input"
-                  disabled={Boolean(draft.id)}
-                  value={draft.provider}
-                  onChange={(e: any) => {
-                    const nextProv = e.target.value as ProviderDraft['provider'];
-                    setDraft(prev => ({
-                      ...prev,
-                      presetKey: 'custom',
-                      provider: nextProv,
-                      baseUrl: nextProv === 'gemini'
-                        ? 'https://generativelanguage.googleapis.com/v1beta'
-                        : nextProv === 'volcengine_asr'
-                          ? 'https://openspeech.bytedance.com/api/v3/auc/bigmodel/recognize/flash'
-                          : nextProv === 'volcengine_tts'
-                            ? 'https://openspeech.bytedance.com/api/v3/tts/unidirectional'
-                            : (prev.baseUrl && !prev.baseUrl.includes('bytedance') && !prev.baseUrl.includes('googleapis'))
-                              ? prev.baseUrl
-                              : '',
-                      resourceId: nextProv === 'volcengine_asr'
-                        ? 'volc.bigasr.auc_turbo'
-                        : nextProv === 'volcengine_tts'
-                          ? 'seed-tts-2.0'
-                          : '',
-                      defaultVoice: nextProv === 'volcengine_tts'
-                        ? 'zh_female_vv_uranus_bigtts'
-                        : nextProv === 'gemini'
-                          ? 'Kore'
-                          : prev.defaultVoice,
-                    }));
-                  }}
-                >
-                  <option value="openai_compat">OpenAI 兼容接口（任意中转站 / DeepSeek / 方舟 / Ollama）</option>
-                  <option value="gemini">Google Gemini 官方接口</option>
-                  <option value="volcengine_asr">火山豆包语音识别（听写 ASR）</option>
-                  <option value="volcengine_tts">火山豆包语音合成（播报 TTS）</option>
-                </select>
-
-                {!isVolcDraft && (
-                  <Fragment>
-                    <label class="voice-field-label">接口地址 (Base URL)</label>
-                    <input
-                      id="vpBaseUrlInput"
-                      class="voice-field-input"
-                      value={draft.baseUrl}
-                      placeholder={
-                        draft.provider === 'gemini'
-                          ? 'https://generativelanguage.googleapis.com/v1beta'
-                          : '例：https://api.example.com/v1'
-                      }
-                      onInput={(e: any) => setDraft({ ...draft, baseUrl: e.target.value })}
-                    />
-                  </Fragment>
-                )}
-
-                <label class="voice-field-label">
-                  {isVolcDraft ? '火山引擎鉴权密钥' : 'API Key（加密保存，不回传明文）'}
+              <div class="vp-field">
+                <label class="vp-field-label" for="vpApiKeyInput">
+                  {isVolcDraft ? '鉴权密钥' : 'API Key'}
                 </label>
 
                 {draft.id && editingCredSummary && (
-                  <div class="voice-saved-hint" style="margin-bottom:6px;">
-                    🔐 已加密保存：{editingCredSummary} · 留空则保持原密钥不变
+                  <div class="vp-saved-key-note">
+                    已加密保存 ({editingCredSummary}) · 留空保持原密钥
                   </div>
                 )}
 
                 {isVolcDraft && (
-                  <div class="voice-subseg" style="margin-top:2px;margin-bottom:6px;">
+                  <div class="vp-seg-pair">
                     <button
                       type="button"
-                      class={`voice-subseg-btn ${draft.volcAuthMode === 'apiKey' ? 'active' : ''}`}
+                      class={`vp-seg-opt ${draft.volcAuthMode === 'apiKey' ? 'active' : ''}`}
                       onClick={() => setDraft({ ...draft, volcAuthMode: 'apiKey' })}
                     >
-                      单把 API Key（推荐）
+                      API Key
                     </button>
                     <button
                       type="button"
-                      class={`voice-subseg-btn ${draft.volcAuthMode === 'appToken' ? 'active' : ''}`}
+                      class={`vp-seg-opt ${draft.volcAuthMode === 'appToken' ? 'active' : ''}`}
                       onClick={() => setDraft({ ...draft, volcAuthMode: 'appToken' })}
                     >
-                      AppID + Access Token
+                      AppID + Token
                     </button>
                   </div>
                 )}
@@ -1087,14 +1056,14 @@ export function VoiceProviderSheet(props: VoiceProviderSheetProps) {
                 {isVolcDraft && draft.volcAuthMode === 'appToken' ? (
                   <div class="voice-two-col">
                     <input
-                      class="voice-field-input"
+                      class="vp-input"
                       value={draft.appId}
-                      placeholder="火山 AppID"
+                      placeholder="AppID"
                       onInput={(e: any) => setDraft({ ...draft, appId: e.target.value })}
                     />
                     <input
                       type="password"
-                      class="voice-field-input"
+                      class="vp-input"
                       value={draft.accessToken}
                       placeholder={draft.id ? '留空沿用原 Token' : 'Access Token'}
                       onInput={(e: any) => setDraft({ ...draft, accessToken: e.target.value })}
@@ -1104,159 +1073,122 @@ export function VoiceProviderSheet(props: VoiceProviderSheetProps) {
                   <input
                     id="vpApiKeyInput"
                     type="password"
-                    class="voice-field-input"
+                    class="vp-input"
                     value={draft.apiKey}
-                    placeholder={
-                      draft.id
-                        ? '留空保留当前已保存密钥，或粘贴新 Key 替换'
-                        : (activePreset?.keyPlaceholder || '粘贴 API Key...')
-                    }
+                    placeholder={draft.id ? '留空保持原密钥，或粘贴新 Key 替换' : '粘贴 API Key（加密保存）'}
                     onInput={(e: any) => setDraft({ ...draft, apiKey: e.target.value })}
                   />
                 )}
+              </div>
 
-                {!isVolcDraft ? (
-                  <Fragment>
-                    <label class="voice-field-label">默认模型名</label>
-                    <input
-                      id="vpDefaultModelInput"
-                      class="voice-field-input"
-                      value={draft.defaultModel}
-                      placeholder="例：deepseek-chat / gpt-4o-mini / doubao-seed-2-0-lite-260215"
-                      onInput={(e: any) => setDraft({ ...draft, defaultModel: e.target.value })}
-                    />
-                    {activePreset?.modelChips && activePreset.modelChips.length > 0 && (
-                      <div class="voice-chip-row" style="margin-top:5px;">
-                        {activePreset.modelChips.map(chip => (
-                          <button
-                            key={chip.value}
-                            type="button"
-                            class={`voice-quick-chip ${draft.defaultModel === chip.value ? 'active' : ''}`}
-                            onClick={() => setDraft({ ...draft, defaultModel: chip.value })}
-                          >
-                            {chip.label}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </Fragment>
-                ) : (
-                  <Fragment>
-                    <label class="voice-field-label">
-                      Resource ID（默认 {draft.provider === 'volcengine_asr' ? 'volc.bigasr.auc_turbo' : 'seed-tts-2.0'}）
-                    </label>
-                    <input
-                      id="vpResourceIdInput"
-                      class="voice-field-input"
-                      value={draft.resourceId}
-                      placeholder={draft.provider === 'volcengine_asr' ? 'volc.bigasr.auc_turbo' : 'seed-tts-2.0'}
-                      onInput={(e: any) => setDraft({ ...draft, resourceId: e.target.value })}
-                    />
-                  </Fragment>
-                )}
+              {!isVolcDraft ? (
+                <div class="vp-field">
+                  <label class="vp-field-label" for="vpDefaultModelInput">模型 ID</label>
+                  <input
+                    id="vpDefaultModelInput"
+                    class="vp-input"
+                    value={draft.defaultModel}
+                    placeholder={
+                      draft.provider === 'gemini'
+                        ? '如：gemini-2.5-flash'
+                        : '如：doubao-seed-2-0-lite-260215 / deepseek-chat'
+                    }
+                    onInput={(e: any) => setDraft({ ...draft, defaultModel: e.target.value })}
+                  />
+                </div>
+              ) : (
+                <div class="vp-field">
+                  <label class="vp-field-label" for="vpResourceIdInput">Resource ID</label>
+                  <input
+                    id="vpResourceIdInput"
+                    class="vp-input"
+                    value={draft.resourceId}
+                    placeholder={draft.provider === 'volcengine_asr' ? 'volc.bigasr.auc_turbo' : 'seed-tts-2.0'}
+                    onInput={(e: any) => setDraft({ ...draft, resourceId: e.target.value })}
+                  />
+                </div>
+              )}
 
-                {(draft.provider === 'volcengine_tts' || draft.provider === 'gemini') && (
-                  <Fragment>
-                    <label class="voice-field-label">默认播报音色（可选）</label>
-                    <input
-                      class="voice-field-input"
-                      value={draft.defaultVoice}
-                      placeholder={draft.provider === 'volcengine_tts' ? 'zh_female_vv_uranus_bigtts' : 'Kore'}
-                      onInput={(e: any) => setDraft({ ...draft, defaultVoice: e.target.value })}
-                    />
-                    {voiceChips.length > 0 && (
-                      <div class="voice-chip-row" style="margin-top:5px;">
-                        {voiceChips.map(v => (
-                          <button
-                            key={v.value}
-                            type="button"
-                            class={`voice-quick-chip ${draft.defaultVoice === v.value ? 'active' : ''}`}
-                            onClick={() => setDraft({ ...draft, defaultVoice: v.value })}
-                          >
-                            {v.label}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </Fragment>
-                )}
+              {(draft.provider === 'volcengine_tts' || draft.provider === 'gemini') && (
+                <div class="vp-field">
+                  <label class="vp-field-label">播报音色（可选）</label>
+                  <input
+                    class="vp-input"
+                    value={draft.defaultVoice}
+                    placeholder={draft.provider === 'volcengine_tts' ? 'zh_female_vv_uranus_bigtts' : 'Kore'}
+                    onInput={(e: any) => setDraft({ ...draft, defaultVoice: e.target.value })}
+                  />
+                  {voiceChips.length > 0 && (
+                    <div class="voice-chip-row" style="margin-top:6px;">
+                      {voiceChips.map(v => (
+                        <button
+                          key={v.value}
+                          type="button"
+                          class={`voice-quick-chip ${draft.defaultVoice === v.value ? 'active' : ''}`}
+                          onClick={() => setDraft({ ...draft, defaultVoice: v.value })}
+                        >
+                          {v.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
 
-                {!draft.id && draft.provider === 'volcengine_asr' && (
-                  <div style="margin-top:10px;padding:9px 10px;border-radius:10px;background:var(--subtle);border:1px solid var(--border);">
-                    <label class="voice-dual-check" style="margin:0;">
-                      <input
-                        type="checkbox"
-                        checked={draft.alsoCreateTts}
-                        onChange={(e: any) => setDraft({ ...draft, alsoCreateTts: Boolean(e.target.checked) })}
-                      />
-                      <span><strong>同时创建「火山豆包播报 (TTS)」并共用这把密钥</strong>（免贴两遍）</span>
-                    </label>
-                    {draft.alsoCreateTts && (
-                      <div style="margin-top:8px;">
-                        <div class="voice-brick-sub-label">挑一个播报声音</div>
-                        <div class="voice-chip-row" style="margin-top:4px;">
-                          {TTS_VOICE_OPTIONS.volcengine_tts.map(v => (
-                            <button
-                              key={v.value}
-                              type="button"
-                              class={`voice-quick-chip ${draft.pairedTtsVoice === v.value ? 'active' : ''}`}
-                              onClick={() => setDraft({ ...draft, pairedTtsVoice: v.value })}
-                            >
-                              {v.label}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    )}
+            <div class="vp-ios-card" style="margin-top:12px;">
+              {!draft.id && draft.provider === 'volcengine_asr' && (
+                <div class="vp-switch-row">
+                  <div>
+                    <div class="vp-switch-title">同时添加火山播报（TTS）</div>
+                    <div class="vp-switch-sub">共用同一把密钥，免填两遍</div>
                   </div>
-                )}
-
-                <label class="voice-dual-check" style="margin-top:10px;">
                   <input
                     type="checkbox"
-                    checked={draft.setAsDefault}
-                    onChange={(e: any) => setDraft({ ...draft, setAsDefault: Boolean(e.target.checked) })}
+                    class="voice-switch"
+                    checked={draft.alsoCreateTts}
+                    onChange={(e: any) => setDraft({ ...draft, alsoCreateTts: Boolean(e.target.checked) })}
                   />
-                  <span>
-                    <strong>保存后立即设为默认</strong>
-                    {draft.provider === 'gemini'
-                      ? '（自动用于 听 + 想 + 说）'
-                      : draft.provider === 'volcengine_asr'
-                        ? (draft.alsoCreateTts && !draft.id ? '（自动用于 听 + 说）' : '（自动用于 👂 听）')
-                        : draft.provider === 'volcengine_tts'
-                          ? '（自动用于 🗣️ 说）'
-                          : '（自动用于 🧠 想，可在列表页随时调 听/说）'}
-                  </span>
-                </label>
-
-                {editorError && (
-                  <div class="voice-test-msg err" style="margin-top:8px;padding:7px 10px;">
-                    ⚠️ {editorError}
-                  </div>
-                )}
-
-                <div style="display:flex;gap:8px;margin-top:12px;">
-                  <button
-                    type="button"
-                    id="vpSaveProviderBtn"
-                    class="primary-block-btn"
-                    style="margin-top:0;flex:1;"
-                    disabled={savingEditor}
-                    onClick={() => void handleSaveProvider()}
-                  >
-                    {savingEditor ? '正在加密保存…' : '💾 保存 Provider'}
-                  </button>
-                  <button
-                    type="button"
-                    class="voice-pill-btn"
-                    style="padding:11px 14px;"
-                    onClick={() => setViewMode('list')}
-                  >
-                    取消
-                  </button>
                 </div>
+              )}
+
+              <div class="vp-switch-row">
+                <div>
+                  <div class="vp-switch-title">保存后设为默认</div>
+                  <div class="vp-switch-sub">
+                    {draft.provider === 'gemini'
+                      ? '设为听写、大脑、播报默认'
+                      : draft.provider === 'volcengine_asr'
+                        ? (draft.alsoCreateTts && !draft.id ? '设为听写与播报默认' : '设为听写默认')
+                        : draft.provider === 'volcengine_tts'
+                          ? '设为播报默认'
+                          : '设为大脑默认，列表页可随时调整'}
+                  </div>
+                </div>
+                <input
+                  type="checkbox"
+                  class="voice-switch"
+                  checked={draft.setAsDefault}
+                  onChange={(e: any) => setDraft({ ...draft, setAsDefault: Boolean(e.target.checked) })}
+                />
               </div>
             </div>
+
+            {editorError && (
+              <div class="vp-inline-notice err" style="margin-top:10px;">
+                {editorError}
+              </div>
+            )}
+
+            <button
+              type="button"
+              id="vpSaveProviderBtn"
+              class="vp-submit-btn"
+              disabled={savingEditor}
+              onClick={() => void handleSaveProvider()}
+            >
+              {savingEditor ? '正在保存…' : '保存 Provider'}
+            </button>
           </div>
         )}
       </div>

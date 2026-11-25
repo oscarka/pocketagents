@@ -1608,9 +1608,9 @@ function bindWalkMediaSession(handlers) {
 var PROTOCOL_LABELS = {
 	native: "手机自带免费",
 	openai_compat: "OpenAI 兼容",
-	gemini: "Google Gemini",
-	volcengine_asr: "火山豆包听写",
-	volcengine_tts: "火山豆包播报"
+	gemini: "Gemini 原生",
+	volcengine_asr: "火山听写",
+	volcengine_tts: "火山播报"
 };
 var STAGE_CAPABILITIES = {
 	openai_compat: [
@@ -1626,164 +1626,6 @@ var STAGE_CAPABILITIES = {
 	volcengine_asr: ["stt"],
 	volcengine_tts: ["tts"]
 };
-var VOICE_PROVIDER_PRESETS = [
-	{
-		key: "deepseek",
-		icon: "🤖",
-		title: "DeepSeek",
-		sub: "高性价比语音大脑",
-		provider: "openai_compat",
-		label: "DeepSeek 官方",
-		baseUrl: "https://api.deepseek.com/v1",
-		defaultModel: "deepseek-chat",
-		defaultVoice: "",
-		resourceId: "",
-		modelChips: [{
-			label: "deepseek-chat (推荐)",
-			value: "deepseek-chat"
-		}, {
-			label: "deepseek-reasoner",
-			value: "deepseek-reasoner"
-		}],
-		keyPlaceholder: "粘贴 DeepSeek API Key（例：sk-...）"
-	},
-	{
-		key: "ark",
-		icon: "🌋",
-		title: "火山方舟 Ark",
-		sub: "豆包 / 方舟 DeepSeek",
-		provider: "openai_compat",
-		label: "火山方舟 Ark",
-		baseUrl: "https://ark.cn-beijing.volces.com/api/v3",
-		defaultModel: "doubao-seed-2-0-lite-260215",
-		defaultVoice: "",
-		resourceId: "",
-		modelChips: [
-			{
-				label: "豆包 2.0 Lite (推荐)",
-				value: "doubao-seed-2-0-lite-260215"
-			},
-			{
-				label: "方舟 DeepSeek V3",
-				value: "deepseek-v3-250324"
-			},
-			{
-				label: "方舟 DeepSeek R1",
-				value: "deepseek-r1-250528"
-			}
-		],
-		keyPlaceholder: "粘贴火山方舟 API Key"
-	},
-	{
-		key: "gemini",
-		icon: "✨",
-		title: "Google Gemini",
-		sub: "1 把 Key 全包听+想+说",
-		provider: "gemini",
-		label: "Google Gemini",
-		baseUrl: "https://generativelanguage.googleapis.com/v1beta",
-		defaultModel: "gemini-2.5-flash",
-		defaultVoice: "Kore",
-		resourceId: "",
-		modelChips: [{
-			label: "gemini-2.5-flash (极速推荐)",
-			value: "gemini-2.5-flash"
-		}, {
-			label: "gemini-3.8-flash",
-			value: "gemini-3.8-flash"
-		}],
-		keyPlaceholder: "粘贴 Gemini Key（例：AIzaSy... 或 AQ.Ab...）"
-	},
-	{
-		key: "openai",
-		icon: "🌐",
-		title: "OpenAI 官方",
-		sub: "听写 + 大脑 + 人声全包",
-		provider: "openai_compat",
-		label: "OpenAI 官方",
-		baseUrl: "https://api.openai.com/v1",
-		defaultModel: "gpt-4o-mini",
-		defaultVoice: "alloy",
-		resourceId: "",
-		modelChips: [{
-			label: "gpt-4o-mini (推荐)",
-			value: "gpt-4o-mini"
-		}, {
-			label: "gpt-4.1-mini",
-			value: "gpt-4.1-mini"
-		}],
-		keyPlaceholder: "粘贴 OpenAI Key（例：sk-proj-...）"
-	},
-	{
-		key: "volcengine_voice",
-		icon: "👂",
-		title: "火山豆包语音",
-		sub: "中文听写 ASR + 拟人播报 TTS",
-		provider: "volcengine_asr",
-		label: "火山豆包识别 (ASR)",
-		baseUrl: "https://openspeech.bytedance.com/api/v3/auc/bigmodel/recognize/flash",
-		defaultModel: "",
-		defaultVoice: "",
-		resourceId: "volc.bigasr.auc_turbo",
-		alsoCreateTts: true,
-		modelChips: [],
-		keyPlaceholder: "粘贴火山引擎「语音技术」API Key"
-	},
-	{
-		key: "siliconflow",
-		icon: "⚡",
-		title: "硅基流动",
-		sub: "国内高速聚合接口",
-		provider: "openai_compat",
-		label: "硅基流动",
-		baseUrl: "https://api.siliconflow.cn/v1",
-		defaultModel: "deepseek-ai/DeepSeek-V3",
-		defaultVoice: "",
-		resourceId: "",
-		modelChips: [{
-			label: "DeepSeek-V3",
-			value: "deepseek-ai/DeepSeek-V3"
-		}, {
-			label: "Qwen2.5-72B",
-			value: "Qwen/Qwen2.5-72B-Instruct"
-		}],
-		keyPlaceholder: "粘贴 SiliconFlow API Key（例：sk-...）"
-	},
-	{
-		key: "openrouter",
-		icon: "🔗",
-		title: "OpenRouter",
-		sub: "全球多模型统一路由",
-		provider: "openai_compat",
-		label: "OpenRouter",
-		baseUrl: "https://openrouter.ai/api/v1",
-		defaultModel: "openai/gpt-4o-mini",
-		defaultVoice: "",
-		resourceId: "",
-		modelChips: [{
-			label: "openai/gpt-4o-mini",
-			value: "openai/gpt-4o-mini"
-		}, {
-			label: "deepseek/deepseek-chat",
-			value: "deepseek/deepseek-chat"
-		}],
-		keyPlaceholder: "粘贴 OpenRouter API Key（例：sk-or-...）"
-	},
-	{
-		key: "custom",
-		icon: "🔧",
-		title: "完全自定义",
-		sub: "任意中转站 / 智谱 / Ollama",
-		provider: "openai_compat",
-		label: "",
-		baseUrl: "",
-		defaultModel: "",
-		defaultVoice: "",
-		resourceId: "",
-		modelChips: [],
-		keyPlaceholder: "粘贴该服务商的 API Key"
-	}
-];
 var TTS_VOICE_OPTIONS = {
 	volcengine_tts: [
 		{
@@ -2112,20 +1954,6 @@ function computeSelectionAfterDelete(deletedCredId, activeProfile, remainingCred
 	};
 }
 /**
-* Concise 1-line voice summary displayed right on Settings Home ("模型与偏好" -> "边走边听 · 语音总管").
-*/
-function formatVoiceSummaryForSettings(voiceCfg) {
-	if (!voiceCfg || !voiceCfg.activeProfile) return "免费本机语音 · 点此添加 Provider";
-	const prof = voiceCfg.activeProfile;
-	const creds = Array.isArray(voiceCfg.credentials) ? voiceCfg.credentials : [];
-	if (prof.id === "native" || prof.stt?.provider === "native" && prof.brain?.provider === "native" && prof.tts?.provider === "native") return creds.length > 0 ? `免费本机语音 · 已添加 ${creds.length} 个 Provider` : "免费本机语音 · 点此添加 Provider";
-	const sttCred = resolveStageCred(prof.stt, creds);
-	const brainCred = resolveStageCred(prof.brain, creds);
-	const ttsCred = resolveStageCred(prof.tts, creds);
-	if (sttCred && brainCred && ttsCred && sttCred.id === brainCred.id && brainCred.id === ttsCred.id) return `全能：${sttCred.label}${creds.length > 1 ? ` · 共 ${creds.length} 个 Provider` : ""}`;
-	return `听：${shortStageLabel(prof.stt, creds)} · 想：${shortStageLabel(prof.brain, creds)} · 说：${shortStageLabel(prof.tts, creds)}`;
-}
-/**
 * Ultra-concise right-side value for Apple-native single-line Settings row ("边走边听").
 */
 function formatVoiceCompactValue(voiceCfg) {
@@ -2149,22 +1977,48 @@ function formatVoiceCompactValue(voiceCfg) {
 	return parts.join(" · ") || "已配置";
 }
 // hub/web/src/components/VoiceProviderSheet.tsx
-function makeDraftFromPreset(presetKey = "deepseek") {
-	const preset = VOICE_PROVIDER_PRESETS.find((p) => p.key === presetKey) || VOICE_PROVIDER_PRESETS[0];
+var BackChevronSvg = () => /* @__PURE__ */ k$1("svg", {
+	width: "18",
+	height: "18",
+	viewBox: "0 0 24 24",
+	fill: "none",
+	stroke: "currentColor",
+	"stroke-width": "2.2",
+	"stroke-linecap": "round",
+	"stroke-linejoin": "round"
+}, /* @__PURE__ */ k$1("path", { d: "M15 18l-6-6 6-6" }));
+var CloseSvg = () => /* @__PURE__ */ k$1("svg", {
+	width: "16",
+	height: "16",
+	viewBox: "0 0 24 24",
+	fill: "none",
+	stroke: "currentColor",
+	"stroke-width": "2.2",
+	"stroke-linecap": "round"
+}, /* @__PURE__ */ k$1("path", { d: "M18 6L6 18M6 6l12 12" }));
+var PlusSvg = () => /* @__PURE__ */ k$1("svg", {
+	width: "14",
+	height: "14",
+	viewBox: "0 0 24 24",
+	fill: "none",
+	stroke: "currentColor",
+	"stroke-width": "2.2",
+	"stroke-linecap": "round"
+}, /* @__PURE__ */ k$1("path", { d: "M12 5v14M5 12h14" }));
+function makeBlankDraft() {
 	return {
 		id: "",
-		presetKey: preset.key,
-		provider: preset.provider,
-		label: preset.label || "",
-		baseUrl: preset.baseUrl || "",
+		provider: "openai_compat",
+		label: "",
+		baseUrl: "",
 		volcAuthMode: "apiKey",
 		apiKey: "",
 		appId: "",
 		accessToken: "",
-		defaultModel: preset.defaultModel || "",
-		defaultVoice: preset.defaultVoice || "",
-		resourceId: preset.resourceId || "",
-		alsoCreateTts: Boolean(preset.alsoCreateTts),
+		defaultModel: "",
+		defaultVoice: "",
+		resourceId: "",
+		alsoCreateTts: true,
 		pairedTtsVoice: "zh_female_vv_uranus_bigtts",
 		pairedTtsResourceId: "seed-tts-2.0",
 		setAsDefault: true
@@ -2173,7 +2027,6 @@ function makeDraftFromPreset(presetKey = "deepseek") {
 function makeDraftFromCredential(cred) {
 	return {
 		id: cred.id,
-		presetKey: "custom",
 		provider: cred.provider || "openai_compat",
 		label: cred.label || "",
 		baseUrl: cred.baseUrl || "",
@@ -2193,7 +2046,7 @@ function makeDraftFromCredential(cred) {
 function VoiceProviderSheet(props) {
 	const { open, onClose, config, loadingCfg, initialView = "list", onConfigChange, onUpdatePrefs, onSoundCheck, soundChecking, soundCheckMsg, onClearSoundCheckMsg, onRunBenchTurn, onToggleBenchVoice, benchDryRun, onSetBenchDryRun, benchText, onSetBenchText, benchRunning, benchRecording, benchReport, apiCall, toast } = props;
 	const [viewMode, setViewMode] = d("list");
-	const [draft, setDraft] = d(() => makeDraftFromPreset("deepseek"));
+	const [draft, setDraft] = d(() => makeBlankDraft());
 	const [editingCredSummary, setEditingCredSummary] = d("");
 	const [savingEditor, setSavingEditor] = d(false);
 	const [editorError, setEditorError] = d("");
@@ -2207,7 +2060,7 @@ function VoiceProviderSheet(props) {
 		setRoutingMsg(null);
 		setEditorError("");
 		if (initialView === "add") {
-			setDraft(makeDraftFromPreset("deepseek"));
+			setDraft(makeBlankDraft());
 			setEditingCredSummary("");
 			setViewMode("editor");
 		} else {
@@ -2244,7 +2097,7 @@ function VoiceProviderSheet(props) {
 				await onUpdatePrefs({ activeProfileId: "native" });
 				setRoutingMsg({
 					ok: true,
-					text: successNotice || "✅ 已切换为免费本机语音"
+					text: successNotice || "已切换为免费本机语音"
 				});
 				return;
 			}
@@ -2257,9 +2110,9 @@ function VoiceProviderSheet(props) {
 				const errText = data?.error || "保存默认分配失败";
 				setRoutingMsg({
 					ok: false,
-					text: `❌ ${errText}`
+					text: errText
 				});
-				toast(`❌ ${errText}`);
+				toast(errText);
 				return;
 			}
 			onConfigChange({
@@ -2268,12 +2121,12 @@ function VoiceProviderSheet(props) {
 			});
 			setRoutingMsg({
 				ok: true,
-				text: successNotice || `✅ 默认分配已生效：${plan.profilePayload.name}`
+				text: successNotice || `已生效：${plan.profilePayload.name}`
 			});
 		} catch (err) {
 			setRoutingMsg({
 				ok: false,
-				text: `❌ ${err?.message || "保存失败"}`
+				text: err?.message || "保存失败"
 			});
 		} finally {
 			setRoutingSaving(false);
@@ -2288,8 +2141,8 @@ function VoiceProviderSheet(props) {
 			brainVal,
 			ttsVal
 		});
-		await persistRouting(nextSel.sttVal, nextSel.brainVal, nextSel.ttsVal, config, `✅ 已将「${cred.label}」设为默认`);
-		toast(`✅ 已将「${cred.label}」设为默认`);
+		await persistRouting(nextSel.sttVal, nextSel.brainVal, nextSel.ttsVal, config, `已将「${cred.label}」设为默认`);
+		toast(`已将「${cred.label}」设为默认`);
 	};
 	const handleTestProvider = async (credId) => {
 		setTestingCredId(credId);
@@ -2306,7 +2159,7 @@ function VoiceProviderSheet(props) {
 				...prev,
 				[credId]: {
 					ok: Boolean(data?.ok),
-					summary: data?.summary || (data?.ok ? `✅ 连通正常 (${data.latencyMs ?? 0}ms)` : `❌ ${data?.error || "测试失败"}`)
+					summary: data?.summary || (data?.ok ? `连通正常 (${data.latencyMs ?? 0}ms)` : data?.error || "测试失败")
 				}
 			}));
 		} catch (err) {
@@ -2314,7 +2167,7 @@ function VoiceProviderSheet(props) {
 				...prev,
 				[credId]: {
 					ok: false,
-					summary: `❌ ${err?.message || "网络异常"}`
+					summary: err?.message || "网络异常"
 				}
 			}));
 		} finally {
@@ -2327,7 +2180,7 @@ function VoiceProviderSheet(props) {
 			const res = await apiCall(`/api/voice/credentials/${encodeURIComponent(cred.id)}`, { method: "DELETE" });
 			const data = await res.json().catch(() => null);
 			if (!res.ok || !data?.ok || !data.config) {
-				toast(`❌ ${data?.error || "删除失败"}`);
+				toast(data?.error || "删除失败");
 				return;
 			}
 			const nextCfg = {
@@ -2335,15 +2188,15 @@ function VoiceProviderSheet(props) {
 				...data.config
 			};
 			onConfigChange(nextCfg);
-			toast(`🗑️ 已删除「${cred.label}」`);
+			toast(`已删除「${cred.label}」`);
 			const fallback = computeSelectionAfterDelete(cred.id, config.activeProfile, nextCfg.credentials);
-			if (fallback.affected) await persistRouting(fallback.nextSelection.sttVal, fallback.nextSelection.brainVal, fallback.nextSelection.ttsVal, nextCfg, `🗑️ 已删除「${cred.label}」，受影响环节已安全回退`);
+			if (fallback.affected) await persistRouting(fallback.nextSelection.sttVal, fallback.nextSelection.brainVal, fallback.nextSelection.ttsVal, nextCfg, `已删除「${cred.label}」，对应环节已回退`);
 		} catch (err) {
-			toast(`❌ 删除失败：${err?.message || "网络异常"}`);
+			toast(`删除失败：${err?.message || "网络异常"}`);
 		}
 	};
-	const openAddEditor = (presetKey = "deepseek") => {
-		setDraft(makeDraftFromPreset(presetKey));
+	const openAddEditor = () => {
+		setDraft(makeBlankDraft());
 		setEditingCredSummary("");
 		setEditorError("");
 		setViewMode("editor");
@@ -2354,23 +2207,33 @@ function VoiceProviderSheet(props) {
 		setEditorError("");
 		setViewMode("editor");
 	};
+	const handleProtocolChange = (nextProv) => {
+		setEditorError("");
+		setDraft((prev) => ({
+			...prev,
+			provider: nextProv,
+			baseUrl: nextProv === "gemini" ? "https://generativelanguage.googleapis.com/v1beta" : nextProv === "volcengine_asr" ? "https://openspeech.bytedance.com/api/v3/auc/bigmodel/recognize/flash" : nextProv === "volcengine_tts" ? "https://openspeech.bytedance.com/api/v3/tts/unidirectional" : prev.baseUrl && !prev.baseUrl.includes("bytedance") && !prev.baseUrl.includes("googleapis") ? prev.baseUrl : "",
+			resourceId: nextProv === "volcengine_asr" ? "volc.bigasr.auc_turbo" : nextProv === "volcengine_tts" ? "seed-tts-2.0" : "",
+			defaultVoice: nextProv === "volcengine_tts" ? "zh_female_vv_uranus_bigtts" : nextProv === "gemini" ? "Kore" : ""
+		}));
+	};
 	const handleSaveProvider = async () => {
 		setEditorError("");
 		const isEdit = Boolean(draft.id);
 		const isVolc = draft.provider === "volcengine_asr" || draft.provider === "volcengine_tts";
 		const cleanLabel = draft.label.trim() || (draft.baseUrl.trim() ? extractHostFromUrl(draft.baseUrl.trim()) : "") || PROTOCOL_LABELS[draft.provider] || "自定义 Provider";
 		if (draft.provider === "openai_compat" && !draft.baseUrl.trim()) {
-			setEditorError("请填写接口地址（Base URL），例如 https://api.deepseek.com/v1");
+			setEditorError("请填写接口地址（Base URL），例如 https://ark.cn-beijing.volces.com/api/v3");
 			return;
 		}
 		if (!isEdit) {
 			if (isVolc && draft.volcAuthMode === "appToken") {
 				if (!draft.appId.trim() || !draft.accessToken.trim()) {
-					setEditorError("请同时填写火山引擎 AppID 和 Access Token");
+					setEditorError("请同时填写 AppID 和 Access Token");
 					return;
 				}
 			} else if (!draft.apiKey.trim()) {
-				setEditorError("请填写 API Key（会经 AES-256 加密保存，不会明文返回）");
+				setEditorError("请填写 API Key（加密保存，不会明文返回）");
 				return;
 			}
 		}
@@ -2382,7 +2245,7 @@ function VoiceProviderSheet(props) {
 				label: cleanLabel,
 				baseUrl: draft.baseUrl.trim(),
 				defaultModel: draft.defaultModel.trim(),
-				defaultVoice: draft.defaultVoice.trim(),
+				defaultVoice: draft.provider === "volcengine_asr" ? "" : draft.defaultVoice.trim(),
 				resourceId: draft.resourceId.trim(),
 				active: true
 			};
@@ -2396,7 +2259,7 @@ function VoiceProviderSheet(props) {
 			});
 			const data = await res.json().catch(() => null);
 			if (!res.ok || !data?.ok || !data.credential) {
-				setEditorError(data?.error || "保存 Provider 失败，请检查地址和密钥");
+				setEditorError(data?.error || "保存失败，请检查地址和密钥");
 				return;
 			}
 			let latestCfg = data.config ? {
@@ -2406,18 +2269,18 @@ function VoiceProviderSheet(props) {
 			const savedCred = data.credential;
 			let pairedTtsCred = null;
 			if (!isEdit && draft.provider === "volcengine_asr" && draft.alsoCreateTts) {
-				const ttsPayload = {
-					provider: "volcengine_tts",
-					label: `${cleanLabel.replace(/\(ASR\)|识别/gi, "").trim() || "火山豆包"}播报 (TTS)`,
-					baseUrl: "https://openspeech.bytedance.com/api/v3/tts/unidirectional",
-					cloneSecretFromCredId: savedCred.id,
-					resourceId: draft.pairedTtsResourceId.trim() || "seed-tts-2.0",
-					defaultVoice: draft.pairedTtsVoice.trim() || "zh_female_vv_uranus_bigtts",
-					active: true
-				};
+				const baseName = cleanLabel.replace(/\(ASR\)|听写|识别/gi, "").trim() || "火山豆包";
 				const ttsRes = await apiCall("/api/voice/credentials", {
 					method: "POST",
-					body: JSON.stringify(ttsPayload)
+					body: JSON.stringify({
+						provider: "volcengine_tts",
+						label: `${baseName}播报`,
+						baseUrl: "https://openspeech.bytedance.com/api/v3/tts/unidirectional",
+						cloneSecretFromCredId: savedCred.id,
+						resourceId: draft.pairedTtsResourceId.trim() || "seed-tts-2.0",
+						defaultVoice: draft.pairedTtsVoice.trim() || "zh_female_vv_uranus_bigtts",
+						active: true
+					})
 				});
 				const ttsData = await ttsRes.json().catch(() => null);
 				if (ttsRes.ok && ttsData?.ok && ttsData.credential) {
@@ -2437,130 +2300,109 @@ function VoiceProviderSheet(props) {
 					brainVal: getStageSelectValue(latestCfg.activeProfile?.brain, latestCfg.credentials),
 					ttsVal: getStageSelectValue(latestCfg.activeProfile?.tts, latestCfg.credentials)
 				}, pairedTtsCred);
-				await persistRouting(nextSel.sttVal, nextSel.brainVal, nextSel.ttsVal, latestCfg, pairedTtsCred ? `✅ 已添加「${savedCred.label}」与播报并设为默认` : `✅ 已保存「${savedCred.label}」并设为默认`);
-			} else if (isEdit && curRoles.length > 0) await persistRouting(getStageSelectValue(latestCfg.activeProfile?.stt, latestCfg.credentials), getStageSelectValue(latestCfg.activeProfile?.brain, latestCfg.credentials), getStageSelectValue(latestCfg.activeProfile?.tts, latestCfg.credentials), latestCfg, `✅ 已更新「${savedCred.label}」配置`);
-			toast(isEdit ? `✅ 已更新「${savedCred.label}」` : `✅ 已添加 Provider「${savedCred.label}」`);
+				await persistRouting(nextSel.sttVal, nextSel.brainVal, nextSel.ttsVal, latestCfg, pairedTtsCred ? `已添加「${savedCred.label}」与播报并设为默认` : `已保存「${savedCred.label}」并设为默认`);
+			} else if (isEdit && curRoles.length > 0) await persistRouting(getStageSelectValue(latestCfg.activeProfile?.stt, latestCfg.credentials), getStageSelectValue(latestCfg.activeProfile?.brain, latestCfg.credentials), getStageSelectValue(latestCfg.activeProfile?.tts, latestCfg.credentials), latestCfg, `已更新「${savedCred.label}」`);
+			toast(isEdit ? `已更新「${savedCred.label}」` : `已添加「${savedCred.label}」`);
 		} catch (err) {
 			setEditorError(err?.message || "网络异常，请重试");
 		} finally {
 			setSavingEditor(false);
 		}
 	};
-	const activePreset = VOICE_PROVIDER_PRESETS.find((p) => p.key === draft.presetKey);
 	const voiceChips = TTS_VOICE_OPTIONS[draft.provider] || [];
 	const isVolcDraft = draft.provider === "volcengine_asr" || draft.provider === "volcengine_tts";
-	const summaryLine = formatVoiceSummaryForSettings(config);
+	const compactSummary = formatVoiceCompactValue(config);
 	return /* @__PURE__ */ k$1("div", {
 		id: "voiceLabSheet",
 		class: "sheet-backdrop open voice-lab-backdrop",
 		onClick: (e) => {
 			if (e.target === e.currentTarget) onClose();
 		}
-	}, /* @__PURE__ */ k$1("div", { class: "sheet-panel voice-lab-panel" }, /* @__PURE__ */ k$1("div", { class: "sheet-handle" }), /* @__PURE__ */ k$1("div", {
-		class: "sheet-title",
-		style: "margin-bottom:10px;"
-	}, viewMode === "list" ? /* @__PURE__ */ k$1("span", { style: "overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" }, "🎙️ 边走边听 · Provider 配置") : /* @__PURE__ */ k$1("div", { style: "display:flex;align-items:center;gap:8px;min-width:0;" }, /* @__PURE__ */ k$1("button", {
+	}, /* @__PURE__ */ k$1("div", { class: "sheet-panel voice-lab-panel vp-ios-sheet" }, /* @__PURE__ */ k$1("div", { class: "sheet-handle" }), /* @__PURE__ */ k$1("div", { class: "vp-sheet-nav" }, /* @__PURE__ */ k$1("div", { class: "vp-sheet-nav-left" }, viewMode === "editor" && /* @__PURE__ */ k$1("button", {
 		type: "button",
-		class: "voice-back-btn",
+		class: "vp-nav-back",
 		id: "vpBackToListBtn",
 		onClick: () => {
 			setEditorError("");
 			setViewMode("list");
 		}
-	}, "‹ 返回列表"), /* @__PURE__ */ k$1("span", { style: "overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" }, draft.id ? "✏️ 编辑 Provider" : "➕ 添加 Provider")), /* @__PURE__ */ k$1("button", {
+	}, /* @__PURE__ */ k$1(BackChevronSvg, null), /* @__PURE__ */ k$1("span", null, "返回"))), /* @__PURE__ */ k$1("div", { class: "vp-sheet-nav-title" }, viewMode === "list" ? "边走边听" : draft.id ? "编辑 Provider" : "添加 Provider"), /* @__PURE__ */ k$1("div", { class: "vp-sheet-nav-right" }, /* @__PURE__ */ k$1("button", {
 		type: "button",
+		class: "vp-nav-close",
 		"aria-label": "关闭语音配置",
-		style: "border:none;background:transparent;color:var(--muted);font-size:18px;cursor:pointer;padding:4px 8px;",
 		onClick: onClose
-	}, "✕")), viewMode === "list" ? /* @__PURE__ */ k$1("div", { class: "voice-lab-body" }, loadingCfg && /* @__PURE__ */ k$1("div", { class: "voice-muted-note" }, "正在读取加密配置…"), /* @__PURE__ */ k$1("div", { class: "voice-tab-stack" }, /* @__PURE__ */ k$1("div", { class: "voice-card voice-status-hero" }, /* @__PURE__ */ k$1("div", { class: "voice-status-hero-row" }, /* @__PURE__ */ k$1("div", { style: "flex:1;min-width:0;" }, /* @__PURE__ */ k$1("div", { class: "voice-status-hero-title" }, activeProf.id === "native" ? "🆓 当前：免费本机语音" : `✅ 当前：${activeProf.name}`), /* @__PURE__ */ k$1("div", { class: "voice-status-hero-sub" }, summaryLine)), /* @__PURE__ */ k$1("div", { style: "display:flex;align-items:center;gap:6px;flex-shrink:0;" }, /* @__PURE__ */ k$1("button", {
+	}, /* @__PURE__ */ k$1(CloseSvg, null)))), viewMode === "list" ? /* @__PURE__ */ k$1("div", { class: "voice-lab-body vp-ios-body" }, loadingCfg && /* @__PURE__ */ k$1("div", { class: "vp-subtle-note" }, "正在读取配置…"), /* @__PURE__ */ k$1("div", { class: "vp-ios-card vp-hero-card" }, /* @__PURE__ */ k$1("div", { class: "vp-hero-row" }, /* @__PURE__ */ k$1("div", { class: "vp-hero-info" }, /* @__PURE__ */ k$1("div", { class: "vp-hero-k" }, "当前生效"), /* @__PURE__ */ k$1("div", { class: "vp-hero-v" }, compactSummary)), /* @__PURE__ */ k$1("div", { class: "vp-hero-actions" }, /* @__PURE__ */ k$1("button", {
 		type: "button",
-		class: "voice-pill-btn primary",
+		class: "vp-btn-primary",
 		id: "vpOpenWalkModeBtn",
 		onClick: () => {
 			onClose();
 			window.openWalkMode?.();
 		}
-	}, "🎧 进入随行"), /* @__PURE__ */ k$1("button", {
+	}, "进入随行"), /* @__PURE__ */ k$1("button", {
 		type: "button",
-		class: "voice-pill-btn",
+		class: "vp-btn-ghost",
 		disabled: soundChecking,
 		onClick: () => void onSoundCheck()
-	}, soundChecking ? "试音中…" : "🔊 试听"))), missingStages.length > 0 && /* @__PURE__ */ k$1("button", {
+	}, soundChecking ? "试音中…" : "试听"))), missingStages.length > 0 && /* @__PURE__ */ k$1("button", {
 		type: "button",
-		class: "voice-missing-key-cta",
-		style: "margin-top:8px;",
-		onClick: () => openAddEditor("deepseek")
-	}, /* @__PURE__ */ k$1("span", null, "⚠️ ", missingStages.join(" / "), " 指向的密钥已缺失"), /* @__PURE__ */ k$1("span", null, "去添加 →")), (soundCheckMsg || routingMsg) && /* @__PURE__ */ k$1("div", {
-		class: `voice-test-msg ${(routingMsg || soundCheckMsg).ok ? "ok" : "err"}`,
-		style: "margin-top:8px;",
+		class: "vp-alert-banner",
+		onClick: openAddEditor
+	}, /* @__PURE__ */ k$1("span", null, missingStages.join(" / "), " 密钥缺失"), /* @__PURE__ */ k$1("span", null, "去添加 ›")), (soundCheckMsg || routingMsg) && /* @__PURE__ */ k$1("div", {
+		class: `vp-inline-notice ${(routingMsg || soundCheckMsg).ok ? "ok" : "err"}`,
 		onClick: () => {
 			setRoutingMsg(null);
 			onClearSoundCheckMsg();
 		}
-	}, (routingMsg || soundCheckMsg).text)), /* @__PURE__ */ k$1("div", { class: "voice-card" }, /* @__PURE__ */ k$1("div", {
-		class: "voice-card-head",
-		style: "margin-bottom:6px;"
-	}, /* @__PURE__ */ k$1("div", {
-		class: "voice-card-title",
-		style: "margin-bottom:0;"
-	}, "🎛️ 默认分配（听 · 想 · 说）"), activeProf.id !== "native" && /* @__PURE__ */ k$1("button", {
+	}, (routingMsg || soundCheckMsg).text)), /* @__PURE__ */ k$1("div", { class: "vp-sec-head" }, /* @__PURE__ */ k$1("span", { class: "vp-sec-label" }, "默认分配"), activeProf.id !== "native" && /* @__PURE__ */ k$1("button", {
 		type: "button",
-		class: "voice-pill-btn",
+		class: "vp-sec-link",
 		disabled: routingSaving,
 		onClick: () => void persistRouting("native", "native", "native")
-	}, "切回免费本机")), /* @__PURE__ */ k$1("div", {
-		class: "voice-muted-note",
-		style: "margin-bottom:8px;"
-	}, "从下方你的 Provider 列表里，自由指定哪一家负责听、想、说，改完自动生效。"), /* @__PURE__ */ k$1("div", { class: "vp-routing-list" }, /* @__PURE__ */ k$1("div", { class: "vp-routing-row" }, /* @__PURE__ */ k$1("div", { class: "vp-routing-label" }, /* @__PURE__ */ k$1("span", { class: "vp-routing-title" }, "👂 听（语音转文字）")), /* @__PURE__ */ k$1("select", {
+	}, "恢复免费本机")), /* @__PURE__ */ k$1("div", { class: "vp-ios-card" }, /* @__PURE__ */ k$1("div", { class: "vp-select-row" }, /* @__PURE__ */ k$1("span", { class: "vp-select-label" }, "听写"), /* @__PURE__ */ k$1("select", {
 		id: "voiceStageSttSelect",
-		class: "vp-routing-select",
+		class: "vp-select-ctrl",
 		disabled: routingSaving,
 		value: sttVal,
 		onChange: (e) => handleStageChange("stt", e.target.value)
-	}, /* @__PURE__ */ k$1("option", { value: "native" }, "🆓 手机自带免费"), sttVal.startsWith("missing:") && /* @__PURE__ */ k$1("option", { value: sttVal }, "⚠️ 密钥缺失 (", PROTOCOL_LABELS[sttVal.slice(8)] || sttVal.slice(8), ")"), sttCreds.map((c) => /* @__PURE__ */ k$1("option", {
+	}, /* @__PURE__ */ k$1("option", { value: "native" }, "手机自带免费"), sttVal.startsWith("missing:") && /* @__PURE__ */ k$1("option", { value: sttVal }, "密钥缺失"), sttCreds.map((c) => /* @__PURE__ */ k$1("option", {
 		key: c.id,
 		value: `cred:${c.id}`
-	}, c.label, " · ", PROTOCOL_LABELS[c.provider] || c.provider)))), /* @__PURE__ */ k$1("div", { class: "vp-routing-row" }, /* @__PURE__ */ k$1("div", { class: "vp-routing-label" }, /* @__PURE__ */ k$1("span", { class: "vp-routing-title" }, "🧠 想（语音大脑）")), /* @__PURE__ */ k$1("select", {
+	}, c.label)))), /* @__PURE__ */ k$1("div", { class: "vp-select-row" }, /* @__PURE__ */ k$1("span", { class: "vp-select-label" }, "大脑"), /* @__PURE__ */ k$1("select", {
 		id: "voiceStageBrainSelect",
-		class: "vp-routing-select",
+		class: "vp-select-ctrl",
 		disabled: routingSaving,
 		value: brainVal,
 		onChange: (e) => handleStageChange("brain", e.target.value)
-	}, /* @__PURE__ */ k$1("option", { value: "native" }, "🆓 本地基础口令"), brainVal.startsWith("missing:") && /* @__PURE__ */ k$1("option", { value: brainVal }, "⚠️ 密钥缺失 (", PROTOCOL_LABELS[brainVal.slice(8)] || brainVal.slice(8), ")"), brainCreds.map((c) => /* @__PURE__ */ k$1("option", {
+	}, /* @__PURE__ */ k$1("option", { value: "native" }, "本地基础口令"), brainVal.startsWith("missing:") && /* @__PURE__ */ k$1("option", { value: brainVal }, "密钥缺失"), brainCreds.map((c) => /* @__PURE__ */ k$1("option", {
 		key: c.id,
 		value: `cred:${c.id}`
-	}, c.label, " · ", c.defaultModel || inferDefaultBrainModel(c))))), /* @__PURE__ */ k$1("div", { class: "vp-routing-row" }, /* @__PURE__ */ k$1("div", { class: "vp-routing-label" }, /* @__PURE__ */ k$1("span", { class: "vp-routing-title" }, "🗣️ 说（文字转语音）")), /* @__PURE__ */ k$1("select", {
+	}, c.label, " (", c.defaultModel || inferDefaultBrainModel(c), ")")))), /* @__PURE__ */ k$1("div", { class: "vp-select-row" }, /* @__PURE__ */ k$1("span", { class: "vp-select-label" }, "播报"), /* @__PURE__ */ k$1("select", {
 		id: "voiceStageTtsSelect",
-		class: "vp-routing-select",
+		class: "vp-select-ctrl",
 		disabled: routingSaving,
 		value: ttsVal,
 		onChange: (e) => handleStageChange("tts", e.target.value)
-	}, /* @__PURE__ */ k$1("option", { value: "native" }, "🆓 手机自带免费"), ttsVal.startsWith("missing:") && /* @__PURE__ */ k$1("option", { value: ttsVal }, "⚠️ 密钥缺失 (", PROTOCOL_LABELS[ttsVal.slice(8)] || ttsVal.slice(8), ")"), ttsCreds.map((c) => /* @__PURE__ */ k$1("option", {
+	}, /* @__PURE__ */ k$1("option", { value: "native" }, "手机自带免费"), ttsVal.startsWith("missing:") && /* @__PURE__ */ k$1("option", { value: ttsVal }, "密钥缺失"), ttsCreds.map((c) => /* @__PURE__ */ k$1("option", {
 		key: c.id,
 		value: `cred:${c.id}`
-	}, c.label, " · ", c.defaultVoice || PROTOCOL_LABELS[c.provider] || c.provider)))))), /* @__PURE__ */ k$1("div", {
-		class: "voice-card",
-		id: "voiceProviderListSection"
-	}, /* @__PURE__ */ k$1("div", {
-		class: "voice-card-head",
-		style: "margin-bottom:8px;"
-	}, /* @__PURE__ */ k$1("div", null, /* @__PURE__ */ k$1("div", {
-		class: "voice-card-title",
-		style: "margin-bottom:2px;"
-	}, "🔌 我的 Provider 列表 (", creds.length, ")"), /* @__PURE__ */ k$1("div", {
-		class: "voice-muted-note",
-		style: "margin:0;"
-	}, "支持任意中转站、OpenAI 兼容接口、DeepSeek、火山豆包、Gemini 等")), /* @__PURE__ */ k$1("button", {
+	}, c.label))))), /* @__PURE__ */ k$1("div", {
+		class: "vp-sec-head",
+		id: "voiceProviderListHeader"
+	}, /* @__PURE__ */ k$1("span", { class: "vp-sec-label" }, "Provider 列表 (", creds.length, ")"), /* @__PURE__ */ k$1("button", {
 		type: "button",
 		id: "voiceAddProviderBtn",
-		class: "voice-pill-btn primary",
-		onClick: () => openAddEditor("deepseek")
-	}, "＋ 添加")), creds.length === 0 ? /* @__PURE__ */ k$1("div", { class: "vp-empty-box" }, /* @__PURE__ */ k$1("div", { class: "vp-empty-title" }, "还没有添加任何 Provider"), /* @__PURE__ */ k$1("div", { class: "vp-empty-desc" }, "点下方按钮添加你自己的服务商（支持自定义接口地址、模型名和 API Key），添加后即可在上方选为默认。"), /* @__PURE__ */ k$1("button", {
+		class: "vp-sec-add-btn",
+		onClick: openAddEditor
+	}, /* @__PURE__ */ k$1(PlusSvg, null), /* @__PURE__ */ k$1("span", null, "添加"))), /* @__PURE__ */ k$1("div", {
+		class: "vp-ios-card",
+		id: "voiceProviderListSection"
+	}, creds.length === 0 ? /* @__PURE__ */ k$1("div", { class: "vp-ios-empty" }, /* @__PURE__ */ k$1("div", { class: "vp-empty-title" }, "暂未添加 Provider"), /* @__PURE__ */ k$1("div", { class: "vp-empty-desc" }, "统一支持 OpenAI 兼容接口（火山方舟、DeepSeek、OpenAI、中转站、Ollama）及原生语音接口"), /* @__PURE__ */ k$1("button", {
 		type: "button",
-		class: "primary-block-btn",
-		style: "margin-top:10px;",
-		onClick: () => openAddEditor("deepseek")
-	}, "＋ 添加第一个 Provider")) : /* @__PURE__ */ k$1("div", { class: "vp-list" }, creds.map((cred) => {
+		class: "vp-btn-primary",
+		style: "margin-top:12px;padding:8px 18px;",
+		onClick: openAddEditor
+	}, "添加 Provider")) : creds.map((cred) => {
 		const roles = getCredentialActiveRoles(cred.id, activeProf, creds);
 		const host = extractHostFromUrl(cred.baseUrl);
 		const modelOrRes = cred.defaultModel || cred.resourceId || "";
@@ -2568,177 +2410,159 @@ function VoiceProviderSheet(props) {
 		const isPrimaryDefault = cred.provider === "gemini" && roles.length === 3 || cred.provider === "volcengine_asr" && roles.includes("stt") || cred.provider === "volcengine_tts" && roles.includes("tts") || cred.provider === "openai_compat" && roles.includes("brain");
 		return /* @__PURE__ */ k$1("div", {
 			key: cred.id,
-			class: `vp-item ${roles.length > 0 ? "is-active" : ""}`
-		}, /* @__PURE__ */ k$1("div", { class: "vp-item-top" }, /* @__PURE__ */ k$1("div", { class: "vp-item-title-wrap" }, /* @__PURE__ */ k$1("span", { class: "vp-item-name" }, cred.label), /* @__PURE__ */ k$1("span", { class: "voice-prov-tag" }, PROTOCOL_LABELS[cred.provider] || cred.provider)), roles.length > 0 && /* @__PURE__ */ k$1("div", { class: "vp-role-badges" }, roles.includes("stt") && /* @__PURE__ */ k$1("span", { class: "vp-role-pill stt" }, "👂 听"), roles.includes("brain") && /* @__PURE__ */ k$1("span", { class: "vp-role-pill brain" }, "🧠 想"), roles.includes("tts") && /* @__PURE__ */ k$1("span", { class: "vp-role-pill tts" }, "🗣️ 说"))), /* @__PURE__ */ k$1("div", { class: "vp-item-meta" }, host && /* @__PURE__ */ k$1("span", null, host), modelOrRes && /* @__PURE__ */ k$1("span", null, "· ", modelOrRes), cred.defaultVoice && cred.provider !== "volcengine_asr" && /* @__PURE__ */ k$1("span", null, "· 音色 ", cred.defaultVoice), /* @__PURE__ */ k$1("span", null, "· ", cred.authSummary)), testRes && /* @__PURE__ */ k$1("div", {
-			class: `voice-test-msg ${testRes.ok ? "ok" : "err"}`,
+			class: "vp-ios-item"
+		}, /* @__PURE__ */ k$1("div", { class: "vp-ios-item-top" }, /* @__PURE__ */ k$1("div", { class: "vp-ios-item-title-wrap" }, /* @__PURE__ */ k$1("span", { class: "vp-ios-item-name" }, cred.label), /* @__PURE__ */ k$1("span", { class: "vp-proto-chip" }, PROTOCOL_LABELS[cred.provider] || cred.provider)), roles.length > 0 && /* @__PURE__ */ k$1("div", { class: "vp-role-badges" }, roles.includes("stt") && /* @__PURE__ */ k$1("span", { class: "vp-role-pill stt" }, "听"), roles.includes("brain") && /* @__PURE__ */ k$1("span", { class: "vp-role-pill brain" }, "想"), roles.includes("tts") && /* @__PURE__ */ k$1("span", { class: "vp-role-pill tts" }, "说"))), /* @__PURE__ */ k$1("div", { class: "vp-ios-item-meta" }, [
+			host,
+			modelOrRes,
+			cred.defaultVoice && cred.provider !== "volcengine_asr" ? cred.defaultVoice : "",
+			cred.authSummary
+		].filter(Boolean).join(" · ")), testRes && /* @__PURE__ */ k$1("div", {
+			class: `vp-inline-notice ${testRes.ok ? "ok" : "err"}`,
 			style: "margin-top:6px;"
-		}, testRes.summary), /* @__PURE__ */ k$1("div", { class: "vp-item-actions" }, /* @__PURE__ */ k$1("button", {
+		}, testRes.summary), /* @__PURE__ */ k$1("div", { class: "vp-ios-item-actions" }, /* @__PURE__ */ k$1("button", {
 			type: "button",
-			class: `voice-pill-btn ${isPrimaryDefault ? "" : "primary"}`,
+			class: `vp-text-act ${isPrimaryDefault ? "muted" : "primary"}`,
 			disabled: routingSaving,
 			onClick: () => void handleSetProviderDefault(cred)
-		}, isPrimaryDefault ? "✅ 已为默认" : "⚡ 设为默认"), /* @__PURE__ */ k$1("button", {
+		}, isPrimaryDefault ? "已默认" : "设为默认"), /* @__PURE__ */ k$1("button", {
 			type: "button",
-			class: "voice-pill-btn",
+			class: "vp-text-act",
 			disabled: testingCredId === cred.id,
 			onClick: () => void handleTestProvider(cred.id)
-		}, testingCredId === cred.id ? "测试中…" : "🔌 测试"), /* @__PURE__ */ k$1("button", {
+		}, testingCredId === cred.id ? "测试中…" : "测试"), /* @__PURE__ */ k$1("button", {
 			type: "button",
-			class: "voice-pill-btn",
+			class: "vp-text-act",
 			onClick: () => openEditEditor(cred)
-		}, "✏️ 编辑"), /* @__PURE__ */ k$1("button", {
+		}, "编辑"), /* @__PURE__ */ k$1("button", {
 			type: "button",
-			class: "voice-pill-btn danger",
+			class: "vp-text-act danger",
 			onClick: () => void handleDeleteProvider(cred)
 		}, "删除")));
-	}))), /* @__PURE__ */ k$1("div", { class: "voice-card" }, /* @__PURE__ */ k$1("div", { class: "voice-toggle-row" }, /* @__PURE__ */ k$1("div", null, /* @__PURE__ */ k$1("div", { class: "voice-row-main" }, "🛡️ 高危操作二次确认"), /* @__PURE__ */ k$1("div", { class: "voice-row-sub" }, "删文件 / 强推 / 部署等危险指令时的保护方式")), /* @__PURE__ */ k$1("select", {
-		class: "voice-mini-select",
+	})), /* @__PURE__ */ k$1("div", { class: "vp-sec-head" }, /* @__PURE__ */ k$1("span", { class: "vp-sec-label" }, "行为与安全")), /* @__PURE__ */ k$1("div", { class: "vp-ios-card" }, /* @__PURE__ */ k$1("div", { class: "vp-select-row" }, /* @__PURE__ */ k$1("span", { class: "vp-select-label" }, "高危操作确认"), /* @__PURE__ */ k$1("select", {
+		class: "vp-select-ctrl",
 		value: config.prefs.l2Policy,
 		onChange: (e) => void onUpdatePrefs({ l2Policy: e.target.value })
-	}, /* @__PURE__ */ k$1("option", { value: "pin" }, "🔢 念 3 位确认码"), /* @__PURE__ */ k$1("option", { value: "screen_only" }, "📱 仅点手机屏幕"))), /* @__PURE__ */ k$1("div", { class: "voice-toggle-row" }, /* @__PURE__ */ k$1("div", null, /* @__PURE__ */ k$1("div", { class: "voice-row-main" }, "🎙️ 播报完自动开麦听我回答"), /* @__PURE__ */ k$1("div", { class: "voice-row-sub" }, "念完选项后自动听 5.5 秒；边听歌时自动压低背景音乐")), /* @__PURE__ */ k$1("input", {
+	}, /* @__PURE__ */ k$1("option", { value: "pin" }, "念 3 位确认码"), /* @__PURE__ */ k$1("option", { value: "screen_only" }, "仅点手机屏幕"))), /* @__PURE__ */ k$1("div", { class: "vp-switch-row" }, /* @__PURE__ */ k$1("div", null, /* @__PURE__ */ k$1("div", { class: "vp-switch-title" }, "播报后自动开麦"), /* @__PURE__ */ k$1("div", { class: "vp-switch-sub" }, "念完选项后自动听 5.5 秒")), /* @__PURE__ */ k$1("input", {
 		type: "checkbox",
 		class: "voice-switch",
 		checked: config.prefs.autoListenAfterBriefing,
 		onChange: (e) => void onUpdatePrefs({ autoListenAfterBriefing: e.target.checked })
 	}))), /* @__PURE__ */ k$1("details", {
-		class: "voice-adv-details",
+		class: "vp-ios-details",
 		open: geekOpen,
 		onToggle: (e) => setGeekOpen(Boolean(e.currentTarget?.open))
-	}, /* @__PURE__ */ k$1("summary", null, "🔧 高级选项与延迟压测（聊天页复用 / 试跑排障）"), /* @__PURE__ */ k$1("div", {
-		class: "voice-adv-body",
-		style: "display:flex;flex-direction:column;gap:10px;"
-	}, /* @__PURE__ */ k$1("div", null, /* @__PURE__ */ k$1("div", { class: "voice-toggle-row" }, /* @__PURE__ */ k$1("div", null, /* @__PURE__ */ k$1("div", { class: "voice-row-main" }, "🎵 边听歌边播报（压低背景音乐）"), /* @__PURE__ */ k$1("div", { class: "voice-row-sub" }, "播报时自动压低音乐音量，说完自动恢复")), /* @__PURE__ */ k$1("input", {
+	}, /* @__PURE__ */ k$1("summary", null, "高级选项与延迟压测"), /* @__PURE__ */ k$1("div", {
+		class: "vp-ios-card",
+		style: "margin-top:8px;"
+	}, /* @__PURE__ */ k$1("div", { class: "vp-switch-row" }, /* @__PURE__ */ k$1("div", null, /* @__PURE__ */ k$1("div", { class: "vp-switch-title" }, "听歌时压低背景音乐"), /* @__PURE__ */ k$1("div", { class: "vp-switch-sub" }, "播报时自动降低音量，说完恢复")), /* @__PURE__ */ k$1("input", {
 		type: "checkbox",
 		class: "voice-switch",
 		checked: config.prefs.duckMusicMode,
 		onChange: (e) => void onUpdatePrefs({ duckMusicMode: e.target.checked })
-	})), /* @__PURE__ */ k$1("div", { class: "voice-toggle-row" }, /* @__PURE__ */ k$1("div", null, /* @__PURE__ */ k$1("div", { class: "voice-row-main" }, "聊天页「🔊 播报」复用云端声音"), /* @__PURE__ */ k$1("div", { class: "voice-row-sub" }, "默认用免费系统语音；开启后用上方选好的「说」服务")), /* @__PURE__ */ k$1("input", {
+	})), /* @__PURE__ */ k$1("div", { class: "vp-switch-row" }, /* @__PURE__ */ k$1("div", null, /* @__PURE__ */ k$1("div", { class: "vp-switch-title" }, "聊天页朗读复用云端播报")), /* @__PURE__ */ k$1("input", {
 		type: "checkbox",
 		class: "voice-switch",
 		checked: config.prefs.useByokForChatTts,
 		onChange: (e) => void onUpdatePrefs({ useByokForChatTts: e.target.checked })
-	})), /* @__PURE__ */ k$1("div", { class: "voice-toggle-row" }, /* @__PURE__ */ k$1("div", null, /* @__PURE__ */ k$1("div", { class: "voice-row-main" }, "聊天页语音输入复用云端听写"), /* @__PURE__ */ k$1("div", { class: "voice-row-sub" }, "默认用免费系统听写；开启后用上方选好的「听」服务")), /* @__PURE__ */ k$1("input", {
+	})), /* @__PURE__ */ k$1("div", { class: "vp-switch-row" }, /* @__PURE__ */ k$1("div", null, /* @__PURE__ */ k$1("div", { class: "vp-switch-title" }, "聊天页语音输入复用云端听写")), /* @__PURE__ */ k$1("input", {
 		type: "checkbox",
 		class: "voice-switch",
 		checked: config.prefs.useByokForChatStt,
 		onChange: (e) => void onUpdatePrefs({ useByokForChatStt: e.target.checked })
-	}))), /* @__PURE__ */ k$1("div", { style: "border-top:1px solid var(--border);padding-top:8px;" }, /* @__PURE__ */ k$1("div", {
-		class: "voice-toggle-row",
-		style: "padding-top:0;"
-	}, /* @__PURE__ */ k$1("div", null, /* @__PURE__ */ k$1("div", { class: "voice-row-main" }, "🧪 安全试跑压测 (Dry-Run)"), /* @__PURE__ */ k$1("div", { class: "voice-row-sub" }, "排查哪一步慢或报错，绝不会真的遥控电脑")), /* @__PURE__ */ k$1("input", {
+	})), /* @__PURE__ */ k$1("div", { class: "vp-bench-block" }, /* @__PURE__ */ k$1("div", {
+		class: "vp-switch-row",
+		style: "padding:0 0 8px;border:none;"
+	}, /* @__PURE__ */ k$1("div", null, /* @__PURE__ */ k$1("div", { class: "vp-switch-title" }, "安全试跑压测（不操作电脑）")), /* @__PURE__ */ k$1("input", {
 		type: "checkbox",
 		class: "voice-switch",
 		checked: benchDryRun,
 		onChange: (e) => onSetBenchDryRun(e.target.checked)
 	})), /* @__PURE__ */ k$1("input", {
-		class: "voice-field-input",
+		class: "vp-input",
 		value: benchText,
 		onInput: (e) => onSetBenchText(e.target.value),
-		placeholder: "输入一句测试口令..."
-	}), /* @__PURE__ */ k$1("div", { style: "display:flex;gap:8px;margin-top:6px;" }, /* @__PURE__ */ k$1("button", {
+		placeholder: "输入一句测试口令…"
+	}), /* @__PURE__ */ k$1("div", { style: "display:flex;gap:8px;margin-top:8px;" }, /* @__PURE__ */ k$1("button", {
 		type: "button",
-		class: "voice-pill-btn primary",
-		style: "flex:1;padding:8px 10px;",
+		class: "vp-btn-primary",
+		style: "flex:1;",
 		disabled: benchRunning,
 		onClick: () => void onRunBenchTurn()
-	}, benchRunning ? "⏳ 测速中…" : "🚀 跑一轮延迟压测"), /* @__PURE__ */ k$1("button", {
+	}, benchRunning ? "测速中…" : "跑一轮压测"), /* @__PURE__ */ k$1("button", {
 		type: "button",
-		class: `voice-pill-btn ${benchRecording ? "danger" : ""}`,
-		style: "padding:8px 10px;",
+		class: `vp-btn-ghost ${benchRecording ? "danger" : ""}`,
 		disabled: benchRunning,
 		onClick: () => void onToggleBenchVoice()
-	}, benchRecording ? "⏹ 停止" : "🎙️ 录真声")), benchReport && /* @__PURE__ */ k$1("div", { style: "margin-top:8px;" }, /* @__PURE__ */ k$1("div", { class: "voice-metrics-grid" }, benchReport.stt && /* @__PURE__ */ k$1("div", { class: "voice-metric-box" }, /* @__PURE__ */ k$1("div", { class: "voice-metric-k" }, "听写"), /* @__PURE__ */ k$1("div", { class: "voice-metric-v" }, benchReport.stt.latencyMs ?? 0, "ms")), benchReport.turn && /* @__PURE__ */ k$1("div", { class: "voice-metric-box" }, /* @__PURE__ */ k$1("div", { class: "voice-metric-k" }, "大脑"), /* @__PURE__ */ k$1("div", { class: "voice-metric-v" }, benchReport.turn.latencyMs ?? 0, "ms")), benchReport.tts && /* @__PURE__ */ k$1("div", { class: "voice-metric-box" }, /* @__PURE__ */ k$1("div", { class: "voice-metric-k" }, "播报"), /* @__PURE__ */ k$1("div", { class: "voice-metric-v" }, benchReport.tts.latencyMs ?? 0, "ms"))), (benchReport.stt?.error || benchReport.turn?.error || benchReport.tts?.error) && /* @__PURE__ */ k$1("div", {
-		class: "voice-test-msg err",
+	}, benchRecording ? "停止" : "录真声")), benchReport && /* @__PURE__ */ k$1("div", { style: "margin-top:10px;" }, /* @__PURE__ */ k$1("div", { class: "voice-metrics-grid" }, benchReport.stt && /* @__PURE__ */ k$1("div", { class: "voice-metric-box" }, /* @__PURE__ */ k$1("div", { class: "voice-metric-k" }, "听写"), /* @__PURE__ */ k$1("div", { class: "voice-metric-v" }, benchReport.stt.latencyMs ?? 0, "ms")), benchReport.turn && /* @__PURE__ */ k$1("div", { class: "voice-metric-box" }, /* @__PURE__ */ k$1("div", { class: "voice-metric-k" }, "大脑"), /* @__PURE__ */ k$1("div", { class: "voice-metric-v" }, benchReport.turn.latencyMs ?? 0, "ms")), benchReport.tts && /* @__PURE__ */ k$1("div", { class: "voice-metric-box" }, /* @__PURE__ */ k$1("div", { class: "voice-metric-k" }, "播报"), /* @__PURE__ */ k$1("div", { class: "voice-metric-v" }, benchReport.tts.latencyMs ?? 0, "ms"))), (benchReport.stt?.error || benchReport.turn?.error || benchReport.tts?.error) && /* @__PURE__ */ k$1("div", {
+		class: "vp-inline-notice err",
 		style: "margin-top:6px;"
 	}, benchReport.stt?.error || benchReport.turn?.error || benchReport.tts?.error), benchReport.turn?.spokenReply && /* @__PURE__ */ k$1("div", {
 		class: "voice-bench-reply",
 		style: "margin-top:6px;"
-	}, benchReport.turn.spokenReply))))))) : /* @__PURE__ */ k$1("div", {
-		class: "voice-lab-body",
+	}, benchReport.turn.spokenReply)))))) : /* @__PURE__ */ k$1("div", {
+		class: "voice-lab-body vp-ios-body",
 		id: "voiceProviderEditor"
-	}, /* @__PURE__ */ k$1("div", { class: "voice-tab-stack" }, !draft.id && /* @__PURE__ */ k$1("div", {
-		class: "voice-card",
-		style: "padding:10px 11px;"
-	}, /* @__PURE__ */ k$1("div", {
-		class: "voice-card-title",
-		style: "margin-bottom:7px;"
-	}, "⚡ 选一个模板快填（也可以选「完全自定义」）"), /* @__PURE__ */ k$1("div", { class: "vp-preset-grid" }, VOICE_PROVIDER_PRESETS.map((p) => /* @__PURE__ */ k$1("button", {
-		key: p.key,
-		type: "button",
-		"data-preset-key": p.key,
-		class: `vp-preset-chip ${draft.presetKey === p.key ? "active" : ""}`,
-		onClick: () => {
-			setEditorError("");
-			setDraft(makeDraftFromPreset(p.key));
-		}
-	}, /* @__PURE__ */ k$1("span", { class: "vp-preset-title" }, p.icon, " ", p.title), /* @__PURE__ */ k$1("span", { class: "vp-preset-sub" }, p.sub))))), /* @__PURE__ */ k$1("div", { class: "voice-card" }, /* @__PURE__ */ k$1("label", {
-		class: "voice-field-label",
-		style: "margin-top:0;"
-	}, "显示名称（自己好认就行）"), /* @__PURE__ */ k$1("input", {
+	}, /* @__PURE__ */ k$1("div", { class: "vp-ios-card vp-form-card" }, /* @__PURE__ */ k$1("div", { class: "vp-field" }, /* @__PURE__ */ k$1("label", {
+		class: "vp-field-label",
+		for: "vpProviderTypeSelect"
+	}, "对接协议"), /* @__PURE__ */ k$1("select", {
+		id: "vpProviderTypeSelect",
+		class: "vp-input",
+		disabled: Boolean(draft.id),
+		value: draft.provider,
+		onChange: (e) => handleProtocolChange(e.target.value)
+	}, /* @__PURE__ */ k$1("option", { value: "openai_compat" }, "OpenAI 兼容（标准）"), /* @__PURE__ */ k$1("option", { value: "gemini" }, "Google Gemini 原生"), /* @__PURE__ */ k$1("option", { value: "volcengine_asr" }, "火山豆包听写（ASR）"), /* @__PURE__ */ k$1("option", { value: "volcengine_tts" }, "火山豆包播报（TTS）")), draft.provider === "openai_compat" && /* @__PURE__ */ k$1("div", { class: "vp-field-hint" }, "火山方舟、DeepSeek、OpenAI、智谱、硅基流动、OpenRouter、中转站、Ollama 均走此标准协议")), /* @__PURE__ */ k$1("div", { class: "vp-field" }, /* @__PURE__ */ k$1("label", {
+		class: "vp-field-label",
+		for: "vpLabelInput"
+	}, "名称"), /* @__PURE__ */ k$1("input", {
 		id: "vpLabelInput",
-		class: "voice-field-input",
+		class: "vp-input",
 		value: draft.label,
-		placeholder: "例：我的中转站 / DeepSeek-V3 / 火山豆包",
+		placeholder: "如：火山方舟 / DeepSeek / 我的中转",
 		onInput: (e) => setDraft({
 			...draft,
 			label: e.target.value
 		})
-	}), /* @__PURE__ */ k$1("label", { class: "voice-field-label" }, "接口协议类型"), /* @__PURE__ */ k$1("select", {
-		id: "vpProviderTypeSelect",
-		class: "voice-field-input",
-		disabled: Boolean(draft.id),
-		value: draft.provider,
-		onChange: (e) => {
-			const nextProv = e.target.value;
-			setDraft((prev) => ({
-				...prev,
-				presetKey: "custom",
-				provider: nextProv,
-				baseUrl: nextProv === "gemini" ? "https://generativelanguage.googleapis.com/v1beta" : nextProv === "volcengine_asr" ? "https://openspeech.bytedance.com/api/v3/auc/bigmodel/recognize/flash" : nextProv === "volcengine_tts" ? "https://openspeech.bytedance.com/api/v3/tts/unidirectional" : prev.baseUrl && !prev.baseUrl.includes("bytedance") && !prev.baseUrl.includes("googleapis") ? prev.baseUrl : "",
-				resourceId: nextProv === "volcengine_asr" ? "volc.bigasr.auc_turbo" : nextProv === "volcengine_tts" ? "seed-tts-2.0" : "",
-				defaultVoice: nextProv === "volcengine_tts" ? "zh_female_vv_uranus_bigtts" : nextProv === "gemini" ? "Kore" : prev.defaultVoice
-			}));
-		}
-	}, /* @__PURE__ */ k$1("option", { value: "openai_compat" }, "OpenAI 兼容接口（任意中转站 / DeepSeek / 方舟 / Ollama）"), /* @__PURE__ */ k$1("option", { value: "gemini" }, "Google Gemini 官方接口"), /* @__PURE__ */ k$1("option", { value: "volcengine_asr" }, "火山豆包语音识别（听写 ASR）"), /* @__PURE__ */ k$1("option", { value: "volcengine_tts" }, "火山豆包语音合成（播报 TTS）")), !isVolcDraft && /* @__PURE__ */ k$1(M, null, /* @__PURE__ */ k$1("label", { class: "voice-field-label" }, "接口地址 (Base URL)"), /* @__PURE__ */ k$1("input", {
+	})), !isVolcDraft && /* @__PURE__ */ k$1("div", { class: "vp-field" }, /* @__PURE__ */ k$1("label", {
+		class: "vp-field-label",
+		for: "vpBaseUrlInput"
+	}, "接口地址 (Base URL)"), /* @__PURE__ */ k$1("input", {
 		id: "vpBaseUrlInput",
-		class: "voice-field-input",
+		class: "vp-input",
 		value: draft.baseUrl,
-		placeholder: draft.provider === "gemini" ? "https://generativelanguage.googleapis.com/v1beta" : "例：https://api.example.com/v1",
+		placeholder: draft.provider === "gemini" ? "https://generativelanguage.googleapis.com/v1beta" : "https://api.example.com/v1",
 		onInput: (e) => setDraft({
 			...draft,
 			baseUrl: e.target.value
 		})
-	})), /* @__PURE__ */ k$1("label", { class: "voice-field-label" }, isVolcDraft ? "火山引擎鉴权密钥" : "API Key（加密保存，不回传明文）"), draft.id && editingCredSummary && /* @__PURE__ */ k$1("div", {
-		class: "voice-saved-hint",
-		style: "margin-bottom:6px;"
-	}, "🔐 已加密保存：", editingCredSummary, " · 留空则保持原密钥不变"), isVolcDraft && /* @__PURE__ */ k$1("div", {
-		class: "voice-subseg",
-		style: "margin-top:2px;margin-bottom:6px;"
-	}, /* @__PURE__ */ k$1("button", {
+	})), /* @__PURE__ */ k$1("div", { class: "vp-field" }, /* @__PURE__ */ k$1("label", {
+		class: "vp-field-label",
+		for: "vpApiKeyInput"
+	}, isVolcDraft ? "鉴权密钥" : "API Key"), draft.id && editingCredSummary && /* @__PURE__ */ k$1("div", { class: "vp-saved-key-note" }, "已加密保存 (", editingCredSummary, ") · 留空保持原密钥"), isVolcDraft && /* @__PURE__ */ k$1("div", { class: "vp-seg-pair" }, /* @__PURE__ */ k$1("button", {
 		type: "button",
-		class: `voice-subseg-btn ${draft.volcAuthMode === "apiKey" ? "active" : ""}`,
+		class: `vp-seg-opt ${draft.volcAuthMode === "apiKey" ? "active" : ""}`,
 		onClick: () => setDraft({
 			...draft,
 			volcAuthMode: "apiKey"
 		})
-	}, "单把 API Key（推荐）"), /* @__PURE__ */ k$1("button", {
+	}, "API Key"), /* @__PURE__ */ k$1("button", {
 		type: "button",
-		class: `voice-subseg-btn ${draft.volcAuthMode === "appToken" ? "active" : ""}`,
+		class: `vp-seg-opt ${draft.volcAuthMode === "appToken" ? "active" : ""}`,
 		onClick: () => setDraft({
 			...draft,
 			volcAuthMode: "appToken"
 		})
-	}, "AppID + Access Token")), isVolcDraft && draft.volcAuthMode === "appToken" ? /* @__PURE__ */ k$1("div", { class: "voice-two-col" }, /* @__PURE__ */ k$1("input", {
-		class: "voice-field-input",
+	}, "AppID + Token")), isVolcDraft && draft.volcAuthMode === "appToken" ? /* @__PURE__ */ k$1("div", { class: "voice-two-col" }, /* @__PURE__ */ k$1("input", {
+		class: "vp-input",
 		value: draft.appId,
-		placeholder: "火山 AppID",
+		placeholder: "AppID",
 		onInput: (e) => setDraft({
 			...draft,
 			appId: e.target.value
 		})
 	}), /* @__PURE__ */ k$1("input", {
 		type: "password",
-		class: "voice-field-input",
+		class: "vp-input",
 		value: draft.accessToken,
 		placeholder: draft.id ? "留空沿用原 Token" : "Access Token",
 		onInput: (e) => setDraft({
@@ -2748,44 +2572,39 @@ function VoiceProviderSheet(props) {
 	})) : /* @__PURE__ */ k$1("input", {
 		id: "vpApiKeyInput",
 		type: "password",
-		class: "voice-field-input",
+		class: "vp-input",
 		value: draft.apiKey,
-		placeholder: draft.id ? "留空保留当前已保存密钥，或粘贴新 Key 替换" : activePreset?.keyPlaceholder || "粘贴 API Key...",
+		placeholder: draft.id ? "留空保持原密钥，或粘贴新 Key 替换" : "粘贴 API Key（加密保存）",
 		onInput: (e) => setDraft({
 			...draft,
 			apiKey: e.target.value
 		})
-	}), !isVolcDraft ? /* @__PURE__ */ k$1(M, null, /* @__PURE__ */ k$1("label", { class: "voice-field-label" }, "默认模型名"), /* @__PURE__ */ k$1("input", {
+	})), !isVolcDraft ? /* @__PURE__ */ k$1("div", { class: "vp-field" }, /* @__PURE__ */ k$1("label", {
+		class: "vp-field-label",
+		for: "vpDefaultModelInput"
+	}, "模型 ID"), /* @__PURE__ */ k$1("input", {
 		id: "vpDefaultModelInput",
-		class: "voice-field-input",
+		class: "vp-input",
 		value: draft.defaultModel,
-		placeholder: "例：deepseek-chat / gpt-4o-mini / doubao-seed-2-0-lite-260215",
+		placeholder: draft.provider === "gemini" ? "如：gemini-2.5-flash" : "如：doubao-seed-2-0-lite-260215 / deepseek-chat",
 		onInput: (e) => setDraft({
 			...draft,
 			defaultModel: e.target.value
 		})
-	}), activePreset?.modelChips && activePreset.modelChips.length > 0 && /* @__PURE__ */ k$1("div", {
-		class: "voice-chip-row",
-		style: "margin-top:5px;"
-	}, activePreset.modelChips.map((chip) => /* @__PURE__ */ k$1("button", {
-		key: chip.value,
-		type: "button",
-		class: `voice-quick-chip ${draft.defaultModel === chip.value ? "active" : ""}`,
-		onClick: () => setDraft({
-			...draft,
-			defaultModel: chip.value
-		})
-	}, chip.label)))) : /* @__PURE__ */ k$1(M, null, /* @__PURE__ */ k$1("label", { class: "voice-field-label" }, "Resource ID（默认 ", draft.provider === "volcengine_asr" ? "volc.bigasr.auc_turbo" : "seed-tts-2.0", "）"), /* @__PURE__ */ k$1("input", {
+	})) : /* @__PURE__ */ k$1("div", { class: "vp-field" }, /* @__PURE__ */ k$1("label", {
+		class: "vp-field-label",
+		for: "vpResourceIdInput"
+	}, "Resource ID"), /* @__PURE__ */ k$1("input", {
 		id: "vpResourceIdInput",
-		class: "voice-field-input",
+		class: "vp-input",
 		value: draft.resourceId,
 		placeholder: draft.provider === "volcengine_asr" ? "volc.bigasr.auc_turbo" : "seed-tts-2.0",
 		onInput: (e) => setDraft({
 			...draft,
 			resourceId: e.target.value
 		})
-	})), (draft.provider === "volcengine_tts" || draft.provider === "gemini") && /* @__PURE__ */ k$1(M, null, /* @__PURE__ */ k$1("label", { class: "voice-field-label" }, "默认播报音色（可选）"), /* @__PURE__ */ k$1("input", {
-		class: "voice-field-input",
+	})), (draft.provider === "volcengine_tts" || draft.provider === "gemini") && /* @__PURE__ */ k$1("div", { class: "vp-field" }, /* @__PURE__ */ k$1("label", { class: "vp-field-label" }, "播报音色（可选）"), /* @__PURE__ */ k$1("input", {
+		class: "vp-input",
 		value: draft.defaultVoice,
 		placeholder: draft.provider === "volcengine_tts" ? "zh_female_vv_uranus_bigtts" : "Kore",
 		onInput: (e) => setDraft({
@@ -2794,7 +2613,7 @@ function VoiceProviderSheet(props) {
 		})
 	}), voiceChips.length > 0 && /* @__PURE__ */ k$1("div", {
 		class: "voice-chip-row",
-		style: "margin-top:5px;"
+		style: "margin-top:6px;"
 	}, voiceChips.map((v) => /* @__PURE__ */ k$1("button", {
 		key: v.value,
 		type: "button",
@@ -2803,53 +2622,35 @@ function VoiceProviderSheet(props) {
 			...draft,
 			defaultVoice: v.value
 		})
-	}, v.label)))), !draft.id && draft.provider === "volcengine_asr" && /* @__PURE__ */ k$1("div", { style: "margin-top:10px;padding:9px 10px;border-radius:10px;background:var(--subtle);border:1px solid var(--border);" }, /* @__PURE__ */ k$1("label", {
-		class: "voice-dual-check",
-		style: "margin:0;"
-	}, /* @__PURE__ */ k$1("input", {
+	}, v.label))))), /* @__PURE__ */ k$1("div", {
+		class: "vp-ios-card",
+		style: "margin-top:12px;"
+	}, !draft.id && draft.provider === "volcengine_asr" && /* @__PURE__ */ k$1("div", { class: "vp-switch-row" }, /* @__PURE__ */ k$1("div", null, /* @__PURE__ */ k$1("div", { class: "vp-switch-title" }, "同时添加火山播报（TTS）"), /* @__PURE__ */ k$1("div", { class: "vp-switch-sub" }, "共用同一把密钥，免填两遍")), /* @__PURE__ */ k$1("input", {
 		type: "checkbox",
+		class: "voice-switch",
 		checked: draft.alsoCreateTts,
 		onChange: (e) => setDraft({
 			...draft,
 			alsoCreateTts: Boolean(e.target.checked)
 		})
-	}), /* @__PURE__ */ k$1("span", null, /* @__PURE__ */ k$1("strong", null, "同时创建「火山豆包播报 (TTS)」并共用这把密钥"), "（免贴两遍）")), draft.alsoCreateTts && /* @__PURE__ */ k$1("div", { style: "margin-top:8px;" }, /* @__PURE__ */ k$1("div", { class: "voice-brick-sub-label" }, "挑一个播报声音"), /* @__PURE__ */ k$1("div", {
-		class: "voice-chip-row",
-		style: "margin-top:4px;"
-	}, TTS_VOICE_OPTIONS.volcengine_tts.map((v) => /* @__PURE__ */ k$1("button", {
-		key: v.value,
-		type: "button",
-		class: `voice-quick-chip ${draft.pairedTtsVoice === v.value ? "active" : ""}`,
-		onClick: () => setDraft({
-			...draft,
-			pairedTtsVoice: v.value
-		})
-	}, v.label))))), /* @__PURE__ */ k$1("label", {
-		class: "voice-dual-check",
-		style: "margin-top:10px;"
-	}, /* @__PURE__ */ k$1("input", {
+	})), /* @__PURE__ */ k$1("div", { class: "vp-switch-row" }, /* @__PURE__ */ k$1("div", null, /* @__PURE__ */ k$1("div", { class: "vp-switch-title" }, "保存后设为默认"), /* @__PURE__ */ k$1("div", { class: "vp-switch-sub" }, draft.provider === "gemini" ? "设为听写、大脑、播报默认" : draft.provider === "volcengine_asr" ? draft.alsoCreateTts && !draft.id ? "设为听写与播报默认" : "设为听写默认" : draft.provider === "volcengine_tts" ? "设为播报默认" : "设为大脑默认，列表页可随时调整")), /* @__PURE__ */ k$1("input", {
 		type: "checkbox",
+		class: "voice-switch",
 		checked: draft.setAsDefault,
 		onChange: (e) => setDraft({
 			...draft,
 			setAsDefault: Boolean(e.target.checked)
 		})
-	}), /* @__PURE__ */ k$1("span", null, /* @__PURE__ */ k$1("strong", null, "保存后立即设为默认"), draft.provider === "gemini" ? "（自动用于 听 + 想 + 说）" : draft.provider === "volcengine_asr" ? draft.alsoCreateTts && !draft.id ? "（自动用于 听 + 说）" : "（自动用于 👂 听）" : draft.provider === "volcengine_tts" ? "（自动用于 🗣️ 说）" : "（自动用于 🧠 想，可在列表页随时调 听/说）")), editorError && /* @__PURE__ */ k$1("div", {
-		class: "voice-test-msg err",
-		style: "margin-top:8px;padding:7px 10px;"
-	}, "⚠️ ", editorError), /* @__PURE__ */ k$1("div", { style: "display:flex;gap:8px;margin-top:12px;" }, /* @__PURE__ */ k$1("button", {
+	}))), editorError && /* @__PURE__ */ k$1("div", {
+		class: "vp-inline-notice err",
+		style: "margin-top:10px;"
+	}, editorError), /* @__PURE__ */ k$1("button", {
 		type: "button",
 		id: "vpSaveProviderBtn",
-		class: "primary-block-btn",
-		style: "margin-top:0;flex:1;",
+		class: "vp-submit-btn",
 		disabled: savingEditor,
 		onClick: () => void handleSaveProvider()
-	}, savingEditor ? "正在加密保存…" : "💾 保存 Provider"), /* @__PURE__ */ k$1("button", {
-		type: "button",
-		class: "voice-pill-btn",
-		style: "padding:11px 14px;",
-		onClick: () => setViewMode("list")
-	}, "取消")))))));
+	}, savingEditor ? "正在保存…" : "保存 Provider"))));
 }
 // hub/web/src/components/VoiceCopilotSheets.tsx
 var DEFAULT_CONFIG = {
@@ -7976,6 +7777,38 @@ var EXACT_ZH_TO_EN = {
 	"检测中": "Checking",
 	"刷新版本": "Reload App",
 	"🎧 进入随行": "🎧 Start Walk Mode",
+	"进入随行": "Start Walk",
+	"试听": "Preview",
+	"当前生效": "Active Profile",
+	"默认分配": "Default Routing",
+	"恢复免费本机": "Use Free Native",
+	"听写": "Speech Input",
+	"大脑": "Brain Model",
+	"播报": "Voice Output",
+	"添加": "Add",
+	"添加 Provider": "Add Provider",
+	"编辑 Provider": "Edit Provider",
+	"保存 Provider": "Save Provider",
+	"暂未添加 Provider": "No Providers Added",
+	"对接协议": "API Protocol",
+	"OpenAI 兼容（标准）": "OpenAI Compatible (Standard)",
+	"Google Gemini 原生": "Google Gemini Native",
+	"火山豆包听写（ASR）": "Volcengine ASR",
+	"火山豆包播报（TTS）": "Volcengine TTS",
+	"名称": "Name",
+	"接口地址 (Base URL)": "Base URL",
+	"模型 ID": "Model ID",
+	"设为默认": "Set Default",
+	"已默认": "Default",
+	"测试": "Test",
+	"编辑": "Edit",
+	"删除": "Delete",
+	"行为与安全": "Behavior & Safety",
+	"高危操作确认": "High-Risk Approval",
+	"播报后自动开麦": "Auto-Listen After Reply",
+	"高级选项与延迟压测": "Advanced & Latency Bench",
+	"保存后设为默认": "Set as Default",
+	"返回": "Back",
 	"➕ 添加新电脑 / 手机扫码登录": "➕ Add Computer / Phone QR Login",
 	"📦 多电脑协同与一键迁移": "📦 Multi-Computer Migration",
 	"🎧 边走边听 · 语音总管": "🎧 Walk Mode · Voice Copilot",
