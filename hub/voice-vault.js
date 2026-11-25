@@ -63,22 +63,23 @@ export const VOICE_PROVIDER_CATALOG = [
   },
   {
     id: 'volcengine_tts',
-    name: '火山豆包语音合成 (Seed-TTS 2.0)',
+    name: '火山豆包语音合成 (Seed-TTS 3.0 / 2.0)',
     shortName: '火山 TTS',
     capabilities: ['tts'],
     authMode: 'volcengine',
     defaultBaseUrl: 'https://openspeech.bytedance.com/api/v3/tts/unidirectional',
     defaultResourceId: 'seed-tts-2.0',
     sampleModels: {
-      tts: ['seed-tts-2.0', 'volc.service_type.10029'],
+      tts: ['doubao-seed-tts-3.0', 'seed-tts-2.0', 'volc.service_type.10029'],
     },
     sampleVoices: [
+      'multi_female_tuanzi_v3_uranus_bigtts',
       'zh_female_vv_uranus_bigtts',
       'zh_female_xiaohe_uranus_bigtts',
       'zh_male_m191_uranus_bigtts',
       'zh_male_taocheng_uranus_bigtts',
     ],
-    hint: '支持 API Key 或 AppID + Access Token 鉴权，独立于 ASR 权限池，可单独绑定已开通 TTS 的凭证',
+    hint: '支持 3.0 新版（仅 API Key，voice.cn-beijing.volces.com）与 2.0 经典版（API Key 或 AppID + Token）',
   },
 ]
 

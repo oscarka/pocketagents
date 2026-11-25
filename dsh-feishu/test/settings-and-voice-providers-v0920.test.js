@@ -650,4 +650,43 @@ test('v0.9.23 VoiceCopilot testCredential supports unsaved draft testing, SSRF &
   });
   assert.equal(normRes.ok, true);
   assert.equal(seenBrainUrl, 'https://ark.cn-beijing.volces.com/api/v3/chat/completions');
+
+  // 9. v0.9.28 Volcengine Seed-TTS 3.0 HTTP Streaming uses voice.cn-beijing.volces.com, X-Api-Key only, and parses JSONL audio events
+  let v3Req = null;
+  const v3TtsCopilot = new VoiceCopilotEngine({
+    vault,
+    hub: null,
+    fetchImpl: async (url, init) => {
+      v3Req = { url: String(url), headers: init?.headers || {}, body: JSON.parse(String(init?.body || '{}')) };
+      const c1 = Buffer.from('mp3part1').toString('base64');
+      const c2 = Buffer.from('mp3part2').toString('base64');
+      const jsonl = [
+        JSON.stringify({ event: 'ready', session_id: 's1' }),
+        JSON.stringify({ event: 'audio', audio: c1 }),
+        JSON.stringify({ event: 'audio', audio: c2 }),
+        JSON.stringify({ event: 'final', is_final: true, reason: 'TTS_STREAM_FINAL_REASON_CLOSED' }),
+      ].join('\n');
+      return {
+        ok: true,
+        status: 200,
+        headers: { get: k => (k.toLowerCase() === 'content-type' ? 'text/plain; charset=utf-8' : '') },
+        text: async () => jsonl,
+      };
+    },
+  });
+  const v3Res = await v3TtsCopilot.testCredential({
+    draft: {
+      provider: 'volcengine_tts',
+      authMode: 'apiKey',
+      apiKey: 'v3-api-key-only',
+      resourceId: 'doubao-seed-tts-3.0',
+      defaultVoice: 'multi_female_tuanzi_v3_uranus_bigtts',
+    },
+  });
+  assert.equal(v3Res.ok, true);
+  assert.equal(v3Req.url, 'https://voice.cn-beijing.volces.com/api/v3/text-to-speech/multi_female_tuanzi_v3_uranus_bigtts/streaming');
+  assert.equal(v3Req.headers['X-Api-Key'], 'v3-api-key-only');
+  assert.equal(v3Req.headers['X-Api-App-Id'], undefined);
+  assert.equal(v3Req.body.model_id, 'doubao-seed-tts-3.0');
+  assert.equal(Buffer.from(v3Res.audioBase64, 'base64').toString(), 'mp3part1mp3part2');
 });

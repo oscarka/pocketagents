@@ -239,6 +239,10 @@ export function inferStageVoiceForCred(cred, prevVoice = '') {
   if (v) return v;
   const pv = String(prevVoice || '').trim();
   if (cred.provider === 'volcengine_tts') {
+    const isV3 = /3\.0/i.test(String(cred.resourceId || '')) || /voice\.cn-beijing\.volces\.com|text-to-speech/i.test(String(cred.baseUrl || ''));
+    if (isV3) {
+      return pv && pv.includes('_v3_') ? pv : 'multi_female_tuanzi_v3_uranus_bigtts';
+    }
     return pv && pv.startsWith('zh_') ? pv : 'zh_female_vv_uranus_bigtts';
   }
   if (cred.provider === 'gemini') {

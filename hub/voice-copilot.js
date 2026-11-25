@@ -2232,8 +2232,156 @@ export class VoiceCopilotEngine {
     const effectiveSpeed = Number(speed || stageCfg.speed || this.vault.state.prefs.speechRate || 1.0)
 
     if (provider === 'volcengine_tts') {
+      const resourceId = String(stageCfg.model || cred.resourceId || cred.defaultModel || 'seed-tts-2.0').trim() || 'seed-tts-2.0'
+      const isSeedTts3 =
+        /3\.0/i.test(resourceId)
+        || /voice\.cn-beijing\.volces\.com|\/text-to-speech/i.test(cred.baseUrl || '')
+
+      if (isSeedTts3) {
+        if (!cred.apiKey) {
+          return {
+            ok: false,
+            provider,
+            model: resourceId,
+            credId: cred.id,
+            latencyMs: this.now() - t0,
+            error: '火山「语音合成 3.0」仅支持 API Key（X-Api-Key）鉴权，请填新版控制台的 API Key',
+          }
+        }
+        const modelId3 = /^seed-tts-3\.0$/i.test(resourceId) ? 'doubao-seed-tts-3.0' : (resourceId || 'doubao-seed-tts-3.0')
+        const speaker3 = String(voice || stageCfg.voice || cred.defaultVoice || 'multi_female_tuanzi_v3_uranus_bigtts').trim() || 'multi_female_tuanzi_v3_uranus_bigtts'
+        const rawBase3 = String(cred.baseUrl || '').trim().replace(/\/+$/, '')
+        let url3 = ''
+        if (rawBase3 && /\/streaming$/i.test(rawBase3)) {
+          url3 = rawBase3.replace(/\{voice_id\}/gi, encodeURIComponent(speaker3))
+        } else if (rawBase3 && /\/text-to-speech$/i.test(rawBase3)) {
+          url3 = `${rawBase3}/${encodeURIComponent(speaker3)}/streaming`
+        } else if (rawBase3 && !/openspeech\.bytedance\.com/i.test(rawBase3)) {
+          url3 = `${rawBase3}/api/v3/text-to-speech/${encodeURIComponent(speaker3)}/streaming`
+        } else {
+          url3 = `https://voice.cn-beijing.volces.com/api/v3/text-to-speech/${encodeURIComponent(speaker3)}/streaming`
+        }
+        const reqBody3 = {
+          text: cleanText,
+          model_id: modelId3,
+          enable_subtitle: false,
+          output_format: {
+            format: 'mp3',
+            sample_rate: 24000,
+          },
+          ...(effectiveSpeed !== 1.0 ? { voice_settings: { speed: effectiveSpeed } } : {}),
+        }
+        let resp3
+        try {
+          resp3 = await fetchWithTimeout(this.fetch, url3, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Api-Key': cred.apiKey,
+              'X-Request-Id': randomUUID(),
+            },
+            body: JSON.stringify(reqBody3),
+          })
+        } catch (err) {
+          return {
+            ok: false,
+            provider,
+            model: modelId3,
+            voice: speaker3,
+            credId: cred.id,
+            latencyMs: this.now() - t0,
+            error: this._explainVoiceError(formatFetchError(err), 'volcengine_tts_v3'),
+          }
+        }
+        const latencyMs = this.now() - t0
+        const contentType = String(resp3.headers?.get?.('content-type') || '').toLowerCase()
+        if (!resp3.ok) {
+          const errText = await resp3.text().catch(() => '')
+          let cleanErr = ''
+          try {
+            const parsed = JSON.parse(errText)
+            const pMsg = parsed?.error?.message || parsed?.header?.message || parsed?.message || ''
+            const pCode = parsed?.error?.code || parsed?.header?.code || parsed?.code || ''
+            if (pMsg) cleanErr = pCode ? `${pMsg} (${pCode})` : String(pMsg)
+          } catch {
+            // non-json error body
+          }
+          const rawErr = cleanErr || errText.slice(0, 180) || `Volcengine Seed-TTS 3.0 HTTP ${resp3.status}`
+          return {
+            ok: false,
+            provider,
+            model: modelId3,
+            voice: speaker3,
+            credId: cred.id,
+            latencyMs,
+            error: this._explainVoiceError(rawErr, 'volcengine_tts_v3'),
+          }
+        }
+        if (contentType.startsWith('audio/')) {
+          const audioBuf = Buffer.from(await resp3.arrayBuffer())
+          return {
+            ok: true,
+            provider,
+            model: modelId3,
+            voice: speaker3,
+            credId: cred.id,
+            mimeType: contentType.split(';')[0] || 'audio/mpeg',
+            audioBase64: audioBuf.toString('base64'),
+            byteLength: audioBuf.length,
+            latencyMs,
+          }
+        }
+        const rawBody3 = await resp3.text()
+        const audioParts3 = []
+        let apiError3 = ''
+        for (const line of rawBody3.split(/\r?\n/)) {
+          const trimmed = line.trim()
+          if (!trimmed) continue
+          try {
+            const obj = JSON.parse(trimmed)
+            if (obj.event === 'error') {
+              const eMsg = obj?.error?.message || obj?.message || 'Seed-TTS 3.0 error'
+              const eCode = obj?.error?.code || obj?.code || ''
+              apiError3 = eCode ? `${eMsg} (${eCode})` : String(eMsg)
+            }
+            if (obj.event === 'audio' && typeof obj.audio === 'string' && obj.audio.length > 0) {
+              audioParts3.push(Buffer.from(obj.audio, 'base64'))
+            } else if (typeof obj.data === 'string' && obj.data.length > 0) {
+              audioParts3.push(Buffer.from(obj.data, 'base64'))
+            }
+          } catch {
+            // ignore non-json fragment
+          }
+        }
+        if (audioParts3.length === 0) {
+          const rawErr = apiError3 || '火山语音合成 3.0 未返回音频数据'
+          return {
+            ok: false,
+            provider,
+            model: modelId3,
+            voice: speaker3,
+            credId: cred.id,
+            latencyMs,
+            error: apiError3
+              ? this._explainVoiceError(rawErr, 'volcengine_tts_v3')
+              : '火山语音合成 3.0 未返回音频数据（请检查音色 ID 与账号开通状态）',
+          }
+        }
+        const merged3 = Buffer.concat(audioParts3)
+        return {
+          ok: true,
+          provider,
+          model: modelId3,
+          voice: speaker3,
+          credId: cred.id,
+          mimeType: 'audio/mpeg',
+          audioBase64: merged3.toString('base64'),
+          byteLength: merged3.length,
+          latencyMs,
+        }
+      }
+
       const url = cred.baseUrl || 'https://openspeech.bytedance.com/api/v3/tts/unidirectional'
-      const resourceId = stageCfg.model || cred.resourceId || 'seed-tts-2.0'
       const speaker = voice || stageCfg.voice || cred.defaultVoice || 'zh_female_vv_uranus_bigtts'
       const headers = buildVolcHeaders(cred, resourceId, 'volcengine_tts')
       const speechRate = Math.max(-50, Math.min(100, Math.round((effectiveSpeed - 1) * 50)))
@@ -2479,6 +2627,9 @@ export class VoiceCopilotEngine {
     const msg = raw.replace(/\s*Request id:\s*[A-Za-z0-9_-]+/gi, '').trim().slice(0, 140) || raw.slice(0, 140)
     const lower = msg.toLowerCase()
     if (/401|unauthorized|invalid.*api.?key|incorrect api key|api.?key.*(incorrect|invalid|format|malformed|missing|wrong)|authentication|access denied|auth/i.test(lower)) {
+      if (provider === 'volcengine_tts_v3') {
+        return `密钥无效或未授权：请确认填的是火山「语音合成 3.0」新版控制台里的 API Key，而不是火山方舟大模型密钥（${msg}）`
+      }
       if (provider.startsWith('volcengine_')) {
         return `密钥无效或未授权：请确认填的是火山「语音技术」密钥，不是「火山方舟」大模型密钥；旧版应用请切到 AppID + Token（${msg}）`
       }
@@ -2488,6 +2639,9 @@ export class VoiceCopilotEngine {
       return `Resource ID 不正确（不要填控制台里的「实例 ID」）：豆包 2.0 标准版请填 volc.seedasr.auc，极速版请填 volc.bigasr.auc_turbo（${msg}）`
     }
     if (/403|forbidden|permission|not granted|not enabled|resource.*not|45000000|55000000|requested resource/i.test(lower)) {
+      if (provider === 'volcengine_tts_v3') {
+        return `无权限调用「语音合成 3.0」或当前音色 ID 未开通：请在火山新版控制台确认已开通语音合成 3.0 且音色 ID 匹配（${msg}）`
+      }
       if (provider === 'volcengine_tts') {
         return `该火山密钥可能尚未开通「语音合成 Seed-TTS 2.0」权限：可在火山控制台开通，或播报先改用手机自带免费（${msg}）`
       }
@@ -2519,11 +2673,15 @@ export class VoiceCopilotEngine {
     const existingId = String(draft?.id || '').trim()
     const existing = existingId ? this.vault.resolveCredential({ credId: existingId }) : null
 
+    const draftResId = String(draft?.resourceId || existing?.resourceId || '').trim()
+    const isVolcTts3Draft = provider === 'volcengine_tts' && (/3\.0/i.test(draftResId) || /voice\.cn-beijing\.volces\.com|text-to-speech/i.test(String(draft?.baseUrl || '')))
     const defaultBaseUrlMap = {
       openai_compat: '',
       gemini: 'https://generativelanguage.googleapis.com/v1beta',
       volcengine_asr: 'https://openspeech.bytedance.com/api/v3/auc/bigmodel/recognize/flash',
-      volcengine_tts: 'https://openspeech.bytedance.com/api/v3/tts/unidirectional',
+      volcengine_tts: isVolcTts3Draft
+        ? 'https://voice.cn-beijing.volces.com/api/v3/text-to-speech'
+        : 'https://openspeech.bytedance.com/api/v3/tts/unidirectional',
     }
     const baseUrlRaw = String(draft?.baseUrl ?? '').trim() || existing?.baseUrl || defaultBaseUrlMap[provider] || ''
     if (provider === 'openai_compat' && !baseUrlRaw) {
@@ -2712,17 +2870,19 @@ export class VoiceCopilotEngine {
     }
 
     if (provider === 'volcengine_tts') {
+      const ttsModel = cred.resourceId || 'seed-tts-2.0'
+      const isV3 = /3\.0/i.test(ttsModel) || /voice\.cn-beijing\.volces\.com|text-to-speech/i.test(cred.baseUrl || '')
       const res = await this.runTts({
         text: '测试成功',
         stageOverride: {
           provider,
           credId: cred.id,
-          model: cred.resourceId || 'seed-tts-2.0',
-          voice: cred.defaultVoice || 'zh_female_vv_uranus_bigtts',
+          model: ttsModel,
+          voice: cred.defaultVoice || (isV3 ? 'multi_female_tuanzi_v3_uranus_bigtts' : 'zh_female_vv_uranus_bigtts'),
         },
         credOverride: cred,
       })
-      const niceErr = res.ok ? '' : this._explainVoiceError(res.error, 'volcengine_tts')
+      const niceErr = res.ok ? '' : this._explainVoiceError(res.error, isV3 ? 'volcengine_tts_v3' : 'volcengine_tts')
       return {
         ok: res.ok,
         provider,

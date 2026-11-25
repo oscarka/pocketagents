@@ -1790,7 +1790,10 @@ function inferStageVoiceForCred(cred, prevVoice = "") {
 	const v = String(cred.defaultVoice || "").trim();
 	if (v) return v;
 	const pv = String(prevVoice || "").trim();
-	if (cred.provider === "volcengine_tts") return pv && pv.startsWith("zh_") ? pv : "zh_female_vv_uranus_bigtts";
+	if (cred.provider === "volcengine_tts") {
+		if (/3\.0/i.test(String(cred.resourceId || "")) || /voice\.cn-beijing\.volces\.com|text-to-speech/i.test(String(cred.baseUrl || ""))) return pv && pv.includes("_v3_") ? pv : "multi_female_tuanzi_v3_uranus_bigtts";
+		return pv && pv.startsWith("zh_") ? pv : "zh_female_vv_uranus_bigtts";
+	}
 	if (cred.provider === "gemini") return pv && [
 		"Kore",
 		"Puck",
@@ -2337,9 +2340,10 @@ function VoiceProviderSheet(props) {
 		setDraft((prev) => ({
 			...prev,
 			provider: nextProv,
-			baseUrl: nextProv === "gemini" ? "https://generativelanguage.googleapis.com/v1beta" : nextProv === "volcengine_asr" ? "https://openspeech.bytedance.com/api/v3/auc/bigmodel/recognize/flash" : nextProv === "volcengine_tts" ? "https://openspeech.bytedance.com/api/v3/tts/unidirectional" : prev.baseUrl && !prev.baseUrl.includes("bytedance") && !prev.baseUrl.includes("googleapis") ? prev.baseUrl : "",
-			resourceId: nextProv === "volcengine_asr" ? "volc.bigasr.auc_turbo" : nextProv === "volcengine_tts" ? "seed-tts-2.0" : "",
-			defaultVoice: nextProv === "volcengine_tts" ? "zh_female_vv_uranus_bigtts" : nextProv === "gemini" ? "Kore" : ""
+			baseUrl: nextProv === "gemini" ? "https://generativelanguage.googleapis.com/v1beta" : nextProv === "volcengine_asr" ? "https://openspeech.bytedance.com/api/v3/auc/bigmodel/recognize/flash" : nextProv === "volcengine_tts" ? "https://voice.cn-beijing.volces.com/api/v3/text-to-speech" : prev.baseUrl && !prev.baseUrl.includes("bytedance") && !prev.baseUrl.includes("googleapis") && !prev.baseUrl.includes("text-to-speech") ? prev.baseUrl : "",
+			volcAuthMode: nextProv === "volcengine_tts" ? "apiKey" : prev.volcAuthMode,
+			resourceId: nextProv === "volcengine_asr" ? "volc.seedasr.auc" : nextProv === "volcengine_tts" ? "doubao-seed-tts-3.0" : "",
+			defaultVoice: nextProv === "volcengine_tts" ? "multi_female_tuanzi_v3_uranus_bigtts" : nextProv === "gemini" ? "Kore" : ""
 		}));
 	};
 	const handleSaveProvider = async () => {
@@ -2441,7 +2445,11 @@ function VoiceProviderSheet(props) {
 			setSavingEditor(false);
 		}
 	};
-	const voiceChips = TTS_VOICE_OPTIONS[draft.provider] || [];
+	const isVolcTts3Draft = draft.provider === "volcengine_tts" && (/3\.0/i.test(draft.resourceId) || /voice\.cn-beijing\.volces\.com|text-to-speech/i.test(draft.baseUrl));
+	const voiceChips = isVolcTts3Draft ? [{
+		label: "团子 3.0 女声",
+		value: "multi_female_tuanzi_v3_uranus_bigtts"
+	}] : TTS_VOICE_OPTIONS[draft.provider] || [];
 	const isVolcDraft = draft.provider === "volcengine_asr" || draft.provider === "volcengine_tts";
 	const compactSummary = formatVoiceCompactValue(config);
 	return /* @__PURE__ */ k$1("div", {
@@ -2675,10 +2683,40 @@ function VoiceProviderSheet(props) {
 				baseUrl: e.target.value
 			});
 		}
-	}), draft.provider === "openai_compat" && /openspeech\.bytedance\.com/i.test(draft.baseUrl) && /* @__PURE__ */ k$1("div", { class: "vp-field-warn" }, "这是火山专有语音地址，请在上方「对接协议」切换为「火山豆包听写 (ASR)」或「火山豆包播报 (TTS)」"), draft.baseUrl.trim() && !/^https?:\/\//i.test(draft.baseUrl.trim()) && /* @__PURE__ */ k$1("div", { class: "vp-field-warn" }, "接口地址请以 https:// 或 http:// 开头")), /* @__PURE__ */ k$1("div", { class: "vp-field" }, /* @__PURE__ */ k$1("label", {
+	}), draft.provider === "openai_compat" && /openspeech\.bytedance\.com/i.test(draft.baseUrl) && /* @__PURE__ */ k$1("div", { class: "vp-field-warn" }, "这是火山专有语音地址，请在上方「对接协议」切换为「火山豆包听写 (ASR)」或「火山豆包播报 (TTS)」"), draft.baseUrl.trim() && !/^https?:\/\//i.test(draft.baseUrl.trim()) && /* @__PURE__ */ k$1("div", { class: "vp-field-warn" }, "接口地址请以 https:// 或 http:// 开头")), draft.provider === "volcengine_tts" && /* @__PURE__ */ k$1("div", { class: "vp-field" }, /* @__PURE__ */ k$1("label", { class: "vp-field-label" }, "接口版本"), /* @__PURE__ */ k$1("div", { class: "vp-seg-pair" }, /* @__PURE__ */ k$1("button", {
+		type: "button",
+		id: "vpVolcTtsV3Btn",
+		class: `vp-seg-opt ${isVolcTts3Draft ? "active" : ""}`,
+		onClick: () => {
+			setDraftTestRes(null);
+			setDraft((prev) => ({
+				...prev,
+				volcAuthMode: "apiKey",
+				baseUrl: "https://voice.cn-beijing.volces.com/api/v3/text-to-speech",
+				resourceId: "doubao-seed-tts-3.0",
+				defaultVoice: !prev.defaultVoice || prev.defaultVoice.startsWith("zh_") ? "multi_female_tuanzi_v3_uranus_bigtts" : prev.defaultVoice
+			}));
+		}
+	}, "3.0 新版（仅 API Key）"), /* @__PURE__ */ k$1("button", {
+		type: "button",
+		id: "vpVolcTtsV2Btn",
+		class: `vp-seg-opt ${!isVolcTts3Draft ? "active" : ""}`,
+		onClick: () => {
+			setDraftTestRes(null);
+			setDraft((prev) => ({
+				...prev,
+				baseUrl: "https://openspeech.bytedance.com/api/v3/tts/unidirectional",
+				resourceId: "seed-tts-2.0",
+				defaultVoice: !prev.defaultVoice || prev.defaultVoice.includes("_v3_") ? "zh_female_vv_uranus_bigtts" : prev.defaultVoice
+			}));
+		}
+	}, "2.0 经典版（Seed-TTS）"))), /* @__PURE__ */ k$1("div", { class: "vp-field" }, /* @__PURE__ */ k$1("label", {
 		class: "vp-field-label",
 		for: "vpApiKeyInput"
-	}, isVolcDraft ? "鉴权密钥" : "API Key"), draft.id && editingCredSummary && /* @__PURE__ */ k$1("div", { class: "vp-saved-key-note" }, "已加密保存 (", editingCredSummary, ") · 留空保持原密钥"), isVolcDraft && /* @__PURE__ */ k$1(M, null, /* @__PURE__ */ k$1("div", {
+	}, isVolcDraft && !isVolcTts3Draft ? "鉴权密钥" : "API Key"), draft.id && editingCredSummary && /* @__PURE__ */ k$1("div", { class: "vp-saved-key-note" }, "已加密保存 (", editingCredSummary, ") · 留空保持原密钥"), isVolcDraft && isVolcTts3Draft && /* @__PURE__ */ k$1("div", {
+		class: "vp-field-hint",
+		style: "margin-top:0;margin-bottom:6px;"
+	}, "火山「语音合成 3.0」只需填写新版控制台的一把 API Key（X-Api-Key），无需 AppID"), isVolcDraft && !isVolcTts3Draft && /* @__PURE__ */ k$1(M, null, /* @__PURE__ */ k$1("div", {
 		class: "vp-field-hint",
 		style: "margin-top:0;margin-bottom:6px;"
 	}, "填火山「语音技术」密钥（非火山方舟大模型密钥）；填完可先点下方「测试连通」确认权限"), /* @__PURE__ */ k$1("div", { class: "vp-seg-pair" }, /* @__PURE__ */ k$1("button", {
@@ -2695,7 +2733,7 @@ function VoiceProviderSheet(props) {
 			...draft,
 			volcAuthMode: "appToken"
 		})
-	}, "AppID + Token"))), isVolcDraft && draft.volcAuthMode === "appToken" ? /* @__PURE__ */ k$1("div", { class: "voice-two-col" }, /* @__PURE__ */ k$1("input", {
+	}, "AppID + Token"))), isVolcDraft && !isVolcTts3Draft && draft.volcAuthMode === "appToken" ? /* @__PURE__ */ k$1("div", { class: "voice-two-col" }, /* @__PURE__ */ k$1("input", {
 		class: "vp-input",
 		value: draft.appId,
 		placeholder: "AppID",
@@ -2737,11 +2775,11 @@ function VoiceProviderSheet(props) {
 	})) : /* @__PURE__ */ k$1("div", { class: "vp-field" }, /* @__PURE__ */ k$1("label", {
 		class: "vp-field-label",
 		for: "vpResourceIdInput"
-	}, "Resource ID"), /* @__PURE__ */ k$1("input", {
+	}, isVolcTts3Draft ? "Model ID" : "Resource ID"), /* @__PURE__ */ k$1("input", {
 		id: "vpResourceIdInput",
 		class: "vp-input",
 		value: draft.resourceId,
-		placeholder: draft.provider === "volcengine_asr" ? "volc.seedasr.auc 或 volc.bigasr.auc_turbo" : "seed-tts-2.0",
+		placeholder: draft.provider === "volcengine_asr" ? "volc.seedasr.auc 或 volc.bigasr.auc_turbo" : isVolcTts3Draft ? "doubao-seed-tts-3.0" : "seed-tts-2.0",
 		onInput: (e) => {
 			setDraftTestRes(null);
 			setDraft({
@@ -2749,7 +2787,27 @@ function VoiceProviderSheet(props) {
 				resourceId: e.target.value
 			});
 		}
-	}), draft.provider === "volcengine_asr" && /* @__PURE__ */ k$1(M, null, /doubao_|\d{12,}/i.test(draft.resourceId) && /* @__PURE__ */ k$1("div", { class: "vp-field-warn" }, "这看起来是控制台的「实例 ID」，不是 Resource ID：2.0 标准版请点下方「2.0 标准版」，极速版请点「极速版」"), /* @__PURE__ */ k$1("div", {
+	}), draft.provider === "volcengine_tts" && !isVolcTts3Draft && /* @__PURE__ */ k$1("div", {
+		class: "voice-chip-row",
+		style: "margin-top:6px;"
+	}, [{
+		label: "2.0 标准 (seed-tts-2.0)",
+		value: "seed-tts-2.0"
+	}, {
+		label: "1.0 兼容 (10029)",
+		value: "volc.service_type.10029"
+	}].map((item) => /* @__PURE__ */ k$1("button", {
+		key: item.value,
+		type: "button",
+		class: `voice-quick-chip ${draft.resourceId === item.value ? "active" : ""}`,
+		onClick: () => {
+			setDraftTestRes(null);
+			setDraft({
+				...draft,
+				resourceId: item.value
+			});
+		}
+	}, item.label))), draft.provider === "volcengine_asr" && /* @__PURE__ */ k$1(M, null, /doubao_|\d{12,}/i.test(draft.resourceId) && /* @__PURE__ */ k$1("div", { class: "vp-field-warn" }, "这看起来是控制台的「实例 ID」，不是 Resource ID：2.0 标准版请点下方「2.0 标准版」，极速版请点「极速版」"), /* @__PURE__ */ k$1("div", {
 		class: "voice-chip-row",
 		style: "margin-top:6px;"
 	}, [
@@ -2779,7 +2837,7 @@ function VoiceProviderSheet(props) {
 	}, item.label))))), (draft.provider === "volcengine_tts" || draft.provider === "gemini") && /* @__PURE__ */ k$1("div", { class: "vp-field" }, /* @__PURE__ */ k$1("label", { class: "vp-field-label" }, "播报音色（可选）"), /* @__PURE__ */ k$1("input", {
 		class: "vp-input",
 		value: draft.defaultVoice,
-		placeholder: draft.provider === "volcengine_tts" ? "zh_female_vv_uranus_bigtts" : "Kore",
+		placeholder: isVolcTts3Draft ? "multi_female_tuanzi_v3_uranus_bigtts（可在 3.0 音色列表复制）" : draft.provider === "volcengine_tts" ? "zh_female_vv_uranus_bigtts" : "Kore",
 		onInput: (e) => setDraft({
 			...draft,
 			defaultVoice: e.target.value

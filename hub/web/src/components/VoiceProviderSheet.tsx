@@ -460,17 +460,18 @@ export function VoiceProviderSheet(props: VoiceProviderSheetProps) {
         : nextProv === 'volcengine_asr'
           ? 'https://openspeech.bytedance.com/api/v3/auc/bigmodel/recognize/flash'
           : nextProv === 'volcengine_tts'
-            ? 'https://openspeech.bytedance.com/api/v3/tts/unidirectional'
-            : (prev.baseUrl && !prev.baseUrl.includes('bytedance') && !prev.baseUrl.includes('googleapis'))
+            ? 'https://voice.cn-beijing.volces.com/api/v3/text-to-speech'
+            : (prev.baseUrl && !prev.baseUrl.includes('bytedance') && !prev.baseUrl.includes('googleapis') && !prev.baseUrl.includes('text-to-speech'))
               ? prev.baseUrl
               : '',
+      volcAuthMode: nextProv === 'volcengine_tts' ? 'apiKey' : prev.volcAuthMode,
       resourceId: nextProv === 'volcengine_asr'
-        ? 'volc.bigasr.auc_turbo'
+        ? 'volc.seedasr.auc'
         : nextProv === 'volcengine_tts'
-          ? 'seed-tts-2.0'
+          ? 'doubao-seed-tts-3.0'
           : '',
       defaultVoice: nextProv === 'volcengine_tts'
-        ? 'zh_female_vv_uranus_bigtts'
+        ? 'multi_female_tuanzi_v3_uranus_bigtts'
         : nextProv === 'gemini'
           ? 'Kore'
           : '',
@@ -605,7 +606,11 @@ export function VoiceProviderSheet(props: VoiceProviderSheetProps) {
     }
   };
 
-  const voiceChips = TTS_VOICE_OPTIONS[draft.provider as keyof typeof TTS_VOICE_OPTIONS] || [];
+  const isVolcTts3Draft = draft.provider === 'volcengine_tts'
+    && (/3\.0/i.test(draft.resourceId) || /voice\.cn-beijing\.volces\.com|text-to-speech/i.test(draft.baseUrl));
+  const voiceChips = isVolcTts3Draft
+    ? [{ label: '团子 3.0 女声', value: 'multi_female_tuanzi_v3_uranus_bigtts' }]
+    : (TTS_VOICE_OPTIONS[draft.provider as keyof typeof TTS_VOICE_OPTIONS] || []);
   const isVolcDraft = draft.provider === 'volcengine_asr' || draft.provider === 'volcengine_tts';
   const compactSummary = formatVoiceCompactValue(config);
 
@@ -1122,9 +1127,54 @@ export function VoiceProviderSheet(props: VoiceProviderSheetProps) {
                 </div>
               )}
 
+              {draft.provider === 'volcengine_tts' && (
+                <div class="vp-field">
+                  <label class="vp-field-label">接口版本</label>
+                  <div class="vp-seg-pair">
+                    <button
+                      type="button"
+                      id="vpVolcTtsV3Btn"
+                      class={`vp-seg-opt ${isVolcTts3Draft ? 'active' : ''}`}
+                      onClick={() => {
+                        setDraftTestRes(null);
+                        setDraft(prev => ({
+                          ...prev,
+                          volcAuthMode: 'apiKey',
+                          baseUrl: 'https://voice.cn-beijing.volces.com/api/v3/text-to-speech',
+                          resourceId: 'doubao-seed-tts-3.0',
+                          defaultVoice: !prev.defaultVoice || prev.defaultVoice.startsWith('zh_')
+                            ? 'multi_female_tuanzi_v3_uranus_bigtts'
+                            : prev.defaultVoice,
+                        }));
+                      }}
+                    >
+                      3.0 新版（仅 API Key）
+                    </button>
+                    <button
+                      type="button"
+                      id="vpVolcTtsV2Btn"
+                      class={`vp-seg-opt ${!isVolcTts3Draft ? 'active' : ''}`}
+                      onClick={() => {
+                        setDraftTestRes(null);
+                        setDraft(prev => ({
+                          ...prev,
+                          baseUrl: 'https://openspeech.bytedance.com/api/v3/tts/unidirectional',
+                          resourceId: 'seed-tts-2.0',
+                          defaultVoice: !prev.defaultVoice || prev.defaultVoice.includes('_v3_')
+                            ? 'zh_female_vv_uranus_bigtts'
+                            : prev.defaultVoice,
+                        }));
+                      }}
+                    >
+                      2.0 经典版（Seed-TTS）
+                    </button>
+                  </div>
+                </div>
+              )}
+
               <div class="vp-field">
                 <label class="vp-field-label" for="vpApiKeyInput">
-                  {isVolcDraft ? '鉴权密钥' : 'API Key'}
+                  {isVolcDraft && !isVolcTts3Draft ? '鉴权密钥' : 'API Key'}
                 </label>
 
                 {draft.id && editingCredSummary && (
@@ -1133,7 +1183,13 @@ export function VoiceProviderSheet(props: VoiceProviderSheetProps) {
                   </div>
                 )}
 
-                {isVolcDraft && (
+                {isVolcDraft && isVolcTts3Draft && (
+                  <div class="vp-field-hint" style="margin-top:0;margin-bottom:6px;">
+                    火山「语音合成 3.0」只需填写新版控制台的一把 API Key（X-Api-Key），无需 AppID
+                  </div>
+                )}
+
+                {isVolcDraft && !isVolcTts3Draft && (
                   <Fragment>
                     <div class="vp-field-hint" style="margin-top:0;margin-bottom:6px;">
                       填火山「语音技术」密钥（非火山方舟大模型密钥）；填完可先点下方「测试连通」确认权限
@@ -1157,7 +1213,7 @@ export function VoiceProviderSheet(props: VoiceProviderSheetProps) {
                   </Fragment>
                 )}
 
-                {isVolcDraft && draft.volcAuthMode === 'appToken' ? (
+                {isVolcDraft && !isVolcTts3Draft && draft.volcAuthMode === 'appToken' ? (
                   <div class="voice-two-col">
                     <input
                       class="vp-input"
@@ -1202,17 +1258,45 @@ export function VoiceProviderSheet(props: VoiceProviderSheetProps) {
                 </div>
               ) : (
                 <div class="vp-field">
-                  <label class="vp-field-label" for="vpResourceIdInput">Resource ID</label>
+                  <label class="vp-field-label" for="vpResourceIdInput">
+                    {isVolcTts3Draft ? 'Model ID' : 'Resource ID'}
+                  </label>
                   <input
                     id="vpResourceIdInput"
                     class="vp-input"
                     value={draft.resourceId}
-                    placeholder={draft.provider === 'volcengine_asr' ? 'volc.seedasr.auc 或 volc.bigasr.auc_turbo' : 'seed-tts-2.0'}
+                    placeholder={
+                      draft.provider === 'volcengine_asr'
+                        ? 'volc.seedasr.auc 或 volc.bigasr.auc_turbo'
+                        : isVolcTts3Draft
+                          ? 'doubao-seed-tts-3.0'
+                          : 'seed-tts-2.0'
+                    }
                     onInput={(e: any) => {
                       setDraftTestRes(null);
                       setDraft({ ...draft, resourceId: e.target.value });
                     }}
                   />
+                  {draft.provider === 'volcengine_tts' && !isVolcTts3Draft && (
+                    <div class="voice-chip-row" style="margin-top:6px;">
+                      {[
+                        { label: '2.0 标准 (seed-tts-2.0)', value: 'seed-tts-2.0' },
+                        { label: '1.0 兼容 (10029)', value: 'volc.service_type.10029' },
+                      ].map(item => (
+                        <button
+                          key={item.value}
+                          type="button"
+                          class={`voice-quick-chip ${draft.resourceId === item.value ? 'active' : ''}`}
+                          onClick={() => {
+                            setDraftTestRes(null);
+                            setDraft({ ...draft, resourceId: item.value });
+                          }}
+                        >
+                          {item.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                   {draft.provider === 'volcengine_asr' && (
                     <Fragment>
                       {/doubao_|\d{12,}/i.test(draft.resourceId) && (
@@ -1250,7 +1334,13 @@ export function VoiceProviderSheet(props: VoiceProviderSheetProps) {
                   <input
                     class="vp-input"
                     value={draft.defaultVoice}
-                    placeholder={draft.provider === 'volcengine_tts' ? 'zh_female_vv_uranus_bigtts' : 'Kore'}
+                    placeholder={
+                      isVolcTts3Draft
+                        ? 'multi_female_tuanzi_v3_uranus_bigtts（可在 3.0 音色列表复制）'
+                        : draft.provider === 'volcengine_tts'
+                          ? 'zh_female_vv_uranus_bigtts'
+                          : 'Kore'
+                    }
                     onInput={(e: any) => setDraft({ ...draft, defaultVoice: e.target.value })}
                   />
                   {voiceChips.length > 0 && (
