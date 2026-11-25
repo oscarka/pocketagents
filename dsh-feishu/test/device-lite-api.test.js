@@ -4,7 +4,12 @@ import assert from 'node:assert/strict'
 import { HubCore } from '../../hub/hub-core.js'
 import { createHubServer } from '../../hub/server.js'
 import { resamplePcm16Mono } from '../../hub/voice-copilot.js'
-import { flushDeviceSummaryTasks, resetDeviceSummaryCache } from '../../hub/device-api.js'
+import {
+  buildDeviceSetupInfo,
+  flushDeviceSummaryTasks,
+  resetDeviceSummaryCache,
+  resetRecentDevices,
+} from '../../hub/device-api.js'
 
 function seedDeviceHub(hub, nowMs) {
   hub.handleHeartbeat({
@@ -530,4 +535,78 @@ test('3-Tier Practical Chinese Localization: native ZH passthrough, 0ms rule map
   const enPoll = await dispatchRequest({ method: 'GET', url: '/api/device/digest?lang=en', headers })
   assert.equal(enPoll.json.approvals[0].tool, 'Bash')
   assert.equal(enPoll.json.approvals[0].title, 'Allow running unit test suite?')
+})
+
+test('Beginner 1-Click Setup Wizard: /device-setup HTML, /api/device/setup-info LAN detection, mint-token & live seen tracker', async () => {
+  resetRecentDevices()
+  const nowMs = 1_796_200_000_000
+  const hub = new HubCore({ now: () => nowMs })
+  seedDeviceHub(hub, nowMs)
+
+  // Verify pure LAN detection prefers 192.168.x.x on en0 and excludes 127.0.0.1
+  const pureInfo = buildDeviceSetupInfo(hub, {
+    reqOrigin: 'http://127.0.0.1:8788',
+    listenPort: 8788,
+    nowMs,
+    interfaces: {
+      lo0: [{ family: 'IPv4', internal: true, address: '127.0.0.1' }],
+      utun3: [{ family: 'IPv4', internal: false, address: '100.64.0.9' }],
+      en0: [{ family: 'IPv4', internal: false, address: '192.168.1.25' }],
+    },
+  })
+  assert.equal(pureInfo.recommendedUrl, 'http://192.168.1.25:8788')
+  assert.ok(!pureInfo.candidateUrls.some(c => c.url.includes('127.0.0.1')))
+
+  const { dispatchRequest } = createHubServer({
+    hub,
+    token: 'wizard-admin-secret',
+    requireToken: true,
+    voiceVaultFile: '',
+  })
+
+  // 1. /device-setup serves public HTML without leaking admin token
+  const pageRes = await dispatchRequest({ method: 'GET', url: '/device-setup' })
+  assert.equal(pageRes.status, 200)
+  assert.match(String(pageRes.body || ''), /连接 FoloToy AI Passport/)
+  assert.ok(!String(pageRes.body || '').includes('wizard-admin-secret'))
+
+  // 2. /api/device/setup-info & /api/device/mint-token require auth
+  const unauthSetup = await dispatchRequest({ method: 'GET', url: '/api/device/setup-info' })
+  assert.equal(unauthSetup.status, 401)
+  const unauthMint = await dispatchRequest({ method: 'POST', url: '/api/device/mint-token', body: {} })
+  assert.equal(unauthMint.status, 401)
+
+  // 3. Authenticated mint-token creates a dedicated dev_ token
+  const adminHeaders = { 'x-hub-token': 'wizard-admin-secret' }
+  const mintRes = await dispatchRequest({
+    method: 'POST',
+    url: '/api/device/mint-token',
+    headers: adminHeaders,
+    body: { deviceName: '我的 AI Passport' },
+  })
+  assert.equal(mintRes.status, 200)
+  assert.equal(mintRes.json.ok, true)
+  assert.ok(mintRes.json.token.startsWith('dev_'))
+
+  // 4. Device uses minted dev_ token to call /api/device/digest -> immediately visible in setup-info.recentDevices!
+  const digRes = await dispatchRequest({
+    method: 'GET',
+    url: '/api/device/digest',
+    headers: { 'x-hub-token': mintRes.json.token },
+    remoteAddress: '192.168.1.88',
+  })
+  assert.equal(digRes.status, 200)
+  assert.equal(digRes.json.ok, true)
+
+  const infoRes = await dispatchRequest({
+    method: 'GET',
+    url: '/api/device/setup-info',
+    headers: adminHeaders,
+  })
+  assert.equal(infoRes.status, 200)
+  assert.equal(infoRes.json.ok, true)
+  assert.equal(infoRes.json.onlineHostsCount, 1)
+  assert.equal(infoRes.json.recentDevices.length, 1)
+  assert.equal(infoRes.json.recentDevices[0].ip, '192.168.1.88')
+  assert.equal(infoRes.json.recentDevices[0].deviceName, '我的 AI Passport')
 })

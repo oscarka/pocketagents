@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { networkInterfaces } from 'node:os'
 import {
   buildDynamicVoiceContext,
   computeDenyOptionIndex,
@@ -842,5 +843,131 @@ export async function handleDeviceTtsPcm(
       'x-audio-bits': '16',
     },
     buffer: tts.pcmBuffer,
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Beginner-Friendly Hardware Setup Helpers (LAN detection + live seen tracker)
+// ---------------------------------------------------------------------------
+const RECENT_DEVICE_TTL_MS = 5 * 60 * 1000
+const recentEdgeDevices = new Map()
+
+export function resetRecentDevices() {
+  recentEdgeDevices.clear()
+}
+
+export function recordDeviceSeen({ ip = '', deviceId = '', deviceName = '', nowMs = Date.now() } = {}) {
+  const cleanIp = String(ip || '').replace(/^::ffff:/, '').trim()
+  const key = String(deviceId || cleanIp || 'edge-device').slice(0, 64)
+  recentEdgeDevices.set(key, {
+    key,
+    ip: cleanIp || 'unknown',
+    deviceId: String(deviceId || '').slice(0, 48),
+    deviceName: String(deviceName || 'FoloToy AI Passport').slice(0, 48),
+    lastSeenMs: nowMs,
+  })
+  if (recentEdgeDevices.size > 16) {
+    for (const [k, v] of recentEdgeDevices.entries()) {
+      if (nowMs - v.lastSeenMs > RECENT_DEVICE_TTL_MS) recentEdgeDevices.delete(k)
+    }
+  }
+}
+
+export function getRecentDevices(nowMs = Date.now()) {
+  const out = []
+  for (const [k, v] of recentEdgeDevices.entries()) {
+    if (nowMs - v.lastSeenMs > RECENT_DEVICE_TTL_MS) {
+      recentEdgeDevices.delete(k)
+      continue
+    }
+    out.push({
+      ip: v.ip,
+      deviceId: v.deviceId,
+      deviceName: v.deviceName,
+      lastSeenMs: v.lastSeenMs,
+      agoSec: Math.max(0, Math.round((nowMs - v.lastSeenMs) / 1000)),
+    })
+  }
+  out.sort((a, b) => b.lastSeenMs - a.lastSeenMs)
+  return out.slice(0, 6)
+}
+
+function scoreIpv4LanAddress(addr = '', iface = '') {
+  if (/^192\.168\./.test(addr)) return 100 + (/^(en0|wlan0|wi-fi)/i.test(iface) ? 20 : 0)
+  if (/^10\./.test(addr)) return 85 + (/^(en0|wlan0|wi-fi)/i.test(iface) ? 20 : 0)
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(addr)) return 75
+  if (/^100\./.test(addr)) return 60 // Tailscale / CGNAT
+  return 40
+}
+
+export function detectLanIpv4Candidates(interfaces = networkInterfaces()) {
+  const seen = new Map()
+  for (const [iface, list] of Object.entries(interfaces || {})) {
+    for (const item of list || []) {
+      const fam = String(item?.family || '')
+      if ((fam === 'IPv4' || fam === '4') && !item.internal && item.address) {
+        const addr = String(item.address).trim()
+        if (!addr || addr === '127.0.0.1' || addr.startsWith('169.254.')) continue
+        const score = scoreIpv4LanAddress(addr, iface)
+        const prev = seen.get(addr)
+        if (!prev || score > prev.score) {
+          seen.set(addr, { address: addr, iface, score })
+        }
+      }
+    }
+  }
+  return [...seen.values()].sort((a, b) => b.score - a.score)
+}
+
+export function buildDeviceSetupInfo(
+  hub,
+  {
+    reqOrigin = '',
+    publicUrl = process.env.PUBLIC_URL || '',
+    listenPort = 0,
+    nowMs = Date.now(),
+    interfaces,
+  } = {},
+) {
+  const cleanPublic = String(publicUrl || '').trim().replace(/\/+$/, '')
+  let parsedOrigin = null
+  try {
+    if (reqOrigin) parsedOrigin = new URL(reqOrigin)
+  } catch {
+    parsedOrigin = null
+  }
+  const resolvedPort = Number(listenPort) || Number(parsedOrigin?.port) || (parsedOrigin?.protocol === 'https:' ? 443 : 8788)
+  const candidates = []
+  const pushUrl = (url, label) => {
+    const clean = String(url || '').trim().replace(/\/+$/, '')
+    if (!clean || candidates.some(c => c.url === clean)) return
+    candidates.push({ url: clean, label })
+  }
+
+  if (/^https?:\/\/[^/\s]+/i.test(cleanPublic)) {
+    pushUrl(cleanPublic, '公网地址 (PUBLIC_URL)')
+  }
+
+  for (const nic of detectLanIpv4Candidates(interfaces)) {
+    pushUrl(`http://${nic.address}:${resolvedPort}`, `本机局域网 (${nic.iface})`)
+  }
+
+  if (parsedOrigin && !/^(localhost|127\.0\.0\.1|\[::1\])$/i.test(parsedOrigin.hostname)) {
+    pushUrl(parsedOrigin.origin, '当前访问地址')
+  }
+
+  const recommendedUrl = candidates[0]?.url || (parsedOrigin ? parsedOrigin.origin : `http://192.168.1.x:${resolvedPort}`)
+  const ctx = buildDynamicVoiceContext(hub)
+  const onlineHosts = (ctx.hosts || []).filter(h => h.online).map(h => h.hostName || h.hostId)
+
+  return {
+    ok: true,
+    recommendedUrl,
+    candidateUrls: candidates,
+    onlineHostsCount: onlineHosts.length,
+    onlineHosts,
+    pendingCount: ctx.pendingApprovals.length,
+    deviceApprovalEnabled: Boolean(hub?.deviceApprovalEnabled),
+    recentDevices: getRecentDevices(nowMs),
   }
 }

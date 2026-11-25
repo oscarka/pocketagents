@@ -16,9 +16,11 @@ import { VoiceVault } from './voice-vault.js'
 import { VoiceCopilotEngine } from './voice-copilot.js'
 import {
   buildDeviceDigest,
+  buildDeviceSetupInfo,
   executeDeviceAction,
   handleDeviceTtsPcm,
   handleDeviceVoiceTurn,
+  recordDeviceSeen,
 } from './device-api.js'
 
 const gzipAsync = promisify(gzip)
@@ -152,6 +154,7 @@ async function readStaticTextPrecompressed(filePath) {
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const INDEX_HTML_PATH = join(__dirname, 'public', 'index.html')
+const DEVICE_SETUP_HTML_PATH = join(__dirname, 'device-setup.html')
 const PACKAGE_JSON_PATH = join(__dirname, '..', 'package.json')
 const CONNECT_SCRIPT_PATH = join(__dirname, '..', 'connect-host.sh')
 const MAX_BODY_BYTES = 50 * 1024 * 1024 // 50 MiB for snapshot uploads
@@ -791,6 +794,25 @@ export function createHubServer({
     }
     if (method === 'POST' && pathname === '/api/usage/v1') {
       return { status: 200, json: { ok: true, selfHosted: true } }
+    }
+
+    // Beginner-friendly FoloToy AI Passport / Edge Device 1-click USB setup wizard (zero secrets in HTML)
+    if (method === 'GET' && (pathname === '/device-setup' || pathname === '/device-setup/')) {
+      try {
+        const html = await readFile(DEVICE_SETUP_HTML_PATH, 'utf8')
+        return {
+          status: 200,
+          headers: {
+            'content-type': 'text/html; charset=utf-8',
+            'cache-control': 'no-store',
+            'content-security-policy':
+              "default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; base-uri 'self'",
+          },
+          body: html,
+        }
+      } catch {
+        return { status: 404, body: 'device-setup.html not found' }
+      }
     }
 
     // One-line Host Install Script served directly from the Hub (pre-fills this Hub's origin URL)
@@ -1885,7 +1907,58 @@ export function createHubServer({
         const curDevice = getAuthenticatedDevice(headers, urlObj)
         const deviceSessionId = `device:${String(body?.sessionId || urlObj.searchParams.get('sessionId') || curDevice?.id || 'default').slice(0, 48)}`
 
+        if (method === 'GET' && pathname === '/api/device/setup-info') {
+          const safeHost = /^[a-zA-Z0-9._:-]+$/.test(urlObj.host) ? urlObj.host : ''
+          const reqOrigin = safeHost ? `${urlObj.protocol}//${safeHost}` : ''
+          const addrInfo = typeof server?.address === 'function' ? server.address() : null
+          const listenPort = addrInfo && typeof addrInfo === 'object' ? Number(addrInfo.port) || 0 : 0
+          return {
+            status: 200,
+            json: buildDeviceSetupInfo(hub, {
+              reqOrigin,
+              listenPort,
+              nowMs: hub.now ? hub.now() : Date.now(),
+            }),
+          }
+        }
+
+        if (method === 'POST' && pathname === '/api/device/mint-token') {
+          if (!expectedToken) {
+            return {
+              status: 200,
+              json: {
+                ok: true,
+                token: '',
+                noAuthRequired: true,
+                deviceName: String(body?.deviceName || 'FoloToy AI Passport').slice(0, 40),
+              },
+            }
+          }
+          const reg = hub.registerTrustedDevice({
+            deviceId: String(body?.deviceId || '').trim(),
+            name: String(body?.deviceName || 'FoloToy AI Passport').trim().slice(0, 40) || 'FoloToy AI Passport',
+            userAgent: 'FoloToy-AI-Passport/1.0',
+            ip: reqClientIp,
+          })
+          return {
+            status: 200,
+            json: {
+              ok: true,
+              token: reg.deviceToken,
+              deviceId: reg.device.id,
+              deviceName: reg.device.name,
+            },
+          }
+        }
+
         if (method === 'GET' && pathname === '/api/device/digest') {
+          const nowMs = hub.now ? hub.now() : Date.now()
+          recordDeviceSeen({
+            ip: reqClientIp,
+            deviceId: curDevice?.id || '',
+            deviceName: curDevice?.name || 'FoloToy AI Passport',
+            nowMs,
+          })
           await voiceVault.init()
           const digest = buildDeviceDigest(hub, {
             maxApprovals: urlObj.searchParams.get('maxApprovals'),
@@ -1895,7 +1968,7 @@ export function createHubServer({
             activeSessionId: urlObj.searchParams.get('agentId') || '',
             lang: urlObj.searchParams.get('lang') || 'zh',
             voiceCopilot,
-            nowMs: hub.now ? hub.now() : Date.now(),
+            nowMs,
           })
           return { status: 200, json: digest }
         }

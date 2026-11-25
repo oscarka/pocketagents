@@ -1,43 +1,66 @@
-# PocketAgents Hardware Remote — FoloToy AI Passport Firmware
+<p align="right">
+  <a href="README.zh_CN.md">简体中文（新手保姆级教程）</a> · <strong>English</strong>
+</p>
 
-Official reference hardware client for **PocketAgents**, built on top of the open-source [`FoloToy/ai-passport`](https://github.com/FoloToy/ai-passport) BSP (ESP32-C3, 8 MB Flash, no PSRAM, 240×320 ST7789P3 TFT, ES8311 full-duplex audio, 3 physical ADC buttons) and consuming PocketAgents's generic **Edge / Lite Device API (`/api/device/*`)**.
+# PocketAgents × FoloToy AI Passport — Beginner Setup Guide
 
-## Features
+Turn your **FoloToy AI Passport** into a pocket remote control for Claude Code, OpenAI Codex, Antigravity IDE, DeepSeek Harness (DSH), and WorkBuddy running on your computer. Glance at your desk status, approve routine commands, answer multiple-choice prompts, block destructive actions behind a 3-digit confirmation code, or hold OK to talk—all in a clean full-Chinese UI with 3-tier automatic translation.
 
-- **Desk Status Monitor**: Live `HOSTS / RUN / WAIT` counters and active session list (Claude Code, Codex, Antigravity IDE, DSH, WorkBuddy).
-- **Auto-Popup Approval & Multi-Choice Triage**: Audible chime + color-coded risk badge (`L0 SAFE` / `L1 EXEC` / `L2 DANGER`).
-- **3-Button Blind Control** (single-key gestures only, matching AI Passport's shared-ADC resistor ladder):
-  - `UP` / `DOWN` click: Cycle pending approvals or select multi-choice options
-  - `OK` click: Approve `L0`/`L1` or submit chosen option (`L2` high-risk commands stay locked and surface a 3-digit PIN)
-  - `OK` double-click: Deny command approval
-  - `UP` double-click: Return to Dashboard
-  - `OK` long-press (Push-To-Talk): Record 16 kHz PCM voice clip -> `POST /api/device/voice-turn` -> stream 16 kHz PCM reply via ES8311 speaker
-- **Zero-Trust Pairing**: Uses a revocable `dev_` token minted via `POST /api/pairing/exchange` (or `HUB_TOKEN` on local dev).
+## 3-Step Quick Start (Zero Serial Commands Required)
 
-## Host Unit Tests (No ESP-IDF Required)
+### Step 1: Flash the Firmware
+1. Connect your powered-on AI Passport to your computer with a data-capable USB-C cable.
+2. Flash `pocketagents-passport-merged.bin` from `0x0` via the [FoloToy Web Flasher](https://ai-passport.folotoy.cn/tools/web-flasher/) or the FoloToy community play page.
+
+### Step 2: Start PocketAgents on Your Computer
+```bash
+# On the hardware preview branch (before main release):
+git clone -b feat/folotoy-passport https://github.com/oscarka/pocketagents.git
+cd pocketagents
+node scripts/cli.mjs
+
+# Once merged to main / npm:
+npx pocketagents
+```
+The terminal automatically prints a 1-click hardware pairing URL:
+```text
+  🪪 AI Passport:    http://127.0.0.1:8788/device-setup?pair=482910
+```
+
+### Step 3: 1-Click USB Wi-Fi & Token Setup
+1. Open the printed `/device-setup` link in **Chrome or Edge**.
+2. The wizard automatically fills your computer's **LAN IP URL** (e.g., `http://192.168.1.25:8788`) and mints a revocable **`dev_...` device token**.
+3. Enter your **2.4 GHz Wi-Fi name & password** (5 GHz is unsupported) and click **`🔌 连接 USB 一键写入设备`**.
+4. Within 3–5 seconds, the top dot on AI Passport turns green and the wizard confirms your device is live!
+
+## Manual Serial Example (Safari / `tool.folotoy.cn`)
+
+If you prefer sending commands manually in [https://tool.folotoy.cn/](https://tool.folotoy.cn/):
+```text
+pa wifi MyHome_2.4G 12345678
+pa set http://192.168.1.25:8788 dev_9f8e7d6c5b4a3210
+```
+
+## 3-Button Controls
+
+- **`UP` / `DOWN` click**: Cycle approvals, move multi-choice highlight, or scroll tasks on the dashboard
+- **`OK` click**: Approve L0/L1, submit selected option, or trigger L2 3-digit PIN guard
+- **`DOWN` long-press (or `OK` double-click)**: Deny the current approval cleanly
+- **`OK` long-press (Push-To-Talk)**: Record voice query / speak L2 confirmation PIN, release to send
+- **`UP` double-click**: Return to Dashboard
+
+## Host Unit Tests & Web Simulator
 
 ```bash
+# Pure-C state machine & UTF-8 JSON parser tests (ASan/UBSan)
 clang -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
   firmware/folotoy-passport/main/pa_model.c \
   firmware/folotoy-passport/tests/test_pa_model.c \
   -o /tmp/test_pa_model && /tmp/test_pa_model
+
+# Hub Edge Device API + 3-tier Chinese localization + setup wizard tests
+node --test dsh-feishu/test/device-lite-api.test.js
+
+# Live seeded simulator Hub (4 mixed ZH/EN scenarios)
+node scripts/passport-sim-hub.mjs
 ```
-
-## Build Merged 8 MB ESP32-C3 Firmware (ESP-IDF v5.5.3 / Docker)
-
-```bash
-docker run --rm \
-  -v "${PWD}/firmware/folotoy-passport:/project" \
-  -w /project \
-  espressif/idf:v5.5.3 \
-  bash -c "idf.py set-target esp32c3 && idf.py build && idf.py merge-bin -o pocketagents-passport-merged.bin"
-```
-
-## Test in the Browser Hardware Simulator (Zero Physical Hardware Required)
-
-1. Start PocketAgents Hub listening on your host LAN IP (e.g. `0.0.0.0:8787`).
-2. Start [`VOID001/FoloToy-Passport-Simulator`](https://github.com/VOID001/FoloToy-Passport-Simulator) with private network bridging enabled:
-   ```bash
-   EMULATOR_NETWORK_ALLOW_PRIVATE=1 npm start
-   ```
-3. Open `http://127.0.0.1:4190`, click **上传固件**, and upload `build/pocketagents-passport-merged.bin`.
