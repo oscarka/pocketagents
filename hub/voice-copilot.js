@@ -71,6 +71,28 @@ export function encodePcm16ToWav(pcmBuffer, sampleRate = 24000, channels = 1) {
   return Buffer.concat([header, pcm])
 }
 
+export function resamplePcm16Mono(pcmBuffer, fromRate = 24000, toRate = 16000) {
+  const src = Buffer.isBuffer(pcmBuffer) ? pcmBuffer : Buffer.from(pcmBuffer || [])
+  const srcSamples = Math.floor(src.length / 2)
+  const inRate = Math.max(4000, Math.min(96000, Math.round(Number(fromRate) || 24000)))
+  const outRate = Math.max(4000, Math.min(96000, Math.round(Number(toRate) || 16000)))
+  if (srcSamples === 0) return Buffer.alloc(0)
+  if (inRate === outRate) return src.subarray(0, srcSamples * 2)
+  const outSamples = Math.max(1, Math.round((srcSamples * outRate) / inRate))
+  const out = Buffer.allocUnsafe(outSamples * 2)
+  const ratio = inRate / outRate
+  for (let i = 0; i < outSamples; i += 1) {
+    const pos = i * ratio
+    const idx = Math.floor(pos)
+    const frac = pos - idx
+    const s0 = src.readInt16LE(Math.min(idx, srcSamples - 1) * 2)
+    const s1 = src.readInt16LE(Math.min(idx + 1, srcSamples - 1) * 2)
+    const val = Math.max(-32768, Math.min(32767, Math.round(s0 + (s1 - s0) * frac)))
+    out.writeInt16LE(val, i * 2)
+  }
+  return out
+}
+
 export function classifyApprovalRisk(approval = {}) {
   if (!approval || typeof approval !== 'object') {
     return { level: 'L1', reason: '常规工具操作' }
@@ -2057,12 +2079,24 @@ export class VoiceCopilotEngine {
     return { ok: false, error: `不支持的播报类型：${kind}`, latencyMs: this.now() - t0 }
   }
 
-  async runTts({ text = '', profileId = '', stageOverride = null, voice = '', speed = null } = {}) {
+  async runTts({
+    text = '',
+    profileId = '',
+    stageOverride = null,
+    voice = '',
+    speed = null,
+    outputFormat = 'auto',
+    sampleRate = 24000,
+  } = {}) {
     const t0 = this.now()
     const cleanText = String(text || '').trim()
     if (!cleanText) {
       return { ok: false, error: '合成文本为空', latencyMs: 0 }
     }
+    const wantPcm16 = String(outputFormat || 'auto').toLowerCase() === 'pcm16'
+    const targetSampleRate = wantPcm16
+      ? Math.max(8000, Math.min(24000, Math.round(Number(sampleRate) || 16000)))
+      : 24000
     const profile = this._resolveEffectiveProfile(profileId, stageOverride ? { tts: stageOverride } : null)
     const stageCfg = profile.tts || {}
     const provider = String(stageCfg.provider || 'native').toLowerCase()
@@ -2096,14 +2130,15 @@ export class VoiceCopilotEngine {
       const speaker = voice || stageCfg.voice || cred.defaultVoice || 'zh_female_vv_uranus_bigtts'
       const headers = buildVolcHeaders(cred, resourceId)
       const speechRate = Math.max(-50, Math.min(100, Math.round((effectiveSpeed - 1) * 50)))
+      const volcRate = wantPcm16 ? (targetSampleRate <= 8000 ? 8000 : targetSampleRate <= 16000 ? 16000 : 24000) : 24000
       const reqBody = {
         user: { uid: 'pocketagents-walk' },
         req_params: {
           text: cleanText,
           speaker,
           audio_params: {
-            format: 'mp3',
-            sample_rate: 24000,
+            format: wantPcm16 ? 'pcm' : 'mp3',
+            sample_rate: volcRate,
             ...(speechRate !== 0 ? { speech_rate: speechRate } : {}),
           },
         },
@@ -2128,14 +2163,18 @@ export class VoiceCopilotEngine {
         }
       }
       if (contentType.startsWith('audio/')) {
-        const audioBuf = Buffer.from(await resp.arrayBuffer())
+        const rawBuf = Buffer.from(await resp.arrayBuffer())
+        const audioBuf = wantPcm16 ? resamplePcm16Mono(rawBuf, volcRate, targetSampleRate) : rawBuf
         return {
           ok: true,
           provider,
           model: resourceId,
           voice: speaker,
           credId: cred.id,
-          mimeType: contentType.split(';')[0] || 'audio/mpeg',
+          mimeType: wantPcm16
+            ? `audio/pcm; rate=${targetSampleRate}; bits=16; channels=1`
+            : contentType.split(';')[0] || 'audio/mpeg',
+          ...(wantPcm16 ? { sampleRate: targetSampleRate, pcmBuffer: audioBuf } : {}),
           audioBase64: audioBuf.toString('base64'),
           byteLength: audioBuf.length,
           latencyMs,
@@ -2170,14 +2209,18 @@ export class VoiceCopilotEngine {
           error: apiError || '火山 TTS 未返回音频数据（请检查该 AppID 是否已开通 Seed-TTS 资源权限）',
         }
       }
-      const merged = Buffer.concat(audioParts)
+      const rawMerged = Buffer.concat(audioParts)
+      const merged = wantPcm16 ? resamplePcm16Mono(rawMerged, volcRate, targetSampleRate) : rawMerged
       return {
         ok: true,
         provider,
         model: resourceId,
         voice: speaker,
         credId: cred.id,
-        mimeType: 'audio/mpeg',
+        mimeType: wantPcm16
+          ? `audio/pcm; rate=${targetSampleRate}; bits=16; channels=1`
+          : 'audio/mpeg',
+        ...(wantPcm16 ? { sampleRate: targetSampleRate, pcmBuffer: merged } : {}),
         audioBase64: merged.toString('base64'),
         byteLength: merged.length,
         latencyMs,
@@ -2230,8 +2273,24 @@ export class VoiceCopilotEngine {
       const rawBuf = Buffer.from(audioPart.inlineData.data, 'base64')
       const isPcm = /pcm|l16/i.test(rawMime)
       const rateMatch = /rate=(\d+)/i.exec(rawMime)
-      const sampleRate = rateMatch ? Number(rateMatch[1]) : 24000
-      const finalBuf = isPcm ? encodePcm16ToWav(rawBuf, sampleRate, 1) : rawBuf
+      const sourceRate = rateMatch ? Number(rateMatch[1]) : 24000
+      if (wantPcm16 && isPcm) {
+        const resampled = resamplePcm16Mono(rawBuf, sourceRate, targetSampleRate)
+        return {
+          ok: true,
+          provider,
+          model,
+          voice: voiceName,
+          credId: cred.id,
+          mimeType: `audio/pcm; rate=${targetSampleRate}; bits=16; channels=1`,
+          sampleRate: targetSampleRate,
+          pcmBuffer: resampled,
+          audioBase64: resampled.toString('base64'),
+          byteLength: resampled.length,
+          latencyMs,
+        }
+      }
+      const finalBuf = isPcm ? encodePcm16ToWav(rawBuf, sourceRate, 1) : rawBuf
       const finalMime = isPcm ? 'audio/wav' : rawMime.split(';')[0]
       return {
         ok: true,
@@ -2261,7 +2320,7 @@ export class VoiceCopilotEngine {
           model,
           input: cleanText,
           voice: chosenVoice,
-          response_format: 'mp3',
+          response_format: wantPcm16 ? 'pcm' : 'mp3',
           speed: effectiveSpeed,
         }),
       })
@@ -2290,8 +2349,8 @@ export class VoiceCopilotEngine {
           error: `OpenAI-compat TTS 返回非音频类型 (${ct.split(';')[0]})`,
         }
       }
-      const buf = Buffer.from(await resp.arrayBuffer())
-      if (buf.length > MAX_TTS_AUDIO_BYTES) {
+      const rawBuf = Buffer.from(await resp.arrayBuffer())
+      if (rawBuf.length > MAX_TTS_AUDIO_BYTES) {
         return {
           ok: false,
           provider,
@@ -2302,13 +2361,19 @@ export class VoiceCopilotEngine {
           error: 'TTS 音频响应体积超限',
         }
       }
+      const buf = wantPcm16 ? resamplePcm16Mono(rawBuf, 24000, targetSampleRate) : rawBuf
       return {
         ok: true,
         provider,
         model,
         voice: chosenVoice,
         credId: cred.id,
-        mimeType: ct.startsWith('audio/') ? ct.split(';')[0] : 'audio/mpeg',
+        mimeType: wantPcm16
+          ? `audio/pcm; rate=${targetSampleRate}; bits=16; channels=1`
+          : ct.startsWith('audio/')
+            ? ct.split(';')[0]
+            : 'audio/mpeg',
+        ...(wantPcm16 ? { sampleRate: targetSampleRate, pcmBuffer: buf } : {}),
         audioBase64: buf.toString('base64'),
         byteLength: buf.length,
         latencyMs,

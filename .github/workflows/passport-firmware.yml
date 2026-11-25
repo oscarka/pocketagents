@@ -1,0 +1,96 @@
+name: FoloToy AI Passport Firmware
+
+on:
+  push:
+    branches:
+      - "feat/folotoy-passport"
+    paths:
+      - "firmware/folotoy-passport/**"
+      - "hub/device-api.js"
+      - "dsh-feishu/test/device-lite-api.test.js"
+      - ".github/workflows/passport-firmware.yml"
+  workflow_dispatch:
+    inputs:
+      wifi_ssid:
+        description: "Default Wi-Fi SSID fallback (Emulator Host Bridge for Web Simulator)"
+        required: false
+        default: "Emulator Host Bridge"
+      hub_url:
+        description: "Default PocketAgents Hub URL fallback"
+        required: false
+        default: "http://192.168.4.1:8787"
+      hub_token:
+        description: "Optional local/simulator test token (NEVER use production secrets here)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  host-tests:
+    name: Host C & Hub Device API Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Run PocketAgents Edge Device API unit tests
+        run: node --test dsh-feishu/test/device-lite-api.test.js
+
+      - name: Run FoloToy Passport pure-C state machine tests (ASan/UBSan)
+        run: |
+          gcc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
+            firmware/folotoy-passport/main/pa_model.c \
+            firmware/folotoy-passport/tests/test_pa_model.c \
+            -o /tmp/test_pa_model
+          /tmp/test_pa_model
+
+  build-esp32c3:
+    name: Build ESP32-C3 Merged Firmware
+    needs: host-tests
+    runs-on: ubuntu-latest
+    container:
+      image: espressif/idf:v5.5.3
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare optional workflow_dispatch sdkconfig overlay
+        working-directory: firmware/folotoy-passport
+        env:
+          INPUT_WIFI_SSID: ${{ github.event.inputs.wifi_ssid }}
+          INPUT_HUB_URL: ${{ github.event.inputs.hub_url }}
+          INPUT_HUB_TOKEN: ${{ github.event.inputs.hub_token }}
+        run: |
+          if [ -n "$INPUT_WIFI_SSID" ] || [ -n "$INPUT_HUB_URL" ] || [ -n "$INPUT_HUB_TOKEN" ]; then
+            cat > sdkconfig.ci <<EOF
+          CONFIG_PA_DEFAULT_WIFI_SSID="${INPUT_WIFI_SSID:-Emulator Host Bridge}"
+          CONFIG_PA_DEFAULT_WIFI_PASS=""
+          CONFIG_PA_DEFAULT_HUB_URL="${INPUT_HUB_URL:-http://192.168.4.1:8787}"
+          CONFIG_PA_DEFAULT_HUB_TOKEN="${INPUT_HUB_TOKEN}"
+          CONFIG_PA_POLL_INTERVAL_MS=1200
+          EOF
+            echo "SDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.ci" >> "$GITHUB_ENV"
+          else
+            echo "SDKCONFIG_DEFAULTS=sdkconfig.defaults" >> "$GITHUB_ENV"
+          fi
+
+      - name: Build ESP32-C3 firmware & merged 0x0 binary
+        working-directory: firmware/folotoy-passport
+        run: |
+          source /opt/esp/idf/export.sh
+          rm -f sdkconfig
+          idf.py set-target esp32c3
+          idf.py build
+          idf.py merge-bin -o build/pocketagents-passport-merged.bin
+          ls -lh build/pocketagents-passport-merged.bin
+
+      - name: Upload merged firmware artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pocketagents-passport-firmware
+          path: firmware/folotoy-passport/build/pocketagents-passport-merged.bin
+          retention-days: 14
