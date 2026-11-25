@@ -79,6 +79,7 @@ jobs:
           fi
 
       - name: Build ESP32-C3 firmware & merged 0x0 binary
+        shell: bash
         working-directory: firmware/folotoy-passport
         run: |
           source /opt/esp/idf/export.sh
