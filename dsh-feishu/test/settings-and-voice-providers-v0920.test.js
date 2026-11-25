@@ -747,3 +747,86 @@ test('v0.9.30 Antigravity pbcopy/osascript fallback & daemon enforce UTF-8 local
   assert.match(daemonSrc, /process\.env\.LC_CTYPE = 'UTF-8'/);
   assert.match(connectSrc, /<key>LANG<\/key>/);
 });
+
+test('v0.9.31 full English i18n coverage for Settings Home, subpages, VoiceProviderSheet, and Walk Mode', async () => {
+  const { translateZhStringToEn } = await import('../../hub/web/src/utils/i18n.js');
+  const samples = [
+    // Settings Home screenshot items
+    '主控 · 3 运行中',
+    '可升级 · 11 会话',
+    '主控 · 可升级',
+    '15 次拦截',
+    '0 条',
+    '1 条',
+    '3 台可用',
+    '需 ≥2 台',
+    '已离线',
+    '已吊销',
+    // Settings subpages
+    '已接入电脑 (3)',
+    '加密分享记录 (2)',
+    '已信任的手机 / 浏览器 (1)',
+    '当前 v0.9.26 · 云端 v0.9.31',
+    '升级 v0.9.31',
+    '近 24 小时已拦截 15 次异常探测（2 个来源 IP）',
+    '运行安全 · 近 24 小时 0 次攻击探测',
+    '已在服务端登记 2 台设备：iPhone',
+    // VoiceProviderSheet ("边走边听")
+    'Provider 列表 (3)',
+    '免费本机 · 2 个',
+    '听写 / 播报 密钥缺失',
+    '手机自带免费',
+    '本地基础口令',
+    '火山听写',
+    '火山播报',
+    '听',
+    '想',
+    '说',
+    '念 3 位确认码',
+    '仅点手机屏幕',
+    '听歌时压低背景音乐',
+    '聊天页朗读复用云端播报',
+    '聊天页语音输入复用云端听写',
+    '安全试跑压测（不操作电脑）',
+    '跑一轮压测',
+    '录真声',
+    '3.0 新版（仅 API Key）',
+    '2.0 经典版（Seed-TTS）',
+    '已加密保存 (API Key sk-•••12) · 留空保持原密钥',
+    '团子 3.0 女声',
+    '同时添加火山播报（TTS）',
+    '云端人声正常 (320ms)',
+    // Walk Mode overlay
+    '⚠️ 2 待审批',
+    '🔒 后台常驻',
+    '🔆 常亮',
+    '🟢 就绪 · 戴耳机随时说',
+    '🎙️ 正在聆听（说完自动停顿或再点圆球）',
+    '👂 正在高速转写…',
+    '🧠 随行总管思考中…',
+    '🔊 正在播报（轻点字幕静音 / 点圆球直接插话）',
+    '🔐 高危操作确认码',
+    '42s 后过期',
+    '你：现在什么进度',
+    '⏭ 汇报最新进度 (2 审批 · 3 运行中)',
+    '⌨️ 静音打字',
+    '🔔 播报：仅审批',
+    '🔔 播报：审批+完成',
+    '🔔 播报：手动',
+  ];
+  for (const zh of samples) {
+    const en = translateZhStringToEn(zh);
+    assert.notEqual(en, zh, `expected English translation for: ${zh}`);
+    // Preserve user payload in '你：现在什么进度' only; all other UI strings must have zero CJK characters
+    if (!zh.startsWith('你：')) {
+      assert.doesNotMatch(en, /[\u4e00-\u9fa5]/, `leftover Chinese in "${zh}" -> "${en}"`);
+    }
+  }
+  assert.equal(translateZhStringToEn('主控 · 3 运行中'), 'Primary · 3 running');
+  assert.equal(translateZhStringToEn('可升级 · 11 会话'), 'Update · 11 chats');
+  assert.equal(translateZhStringToEn('15 次拦截'), '15 blocked');
+  assert.equal(translateZhStringToEn('0 条'), '0 links');
+  assert.equal(translateZhStringToEn('3 台可用'), '3 available');
+  assert.equal(translateZhStringToEn('Provider 列表 (3)'), 'Providers (3)');
+  assert.equal(translateZhStringToEn('🔒 后台常驻'), '🔒 Background Active');
+});

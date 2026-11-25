@@ -1,5 +1,6 @@
 import { h, Fragment } from 'preact';
 import { useEffect, useState } from 'preact/hooks';
+import { applyLangToDom, getLangPref, translateZhStringToEn } from '../utils/i18n.js';
 import {
   PROTOCOL_LABELS,
   TTS_VOICE_OPTIONS,
@@ -217,6 +218,20 @@ export function VoiceProviderSheet(props: VoiceProviderSheetProps) {
   const [testingCredId, setTestingCredId] = useState('');
   const [testResults, setTestResults] = useState<Record<string, { ok: boolean; summary: string }>>({});
   const [geekOpen, setGeekOpen] = useState(false);
+  const [, setLangTick] = useState(() => getLangPref());
+
+  useEffect(() => {
+    const onLang = (ev: any) => setLangTick(String(ev?.detail || getLangPref()));
+    window.addEventListener('dsh:lang-change', onLang);
+    return () => window.removeEventListener('dsh:lang-change', onLang);
+  }, []);
+
+  // Re-apply English DOM translation after every Preact commit while sheet is open
+  useEffect(() => {
+    if (!open) return;
+    const el = document.getElementById('voiceLabSheet');
+    if (el) applyLangToDom(el, getLangPref());
+  });
 
   useEffect(() => {
     if (!open) return;
@@ -404,7 +419,9 @@ export function VoiceProviderSheet(props: VoiceProviderSheetProps) {
   };
 
   const handleDeleteProvider = async (cred: PublicCredential) => {
-    if (!confirm(`确定删除 Provider「${cred.label}」吗？\n删除后如果正在使用它，对应环节会自动回退。`)) {
+    const zhConfirm = `确定删除 Provider「${cred.label}」吗？\n删除后如果正在使用它，对应环节会自动回退。`;
+    const confirmMsg = getLangPref() === 'en' ? translateZhStringToEn(zhConfirm) : zhConfirm;
+    if (!confirm(confirmMsg)) {
       return;
     }
     try {
@@ -702,7 +719,7 @@ export function VoiceProviderSheet(props: VoiceProviderSheetProps) {
                   class="vp-alert-banner"
                   onClick={openAddEditor}
                 >
-                  <span>{missingStages.join(' / ')} 密钥缺失</span>
+                  <span>{`${missingStages.join(' / ')} 密钥缺失`}</span>
                   <span>去添加 ›</span>
                 </button>
               )}
@@ -802,7 +819,7 @@ export function VoiceProviderSheet(props: VoiceProviderSheetProps) {
 
             {/* 3. Provider 列表（DSH 统一协议列表） */}
             <div class="vp-sec-head" id="voiceProviderListHeader">
-              <span class="vp-sec-label">Provider 列表 ({creds.length})</span>
+              <span class="vp-sec-label">{`Provider 列表 (${creds.length})`}</span>
               <button
                 type="button"
                 id="voiceAddProviderBtn"
@@ -1179,7 +1196,7 @@ export function VoiceProviderSheet(props: VoiceProviderSheetProps) {
 
                 {draft.id && editingCredSummary && (
                   <div class="vp-saved-key-note">
-                    已加密保存 ({editingCredSummary}) · 留空保持原密钥
+                    {`已加密保存 (${editingCredSummary}) · 留空保持原密钥`}
                   </div>
                 )}
 

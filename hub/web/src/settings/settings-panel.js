@@ -111,6 +111,10 @@ export function createSettingsPanel(deps) {
     const meta = computePushBadgeMeta(statusText);
     badge.textContent = meta.text;
     badge.className = `ios-row-val tone-${meta.tone}`;
+    const langPref = deps.getState?.()?.langPref;
+    if (langPref === 'en' && typeof deps.applyLangToDom === 'function') {
+      deps.applyLangToDom(badge, langPref);
+    }
   }
 
   function buildSignature(state, voiceCompact) {
@@ -538,7 +542,7 @@ export function createSettingsPanel(deps) {
     const sessCount = (h.bridgeState?.tasks || []).length;
     const runCount = h.runningCount || 0;
     const turboShort = h.bridgeState?.turbo?.enabled ? '极速同步' : '轮询模式';
-    const shortFp = (h.fingerprint || '已锁定').slice(0, 14);
+    const shortFp = (h.fingerprint || (state.langPref === 'en' ? 'Pinned' : '已锁定')).slice(0, 14);
     const hostVer = String(h.bridgeState?.agentVersion || '');
     const isUpgradingHost = Boolean(upgradingHostMap[h.hostId] && Date.now() - upgradingHostMap[h.hostId] < 45000);
     const isHostOutdated = Boolean(isHostLive && !isRevoked && (!hostVer || deps.compareSemver(hostVer, hubVer) < 0));

@@ -1,5 +1,6 @@
 import { h, Fragment } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
+import { applyLangToDom, getLangPref } from '../utils/i18n.js';
 import {
   WalkWavRecorder,
   WalkSpeechPlayer,
@@ -153,10 +154,40 @@ export function VoiceCopilotSheets() {
 
   // Bench / Dry-Run Lab state
   const [benchDryRun, setBenchDryRun] = useState(true);
-  const [benchText, setBenchText] = useState('现在有哪些待审批和运行中的任务？');
+  const [benchText, setBenchText] = useState(() =>
+    getLangPref() === 'en'
+      ? 'What pending approvals and running tasks do I have?'
+      : '现在有哪些待审批和运行中的任务？',
+  );
   const [benchRunning, setBenchRunning] = useState(false);
   const [benchRecording, setBenchRecording] = useState(false);
   const [benchReport, setBenchReport] = useState<any>(null);
+  const [, setLangTick] = useState(() => getLangPref());
+
+  useEffect(() => {
+    const onLang = (ev: any) => {
+      const next = String(ev?.detail || getLangPref());
+      setLangTick(next);
+      setBenchText(prev => {
+        if (next === 'en' && prev === '现在有哪些待审批和运行中的任务？') {
+          return 'What pending approvals and running tasks do I have?';
+        }
+        if (next === 'zh' && prev === 'What pending approvals and running tasks do I have?') {
+          return '现在有哪些待审批和运行中的任务？';
+        }
+        return prev;
+      });
+    };
+    window.addEventListener('dsh:lang-change', onLang);
+    return () => window.removeEventListener('dsh:lang-change', onLang);
+  }, []);
+
+  // Re-apply English DOM translation after every Preact commit while Walk Mode overlay is open
+  useEffect(() => {
+    if (!walkOpen) return;
+    const el = document.getElementById('walkModeOverlay');
+    if (el) applyLangToDom(el, getLangPref());
+  });
 
   const recorderRef = useRef<WalkWavRecorder | null>(null);
   const playerRef = useRef<WalkSpeechPlayer | null>(null);
@@ -1111,7 +1142,7 @@ export function VoiceCopilotSheets() {
                 <span>▾</span>
               </button>
               {hubSummary.approvals.length > 0 && (
-                <span class="walk-badge-warn">⚠️ {hubSummary.approvals.length} 待审批</span>
+                <span class="walk-badge-warn">{`⚠️ ${hubSummary.approvals.length} 待审批`}</span>
               )}
               {nativeShell && <span class="walk-badge-subtle">🔒 后台常驻</span>}
               {wakeLocked && <span class="walk-badge-subtle">🔆 常亮</span>}
@@ -1159,11 +1190,11 @@ export function VoiceCopilotSheets() {
               <div class="walk-pin-card" onClick={e => e.stopPropagation()}>
                 <div class="walk-pin-head">
                   <span>🔐 高危操作确认码</span>
-                  <span class="walk-pin-timer">{pinSecLeft}s 后过期</span>
+                  <span class="walk-pin-timer">{`${pinSecLeft}s 后过期`}</span>
                 </div>
                 <div class="walk-pin-digits">{activePin.pin.split('').join('  ')}</div>
                 <div class="walk-pin-desc">
-                  {activePin.summary || activePin.code} · 请念出上方 3 位数字放行，或说「拒绝」
+                  {`${activePin.summary || activePin.code} · 请念出上方 3 位数字放行，或说「拒绝」`}
                 </div>
                 <div class="walk-pin-actions">
                   <button type="button" class="walk-chip-danger" onClick={() => void handleClearPin(true)}>
@@ -1177,7 +1208,7 @@ export function VoiceCopilotSheets() {
             )}
 
             <div class="walk-subtitle-box">
-              {lastUserText && <div class="walk-user-line">你：{lastUserText}</div>}
+              {lastUserText && <div class="walk-user-line">{`你：${lastUserText}`}</div>}
               <div class="walk-reply-line">{lastReplyText}</div>
               {(lastActionBadge || lastLatencyBadge) && (
                 <div class="walk-meta-row">
@@ -1189,14 +1220,14 @@ export function VoiceCopilotSheets() {
 
             <div class="walk-quick-strip" onClick={e => e.stopPropagation()}>
               <button type="button" class="walk-chip-btn" onClick={() => void runBriefingTurn()}>
-                ⏭ 汇报最新进度 ({hubSummary.approvals.length} 审批 · {hubSummary.runningCount} 运行中)
+                {`⏭ 汇报最新进度 (${hubSummary.approvals.length} 审批 · ${hubSummary.runningCount} 运行中)`}
               </button>
               <button
                 type="button"
                 class="walk-chip-btn"
                 onClick={() => setWalkTextInputOpen(v => !v)}
               >
-                ⌨️ {walkTextInputOpen ? '收起打字' : '静音打字'}
+                {walkTextInputOpen ? '⌨️ 收起打字' : '⌨️ 静音打字'}
               </button>
             </div>
 
@@ -1265,7 +1296,7 @@ export function VoiceCopilotSheets() {
                   void updatePrefPatch({ proactiveBriefing: next });
                 }}
               >
-                🔔 播报：{config.prefs.proactiveBriefing === 'approvals' ? '仅审批' : config.prefs.proactiveBriefing === 'all' ? '审批+完成' : '手动'}
+                {`🔔 播报：${config.prefs.proactiveBriefing === 'approvals' ? '仅审批' : config.prefs.proactiveBriefing === 'all' ? '审批+完成' : '手动'}`}
               </button>
               <button
                 type="button"

@@ -759,6 +759,9 @@ export function initHubController() {
     triageCtrl?.onLangChanged?.();
     renderAll();
     applyLangToDom(document.body, langPref);
+    try {
+      window.dispatchEvent(new CustomEvent('dsh:lang-change', { detail: langPref }));
+    } catch { }
   }
   function toggleLangPreference() {
     setLangPreference(langPref === 'en' ? 'zh' : 'en');
