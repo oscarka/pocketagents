@@ -7,6 +7,8 @@ on:
     paths:
       - "firmware/folotoy-passport/**"
       - "hub/device-api.js"
+      - "hub/voice-copilot.js"
+      - "hub/server.js"
       - "dsh-feishu/test/device-lite-api.test.js"
       - ".github/workflows/passport-firmware.yml"
   workflow_dispatch:
@@ -29,7 +31,7 @@ permissions:
 
 jobs:
   host-tests:
-    name: Host C & Hub Device API Tests
+    name: Host C, Hub API Tests & Full-ZH Font Gen
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -49,6 +51,29 @@ jobs:
             -o /tmp/test_pa_model
           /tmp/test_pa_model
 
+      - name: Generate compact 3,755-Hanzi LVGL 9.5 Chinese fonts (16px + 12px)
+        run: |
+          set -euo pipefail
+          FONT_PATH="/tmp/SourceHanSansSC-Regular.otf"
+          if ! curl -fsSL --retry 3 -o "$FONT_PATH" \
+            "https://github.com/adobe-fonts/source-han-sans/raw/release/OTF/SimplifiedChinese/SourceHanSansSC-Regular.otf"; then
+            echo "Fallback: installing fonts-noto-cjk..."
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq --no-install-recommends fonts-noto-cjk
+            FONT_PATH=""
+          fi
+          PA_ZH_FONT_FILE="$FONT_PATH" python3 firmware/folotoy-passport/tools/gen_zh_fonts.py
+          ls -lh firmware/folotoy-passport/main/pa_font_zh_16.c firmware/folotoy-passport/main/pa_font_zh_12.c
+
+      - name: Upload generated Chinese font C sources
+        uses: actions/upload-artifact@v4
+        with:
+          name: passport-zh-fonts
+          path: |
+            firmware/folotoy-passport/main/pa_font_zh_16.c
+            firmware/folotoy-passport/main/pa_font_zh_12.c
+          retention-days: 1
+
   build-esp32c3:
     name: Build ESP32-C3 Merged Firmware
     needs: host-tests
@@ -57,6 +82,15 @@ jobs:
       image: espressif/idf:v5.5.3
     steps:
       - uses: actions/checkout@v4
+
+      - name: Download generated Chinese fonts
+        uses: actions/download-artifact@v4
+        with:
+          name: passport-zh-fonts
+          path: firmware/folotoy-passport/main
+
+      - name: Verify Chinese font sources present
+        run: ls -lh firmware/folotoy-passport/main/pa_font_zh_*.c
 
       - name: Prepare optional workflow_dispatch sdkconfig overlay
         working-directory: firmware/folotoy-passport

@@ -1886,12 +1886,15 @@ export function createHubServer({
         const deviceSessionId = `device:${String(body?.sessionId || urlObj.searchParams.get('sessionId') || curDevice?.id || 'default').slice(0, 48)}`
 
         if (method === 'GET' && pathname === '/api/device/digest') {
+          await voiceVault.init()
           const digest = buildDeviceDigest(hub, {
             maxApprovals: urlObj.searchParams.get('maxApprovals'),
             maxTasks: urlObj.searchParams.get('maxTasks'),
             since: urlObj.searchParams.get('since') || '',
             activeHostId: urlObj.searchParams.get('hostId') || '',
             activeSessionId: urlObj.searchParams.get('agentId') || '',
+            lang: urlObj.searchParams.get('lang') || 'zh',
+            voiceCopilot,
             nowMs: hub.now ? hub.now() : Date.now(),
           })
           return { status: 200, json: digest }

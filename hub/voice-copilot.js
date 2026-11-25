@@ -2463,4 +2463,106 @@ export class VoiceCopilotEngine {
       summary: res.ok ? `✅ 连通正常 (${res.latencyMs}ms · ${res.model || model})` : `❌ ${res.error}`,
     }
   }
+
+  resolveDeviceBrainStage(profileId = '') {
+    const profile = this._resolveEffectiveProfile(profileId, null)
+    const brain = profile?.brain || {}
+    const provider = String(brain.provider || '').toLowerCase()
+    if (provider === 'gemini' || provider === 'openai_compat') {
+      const cred = this.vault.resolveCredential({ provider, credId: brain.credId })
+      if (cred) {
+        return {
+          provider,
+          credId: cred.id,
+          model: brain.model || cred.defaultModel || (provider === 'gemini' ? 'gemini-2.5-flash' : 'gpt-4o-mini'),
+          thinkingLevel: 'off',
+          maxTokens: 180,
+        }
+      }
+    }
+    // Fallback: reuse any configured Gemini or OpenAI-compat credential in BYOK vault
+    for (const fallbackProvider of ['gemini', 'openai_compat']) {
+      const cred = this.vault.resolveCredential({ provider: fallbackProvider })
+      if (cred) {
+        return {
+          provider: fallbackProvider,
+          credId: cred.id,
+          model: cred.defaultModel || (fallbackProvider === 'gemini' ? 'gemini-2.5-flash' : 'gpt-4o-mini'),
+          thinkingLevel: 'off',
+          maxTokens: 180,
+        }
+      }
+    }
+    return null
+  }
+
+  /**
+   * Compact, non-hallucinating Chinese summary & option translation for tiny
+   * edge-device displays (FoloToy AI Passport, Watch, E-ink). Never modifies raw commands.
+   */
+  async summarizeDeviceApprovalZh({
+    title = '',
+    cmd = '',
+    tool = '',
+    kind = 'approval',
+    risk = 'L1',
+    options = [],
+    profileId = '',
+  } = {}) {
+    const stageCfg = this.resolveDeviceBrainStage(profileId)
+    if (!stageCfg) {
+      return { ok: false, skipped: true, reason: 'no_cloud_brain' }
+    }
+    const cleanOptions = Array.isArray(options) ? options.slice(0, 4).map(s => String(s || '').trim()) : []
+    const systemPrompt = [
+      '你是 240x320 极小硬件屏幕的中文审批翻译助手。',
+      '请把 AI 编程工具弹出的英文审批或英文多选题浓缩成一眼能看懂的中文大白话。',
+      '只返回严格 JSON：{"title":"<=14字中文意图","options":["<=10字中文选项",...]}。',
+      '规则：',
+      '1) options 数量必须与输入完全一致（输入为空数组则返回 []），顺序不可调换；',
+      '2) 若为 L2 高危命令，title 必须直白点出危险动作（如删除、强推、清空库），严禁弱化风险；',
+      '3) 禁止输出任何 Markdown 代码块或多余解释。',
+    ].join('\n')
+    const userPayload = JSON.stringify({
+      kind,
+      risk,
+      tool,
+      title: String(title || '').slice(0, 120),
+      cmd: String(cmd || '').slice(0, 160),
+      options: cleanOptions,
+    })
+    const res = await this._callBrainModel(stageCfg, {
+      systemPrompt,
+      userText: userPayload,
+    })
+    if (!res.ok || !res.rawText) {
+      return { ok: false, error: res.error || 'empty_brain_reply' }
+    }
+    const cleaned = String(res.rawText)
+      .replace(/^```(?:json)?\s*/i, '')
+      .replace(/\s*```$/i, '')
+      .trim()
+    try {
+      const parsed = JSON.parse(cleaned)
+      const outTitle = String(parsed?.title || '').replace(/\s+/g, ' ').trim().slice(0, 28)
+      const rawOutOpts = Array.isArray(parsed?.options) ? parsed.options : []
+      const outOptions =
+        cleanOptions.length > 0 && rawOutOpts.length === cleanOptions.length
+          ? rawOutOpts.map((o, i) => String(o || cleanOptions[i]).replace(/\s+/g, ' ').trim().slice(0, 18))
+          : cleanOptions
+      if (!outTitle && outOptions.length === 0) {
+        return { ok: false, error: 'empty_parsed_summary' }
+      }
+      return {
+        ok: true,
+        title: outTitle,
+        options: outOptions,
+        provider: res.provider,
+        model: res.model,
+        latencyMs: res.latencyMs,
+      }
+    } catch {
+      return { ok: false, error: 'invalid_json_summary' }
+    }
+  }
 }

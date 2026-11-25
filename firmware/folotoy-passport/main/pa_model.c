@@ -553,7 +553,7 @@ void pa_state_init(pa_state_t *st)
     memset(st, 0, sizeof(*st));
     st->battery_soc = -1;
     st->net_status = PA_NET_CONNECTING;
-    copy_utf8_trunc(st->net_detail, sizeof(st->net_detail), "Connecting Wi-Fi...");
+    copy_utf8_trunc(st->net_detail, sizeof(st->net_detail), "正在连接 Wi-Fi...");
     st->screen = PA_SCREEN_DASHBOARD;
 }
 
@@ -658,8 +658,8 @@ pa_chime_t pa_state_apply_action_result(pa_state_t *st, const pa_action_result_t
                             st->digest.approvals[st->selected_approval].code);
         }
         char msg[80];
-        snprintf(msg, sizeof(msg), "L2 LOCKED! Hold OK & say %s",
-                 res->confirm_pin[0] ? res->confirm_pin : "PIN");
+        snprintf(msg, sizeof(msg), "高危锁定！长按OK报码 %s",
+                 res->confirm_pin[0] ? res->confirm_pin : "确认码");
         set_toast(st, msg, true, now_ms, 8000);
         return PA_CHIME_WARN_L2;
     }
@@ -667,12 +667,12 @@ pa_chime_t pa_state_apply_action_result(pa_state_t *st, const pa_action_result_t
     if (res->ok) {
         st->l2_pin_active = false;
         st->l2_pin_code[0] = '\0';
-        set_toast(st, res->message[0] ? res->message : (was_deny ? "Denied" : "Approved"),
+        set_toast(st, res->message[0] ? res->message : (was_deny ? "已拒绝" : "已放行"),
                   false, now_ms, 2600);
         return was_deny ? PA_CHIME_DENY : PA_CHIME_OK;
     }
 
-    set_toast(st, res->message[0] ? res->message : "Action failed", true, now_ms, 3200);
+    set_toast(st, res->message[0] ? res->message : "执行失败", true, now_ms, 3200);
     return PA_CHIME_DENY;
 }
 
@@ -682,20 +682,20 @@ pa_chime_t pa_state_apply_voice_result(pa_state_t *st, const pa_voice_result_t *
     st->busy = false;
     st->voice_phase = PA_VOICE_REPLY;
     copy_utf8_trunc(st->voice_transcript, sizeof(st->voice_transcript),
-                    res->transcript[0] ? res->transcript : "(voice)");
+                    res->transcript[0] ? res->transcript : "(语音)");
     copy_utf8_trunc(st->voice_reply, sizeof(st->voice_reply),
-                    res->reply[0] ? res->reply : (res->ok ? "Done" : "Voice failed"));
+                    res->reply[0] ? res->reply : (res->ok ? "已处理" : "语音处理失败"));
 
     if (res->requires_pin && res->pin[0]) {
         st->l2_pin_active = true;
         copy_utf8_trunc(st->l2_pin_code, sizeof(st->l2_pin_code), res->pin);
-        set_toast(st, "L2 PIN required", true, now_ms, 5000);
+        set_toast(st, "需要高危确认码", true, now_ms, 5000);
         return PA_CHIME_WARN_L2;
     }
     if (res->ok && res->executed) {
         st->l2_pin_active = false;
         st->l2_pin_code[0] = '\0';
-        set_toast(st, "Voice command executed", false, now_ms, 2400);
+        set_toast(st, "语音指令已执行", false, now_ms, 2400);
         return PA_CHIME_OK;
     }
     return res->ok ? PA_CHIME_OK : PA_CHIME_DENY;
@@ -724,7 +724,7 @@ pa_dispatch_t pa_state_on_key(pa_state_t *st, pa_key_t key, pa_key_ev_t ev, uint
         st->screen = PA_SCREEN_VOICE;
         st->voice_phase = PA_VOICE_RECORDING;
         st->voice_transcript[0] = '\0';
-        copy_utf8_trunc(st->voice_reply, sizeof(st->voice_reply), "Listening... release OK to send");
+        copy_utf8_trunc(st->voice_reply, sizeof(st->voice_reply), "录音中... 松开OK发送");
         out.cmd = PA_CMD_VOICE_START;
         out.chime = PA_CHIME_PTT_START;
         out.ui_dirty = true;
@@ -750,7 +750,7 @@ pa_dispatch_t pa_state_on_key(pa_state_t *st, pa_key_t key, pa_key_ev_t ev, uint
                 st->screen = PA_SCREEN_APPROVAL;
                 out.ui_dirty = true;
             } else {
-                set_toast(st, "Syncing...", false, now_ms, 1200);
+                set_toast(st, "正在同步...", false, now_ms, 1200);
                 out.cmd = PA_CMD_FORCE_REFRESH;
                 out.ui_dirty = true;
             }
@@ -816,7 +816,7 @@ pa_dispatch_t pa_state_on_key(pa_state_t *st, pa_key_t key, pa_key_ev_t ev, uint
                 out.slot = cur->slot;
                 copy_utf8_trunc(out.code, sizeof(out.code), cur->code);
                 out.option_index = st->selected_option + 1;
-                set_toast(st, "Sending choice...", false, now_ms, 2000);
+                set_toast(st, "正在提交选项...", false, now_ms, 2000);
                 out.ui_dirty = true;
                 return out;
             }
@@ -855,7 +855,7 @@ pa_dispatch_t pa_state_on_key(pa_state_t *st, pa_key_t key, pa_key_ev_t ev, uint
                 out.cmd = PA_CMD_APPROVE;
                 out.slot = cur->slot;
                 copy_utf8_trunc(out.code, sizeof(out.code), cur->code);
-                set_toast(st, cur->risk == PA_RISK_L2 ? "Checking L2 guard..." : "Approving...",
+                set_toast(st, cur->risk == PA_RISK_L2 ? "正在核验高危..." : "正在放行...",
                           false, now_ms, 2500);
                 out.ui_dirty = true;
                 return out;
@@ -866,7 +866,7 @@ pa_dispatch_t pa_state_on_key(pa_state_t *st, pa_key_t key, pa_key_ev_t ev, uint
                 out.cmd = PA_CMD_DENY;
                 out.slot = cur->slot;
                 copy_utf8_trunc(out.code, sizeof(out.code), cur->code);
-                set_toast(st, "Denying...", false, now_ms, 2500);
+                set_toast(st, "正在拒绝...", false, now_ms, 2500);
                 out.ui_dirty = true;
                 return out;
             }

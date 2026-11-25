@@ -13,6 +13,21 @@ const DEFAULT_MAX_TASKS = 5
 const MAX_ALLOWED_APPROVALS = 8
 const MAX_ALLOWED_TASKS = 8
 
+const ZH_CHAR_RE = /[\u4e00-\u9fff]/
+const LATIN_WORD_RE = /[A-Za-z]{2,}/
+
+// Per-approval async small-model localization cache (LRU, 10m TTL, 30s error backoff)
+const SUMMARY_CACHE_MAX = 120
+const SUMMARY_CACHE_TTL_MS = 10 * 60_000
+const SUMMARY_ERROR_BACKOFF_MS = 30_000
+const summaryCache = new Map()
+const summaryInflight = new Map()
+
+export function resetDeviceSummaryCache() {
+  summaryCache.clear()
+  summaryInflight.clear()
+}
+
 function compactLine(value, maxChars = 48) {
   const clean = String(value || '')
     .replace(/[\r\n\t]+/g, ' ')
@@ -24,7 +39,86 @@ function compactLine(value, maxChars = 48) {
   return `${chars.slice(0, Math.max(1, maxChars - 1)).join('')}…`
 }
 
-function extractCompactOptions(approval) {
+function hasChinese(text = '') {
+  return ZH_CHAR_RE.test(String(text || ''))
+}
+
+function localizeToolNameZh(rawTool = '', kind = 'approval') {
+  const t = String(rawTool || '').trim()
+  const lower = t.toLowerCase()
+  if (kind === 'question' || lower === 'ask_question' || lower === 'ask_user_question' || lower === 'question') {
+    return '请你选择'
+  }
+  if (lower === 'bash' || lower === 'run_command' || lower === 'shell' || lower === 'terminal' || lower === 'exec') {
+    return '终端命令'
+  }
+  if (lower === 'edit' || lower === 'edit_file' || lower === 'replace_file_content' || lower === 'multi_replace_file_content') {
+    return '修改代码'
+  }
+  if (lower === 'write' || lower === 'write_file' || lower === 'write_to_file') {
+    return '写入文件'
+  }
+  if (lower === 'read' || lower === 'read_file' || lower === 'view_file') {
+    return '读取文件'
+  }
+  if (lower.startsWith('browser') || lower.includes('upload')) {
+    return '浏览器操作'
+  }
+  if (lower.startsWith('mcp_') || lower.startsWith('mcp:')) {
+    return '插件工具'
+  }
+  if (!t) return '工具审批'
+  return compactLine(t, 12)
+}
+
+function localizeOptionRuleZh(rawOpt = '') {
+  const s = String(rawOpt || '').trim()
+  if (!s || hasChinese(s)) return compactLine(s, 18)
+  const lower = s.toLowerCase()
+  if (/^(yes,?\s*)?(allow|approve)\s*(this\s*time|once)?$/.test(lower)) return '本次允许'
+  if (/^always\s*allow|^allow\s*always/.test(lower)) return '总是允许'
+  if (/^allow\s*(in\s*this\s*)?(chat|session|workspace)/.test(lower)) return '本会话允许'
+  if (/^(no|deny|reject|decline)\b/.test(lower)) return '拒绝'
+  if (/^cancel\b/.test(lower)) return '取消'
+  if (/^skip\b/.test(lower)) return '跳过'
+  return ''
+}
+
+function inferDeterministicCommandTitleZh({ cmd = '', title = '', tool = '', risk = 'L1' } = {}) {
+  const blob = `${cmd} ${title}`.trim()
+  const lower = blob.toLowerCase()
+  if (risk === 'L2') {
+    if (/\bgit\s+push\b.*(--force|-f\b)/.test(lower) && /\brm\s+-[a-z]*r/.test(lower)) {
+      return '高危：删文件并强推代码'
+    }
+    if (/\bgit\s+push\b.*(--force|-f\b)/.test(lower)) return '高危：强制推送 Git 仓库'
+    if (/\brm\s+-[a-z]*r|\brm\s+-rf/.test(lower)) return '高危：递归强制删除文件'
+    if (/\bdrop\s+(table|database|schema)|\btruncate\b|\bdelete\s+from\b/.test(lower)) return '高危：删除/清空数据库'
+    if (/\bsudo\b/.test(lower)) return '高危：管理员权限命令'
+    if (/\bdeploy\b|\bterraform\b|\bkubectl\s+delete/.test(lower)) return '高危：生产环境变更'
+    return '高危操作，请核对原文'
+  }
+  if (/\b(npm|pnpm|yarn)\s+test\b|\bnode\s+--test\b|\bpytest\b|\bvitest\b|\bjest\b|\bcargo\s+test\b|\bgo\s+test\b/.test(lower)) {
+    return '运行自动化测试'
+  }
+  if (/\b(npm|pnpm|yarn)\s+run\s+build\b|\bvite\s+build\b|\btsc\b|\bidf\.py\s+build\b|\bcargo\s+build\b/.test(lower)) {
+    return '执行项目构建'
+  }
+  if (/\b(npm|pnpm|yarn)\s+(install|add|i)\b|\bpip\s+install\b/.test(lower)) {
+    return '安装项目依赖'
+  }
+  if (/\bgit\s+commit\b/.test(lower)) return '提交代码变更'
+  if (/\bgit\s+push\b/.test(lower)) return '推送代码到远程'
+  if (/\bgit\s+(status|diff|log|branch)\b/.test(lower)) return '查看 Git 状态'
+  if (/\bdocker\s+/.test(lower)) return '执行容器命令'
+  if (/\bcurl\b|\bwget\b/.test(lower)) return '发起网络请求'
+  if (/upload/i.test(blob) && /browser/i.test(tool)) return '浏览器上传文件'
+  if (tool.toLowerCase() === 'edit' || tool.toLowerCase() === 'edit_file') return '修改项目代码文件'
+  if (tool.toLowerCase() === 'write' || tool.toLowerCase() === 'write_file') return '写入项目文件'
+  return ''
+}
+
+function extractRawOptions(approval) {
   if (approval.kind === 'question' && Array.isArray(approval.questions) && approval.questions.length > 0) {
     const q0 = approval.questions[0]
     const rawOpts = Array.isArray(q0?.options) ? q0.options : []
@@ -63,6 +157,169 @@ function normalizePositiveInt(value, fallback, min, max) {
   return Math.max(min, Math.min(max, Math.round(n)))
 }
 
+function pruneSummaryCache(nowMs) {
+  for (const [k, entry] of summaryCache.entries()) {
+    if (nowMs > entry.expiresAt) summaryCache.delete(k)
+  }
+  while (summaryCache.size > SUMMARY_CACHE_MAX) {
+    const oldestKey = summaryCache.keys().next().value
+    if (!oldestKey) break
+    summaryCache.delete(oldestKey)
+  }
+}
+
+/**
+ * 3-Tier Practical Localization for an approval item:
+ *   Tier 1 (0ms, $0): Already Chinese -> pass through untouched
+ *   Tier 2 (0ms, $0): Deterministic rule map for common tools/commands/buttons
+ *   Tier 3 (async, cached): BYOK small-model Chinese summary/options for complex English items
+ * Always keeps raw `cmd` verbatim so dangerous commands are never masked.
+ */
+function localizeApprovalForDevice(approval, { lang = 'zh', voiceCopilot = null, nowMs = Date.now() } = {}) {
+  const rawTitle = compactLine(approval.title || approval.promptTitle || approval.toolName || 'Pending approval', 44)
+  const rawCmd = extractQuestionPrompt(approval)
+  const rawOptions = extractRawOptions(approval)
+  const rawTool = compactLine(approval.toolName || (approval.kind === 'question' ? 'question' : 'tool'), 20)
+  const risk = approval.riskLevel || 'L1'
+  const kind = approval.kind === 'question' ? 'question' : 'approval'
+
+  if (lang === 'en') {
+    return {
+      tool: rawTool,
+      title: rawTitle,
+      cmd: rawCmd,
+      options: rawOptions,
+      zhSource: 'en',
+    }
+  }
+
+  const toolZh = localizeToolNameZh(rawTool, kind)
+
+  // Tier 1: Already Chinese -> 0ms pass-through, NEVER waste an LLM call
+  const titleAlreadyZh = hasChinese(rawTitle)
+  const optsAlreadyZh = rawOptions.length === 0 || rawOptions.every(o => hasChinese(o))
+  if (titleAlreadyZh && optsAlreadyZh) {
+    return {
+      tool: toolZh,
+      title: rawTitle,
+      cmd: rawCmd,
+      options: rawOptions,
+      zhSource: 'native_zh',
+    }
+  }
+
+  // Tier 2: Deterministic local rules (0ms, $0)
+  const ruleTitle = titleAlreadyZh
+    ? rawTitle
+    : inferDeterministicCommandTitleZh({ cmd: rawCmd, title: rawTitle, tool: rawTool, risk })
+  const ruleOptions = rawOptions.map(o => localizeOptionRuleZh(o) || o)
+  const allOptionsLocalized = rawOptions.length === 0 || ruleOptions.every(o => hasChinese(o))
+
+  const needsLlmTitle = !titleAlreadyZh && !ruleTitle && LATIN_WORD_RE.test(rawTitle)
+  const needsLlmOptions = kind === 'question' && !allOptionsLocalized
+
+  if (!needsLlmTitle && !needsLlmOptions) {
+    return {
+      tool: toolZh,
+      title: compactLine(ruleTitle || rawTitle, 32),
+      cmd: rawCmd,
+      options: ruleOptions,
+      zhSource: 'rule',
+    }
+  }
+
+  // Tier 3: Async cached BYOK small-model translation (non-blocking!)
+  const fingerprint = createHash('sha256')
+    .update(JSON.stringify([rawTitle, rawCmd, rawOptions]))
+    .digest('hex')
+    .slice(0, 12)
+  const cacheKey = `${approval.hostId}:${approval.code}:${fingerprint}`
+
+  pruneSummaryCache(nowMs)
+  const cached = summaryCache.get(cacheKey)
+  if (cached && cached.ok) {
+    // Safety invariant: L2 commands MUST retain explicit high-risk marker and verbatim cmd
+    let finalTitle = cached.title || ruleTitle || rawTitle
+    if (risk === 'L2' && !/高危|危险|强推|删|清空/.test(finalTitle)) {
+      finalTitle = `高危：${finalTitle}`
+    }
+    return {
+      tool: toolZh,
+      title: compactLine(finalTitle, 32),
+      cmd: rawCmd,
+      options:
+        cached.options && cached.options.length === rawOptions.length
+          ? cached.options
+          : ruleOptions,
+      zhSource: 'llm_cache',
+    }
+  }
+
+  // Trigger ONE deduplicated background small-model call if BYOK brain is available and not backed off
+  const backedOff = Boolean(cached && !cached.ok && nowMs < cached.expiresAt)
+  if (
+    !backedOff &&
+    !summaryInflight.has(cacheKey) &&
+    voiceCopilot &&
+    typeof voiceCopilot.summarizeDeviceApprovalZh === 'function' &&
+    typeof voiceCopilot.resolveDeviceBrainStage === 'function' &&
+    voiceCopilot.resolveDeviceBrainStage()
+  ) {
+    const promise = voiceCopilot
+      .summarizeDeviceApprovalZh({
+        title: rawTitle,
+        cmd: rawCmd,
+        tool: rawTool,
+        kind,
+        risk,
+        options: kind === 'question' ? rawOptions : [],
+      })
+      .then(res => {
+        const doneAt = Math.max(nowMs, voiceCopilot?.now?.() || Date.now())
+        if (res?.ok) {
+          summaryCache.set(cacheKey, {
+            ok: true,
+            title: res.title || '',
+            options: Array.isArray(res.options) && res.options.length === rawOptions.length ? res.options : null,
+            expiresAt: doneAt + SUMMARY_CACHE_TTL_MS,
+          })
+        } else {
+          summaryCache.set(cacheKey, {
+            ok: false,
+            expiresAt: doneAt + SUMMARY_ERROR_BACKOFF_MS,
+          })
+        }
+      })
+      .catch(() => {
+        const errAt = Math.max(nowMs, voiceCopilot?.now?.() || Date.now())
+        summaryCache.set(cacheKey, {
+          ok: false,
+          expiresAt: errAt + SUMMARY_ERROR_BACKOFF_MS,
+        })
+      })
+      .finally(() => {
+        summaryInflight.delete(cacheKey)
+      })
+    summaryInflight.set(cacheKey, promise)
+  }
+
+  return {
+    tool: toolZh,
+    title: compactLine(ruleTitle || rawTitle, 36),
+    cmd: rawCmd,
+    options: ruleOptions,
+    zhSource: 'pending_llm',
+  }
+}
+
+/**
+ * Wait for any active background Tier-3 localization promises (used in deterministic tests).
+ */
+export async function flushDeviceSummaryTasks() {
+  if (summaryInflight.size === 0) return
+  await Promise.allSettled([...summaryInflight.values()])
+}
+
 /**
  * Build a tiny (< 3 KB), deterministic, MCU-safe digest of current hosts, tasks,
  * and pending approvals. Reusable across FoloToy AI Passport, ESP32-S3 badges,
@@ -76,32 +333,38 @@ export function buildDeviceDigest(
     since = '',
     activeHostId = '',
     activeSessionId = '',
+    lang = 'zh',
+    voiceCopilot = null,
     nowMs = Date.now(),
   } = {},
 ) {
   const ctx = buildDynamicVoiceContext(hub, { activeHostId, activeSessionId })
   const approvalCap = normalizePositiveInt(maxApprovals, DEFAULT_MAX_APPROVALS, 1, MAX_ALLOWED_APPROVALS)
   const taskCap = normalizePositiveInt(maxTasks, DEFAULT_MAX_TASKS, 1, MAX_ALLOWED_TASKS)
+  const effectiveLang = String(lang || 'zh').toLowerCase() === 'en' ? 'en' : 'zh'
 
   const hostsOnline = ctx.hosts.filter(h => h.online).length
   const hostsTotal = ctx.hosts.length
   const runningCount = ctx.tasks.filter(t => t.status === 'running').length
   const pendingCount = ctx.pendingApprovals.length
 
-  const approvals = ctx.pendingApprovals.slice(0, approvalCap).map(a => ({
-    slot: a.slot,
-    hostId: compactLine(a.hostId, 32),
-    hostName: compactLine(a.hostName, 20),
-    code: compactLine(a.code, 32),
-    agentId: compactLine(a.agentId, 48),
-    session: compactLine(a.sessionTitle || a.hostName, 26),
-    kind: a.kind === 'question' ? 'question' : 'approval',
-    tool: compactLine(a.toolName || (a.kind === 'question' ? 'question' : 'tool'), 20),
-    risk: a.riskLevel || 'L1',
-    title: compactLine(a.title || a.promptTitle || a.toolName || 'Pending approval', 44),
-    cmd: extractQuestionPrompt(a),
-    options: extractCompactOptions(a),
-  }))
+  const approvals = ctx.pendingApprovals.slice(0, approvalCap).map(a => {
+    const loc = localizeApprovalForDevice(a, { lang: effectiveLang, voiceCopilot, nowMs })
+    return {
+      slot: a.slot,
+      hostId: compactLine(a.hostId, 32),
+      hostName: compactLine(a.hostName, 20),
+      code: compactLine(a.code, 32),
+      agentId: compactLine(a.agentId, 48),
+      session: compactLine(a.sessionTitle || a.hostName, 26),
+      kind: a.kind === 'question' ? 'question' : 'approval',
+      tool: loc.tool,
+      risk: a.riskLevel || 'L1',
+      title: loc.title,
+      cmd: loc.cmd,
+      options: loc.options,
+    }
+  })
 
   const tasks = ctx.tasks.slice(0, taskCap).map(t => ({
     hostId: compactLine(t.hostId, 32),
@@ -198,8 +461,8 @@ export function executeDeviceAction(
         json: {
           ok: false,
           error: ctx.pendingApprovals.length > 1
-            ? 'Multiple approvals pending; specify slot or code'
-            : 'Approval not found or already resolved',
+            ? '有多条待审批，请指定序号或单号'
+            : '审批不存在或已处理',
           pending: ctx.pendingApprovals.length,
         },
       }
@@ -211,7 +474,7 @@ export function executeDeviceAction(
         status: 400,
         json: {
           ok: false,
-          error: 'Target item is a command approval, not a multiple-choice question',
+          error: '当前是命令确认而非多选题',
           slot: approval.slot,
           code: approval.code,
         },
@@ -231,9 +494,7 @@ export function executeDeviceAction(
             risk: 'L2',
             slot: approval.slot,
             code: approval.code,
-            message: isLocked
-              ? 'L2 PIN locked; confirm on phone screen'
-              : 'L2 policy requires phone screen confirmation',
+            message: isLocked ? '确认码已锁定，请用手机处理' : '高危策略要求在手机确认',
           },
         }
       }
@@ -258,8 +519,8 @@ export function executeDeviceAction(
             code: approval.code,
             confirmPin: challenge.pin,
             expiresAt: challenge.expiresAt,
-            message: `L2 HIGH RISK! Say or enter PIN ${challenge.pin}`,
-            speechHint: `高危操作预警，请念出确认码 ${formatPinForSpeech(challenge.pin)} 放行，或双击拒绝。`,
+            message: `高危锁定：长按OK报码 ${challenge.pin}`,
+            speechHint: `高危操作预警，请念出确认码 ${formatPinForSpeech(challenge.pin)} 放行，或长按下键拒绝。`,
           },
         }
       }
@@ -279,7 +540,7 @@ export function executeDeviceAction(
             risk: 'L2',
             slot: approval.slot,
             code: approval.code,
-            message: verdict.status === 'locked' ? 'L2 PIN locked' : 'Invalid or expired PIN',
+            message: verdict.status === 'locked' ? '高危码已锁定' : '确认码错误或已过期',
           },
         }
       }
@@ -346,11 +607,11 @@ export function executeDeviceAction(
         actionId: outcome?.command?.id || '',
         message: outcome?.ok
           ? isDeny
-            ? `Denied #${approval.slot}`
+            ? `已拒绝 #${approval.slot}`
             : type === 'answer'
-              ? `Answered #${approval.slot} (opt ${cmdPayload.optionIndex})`
-              : `Approved #${approval.slot}`
-          : outcome?.error || 'Failed to queue command',
+              ? `已提交选项 ${cmdPayload.optionIndex}`
+              : `已放行 #${approval.slot}`
+          : outcome?.error || '指令下发失败',
       },
     }
   }
@@ -362,7 +623,7 @@ export function executeDeviceAction(
       ctx.tasks.find(t => targetAgent && t.agentId === targetAgent && (!targetHost || t.hostId === targetHost)) ||
       ctx.tasks.find(t => t.status === 'running' && (!targetHost || t.hostId === targetHost))
     if (!task) {
-      return { status: 404, json: { ok: false, error: 'No running task found to stop' } }
+      return { status: 404, json: { ok: false, error: '当前无运行中任务可停止' } }
     }
     const outcome = hub.queueCommand(task.hostId, { type: 'stop', agentId: task.agentId })
     return {
@@ -373,7 +634,7 @@ export function executeDeviceAction(
         hostId: task.hostId,
         agentId: task.agentId,
         actionId: outcome?.command?.id || '',
-        message: outcome?.ok ? `Stopped ${compactLine(task.title, 20)}` : outcome?.error || 'Failed to stop task',
+        message: outcome?.ok ? `已停止 ${compactLine(task.title, 16)}` : outcome?.error || '停止失败',
       },
     }
   }
@@ -381,7 +642,7 @@ export function executeDeviceAction(
   if (type === 'prompt') {
     const promptText = String(body?.text || body?.prompt || '').trim()
     if (!promptText) {
-      return { status: 400, json: { ok: false, error: 'Prompt text is required' } }
+      return { status: 400, json: { ok: false, error: '指令内容不能为空' } }
     }
     const targetHost = String(body?.hostId || '').trim()
     const targetAgent = String(body?.agentId || '').trim()
@@ -389,7 +650,7 @@ export function executeDeviceAction(
       ctx.tasks.find(t => targetAgent && t.agentId === targetAgent && (!targetHost || t.hostId === targetHost)) ||
       ctx.tasks.find(t => !targetHost || t.hostId === targetHost)
     if (!task) {
-      return { status: 404, json: { ok: false, error: 'No active session found for prompt' } }
+      return { status: 404, json: { ok: false, error: '未找到可用会话' } }
     }
     const outcome = hub.queueCommand(task.hostId, { type: 'prompt', agentId: task.agentId, text: promptText })
     return {
@@ -400,7 +661,7 @@ export function executeDeviceAction(
         hostId: task.hostId,
         agentId: task.agentId,
         actionId: outcome?.command?.id || '',
-        message: outcome?.ok ? `Sent to ${compactLine(task.title, 20)}` : outcome?.error || 'Failed to send prompt',
+        message: outcome?.ok ? `已发给 ${compactLine(task.title, 16)}` : outcome?.error || '发送失败',
       },
     }
   }
@@ -409,7 +670,7 @@ export function executeDeviceAction(
     status: 400,
     json: {
       ok: false,
-      error: `Unsupported device action type: ${type || '(empty)'}`,
+      error: `不支持的设备指令类型: ${type || '(empty)'}`,
     },
   }
 }
@@ -471,7 +732,7 @@ export async function handleDeviceVoiceTurn(
       status: 400,
       json: {
         ok: false,
-        error: 'Missing voice audio (audio/pcm or audio/wav) or JSON text',
+        error: '缺少语音数据或文本内容',
       },
     }
   }
@@ -490,7 +751,7 @@ export async function handleDeviceVoiceTurn(
       json: {
         ok: false,
         transcript: compactLine(transcript, 80),
-        reply: compactLine(turn.error || 'Voice turn failed', 100),
+        reply: compactLine(turn.error || '语音处理失败', 100),
         executed: false,
         ...(sttMeta ? { stt: sttMeta } : {}),
       },
@@ -503,7 +764,7 @@ export async function handleDeviceVoiceTurn(
     json: {
       ok: true,
       transcript: compactLine(transcript, 80),
-      reply: compactLine(cleanReply || turn.spokenReply || 'OK', 110),
+      reply: compactLine(cleanReply || turn.spokenReply || '已处理', 110),
       executed: Boolean(turn.execution?.executed),
       actionType: String(turn.action?.type || 'none'),
       requiresPin: Boolean(turn.execution?.requiresPin),
@@ -541,7 +802,7 @@ export async function handleDeviceTtsPcm(
   if (!cleanText) {
     return {
       status: 400,
-      json: { ok: false, error: 'Missing text or valid briefing slot' },
+      json: { ok: false, error: '缺少播报文本或审批序号' },
     }
   }
 
@@ -556,7 +817,7 @@ export async function handleDeviceTtsPcm(
   if (!tts.ok) {
     return {
       status: 502,
-      json: { ok: false, error: tts.error || 'TTS synthesis failed' },
+      json: { ok: false, error: tts.error || 'TTS 合成失败' },
     }
   }
   if (tts.useBrowserSpeech || !Buffer.isBuffer(tts.pcmBuffer)) {
@@ -564,7 +825,7 @@ export async function handleDeviceTtsPcm(
       status: 501,
       json: {
         ok: false,
-        error: 'Cloud BYOK TTS provider required for raw PCM hardware output (current profile uses browser native speech)',
+        error: '硬件 PCM 播报需先在控制台配置云端 BYOK TTS 密钥',
         text: cleanText,
       },
     }

@@ -18,7 +18,7 @@
 
 static const char *TAG = "pa_net";
 
-#define PA_HTTP_RESP_BUF_SIZE 4096
+#define PA_HTTP_RESP_BUF_SIZE 6144
 
 static volatile bool s_wifi_connected = false;
 static char s_ip_str[24] = { 0 };

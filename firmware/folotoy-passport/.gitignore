@@ -3,4 +3,7 @@ managed_components/
 sdkconfig
 sdkconfig.old
 sdkconfig.sim
+sdkconfig.ci
 *.bin
+main/pa_font_zh_16.c
+main/pa_font_zh_12.c

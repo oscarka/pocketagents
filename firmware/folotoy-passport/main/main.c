@@ -207,7 +207,7 @@ static void net_worker_task(void *arg)
                          (int)job.dispatch.cmd, job.dispatch.slot, status,
                          ares.ok ? 1 : 0, ares.confirm_pin);
                 if (status <= 0 && ares.message[0] == '\0') {
-                    snprintf(ares.message, sizeof(ares.message), "Network error");
+                    snprintf(ares.message, sizeof(ares.message), "网络异常");
                 }
                 pa_chime_t ch = PA_CHIME_NONE;
                 if (xSemaphoreTake(s_state_mux, pdMS_TO_TICKS(100)) == pdTRUE) {
@@ -231,7 +231,7 @@ static void net_worker_task(void *arg)
                     free(job.pcm_buf);
                     job.pcm_buf = NULL;
                 } else {
-                    snprintf(vres.reply, sizeof(vres.reply), "No audio captured");
+                    snprintf(vres.reply, sizeof(vres.reply), "未录到语音");
                 }
                 ESP_LOGI(TAG, "[PA] voice-turn http=%d ok=%d exec=%d",
                          status, vres.ok ? 1 : 0, vres.executed ? 1 : 0);
@@ -271,7 +271,7 @@ static void net_worker_task(void *arg)
         if (!pa_net_is_wifi_connected()) {
             if (xSemaphoreTake(s_state_mux, pdMS_TO_TICKS(50)) == pdTRUE) {
                 s_state.net_status = PA_NET_CONNECTING;
-                snprintf(s_state.net_detail, sizeof(s_state.net_detail), "Joining Wi-Fi...");
+                snprintf(s_state.net_detail, sizeof(s_state.net_detail), "正在连 Wi-Fi...");
                 xSemaphoreGive(s_state_mux);
             }
             refresh_ui_now();
@@ -298,10 +298,10 @@ static void net_worker_task(void *arg)
             if (xSemaphoreTake(s_state_mux, pdMS_TO_TICKS(100)) == pdTRUE) {
                 if (status == 401 || status == 403) {
                     s_state.net_status = PA_NET_AUTH_ERROR;
-                    snprintf(s_state.net_detail, sizeof(s_state.net_detail), "Auth failed (HTTP %d)", status);
+                    snprintf(s_state.net_detail, sizeof(s_state.net_detail), "认证失败 (%d)", status);
                 } else {
                     s_state.net_status = PA_NET_ERROR;
-                    snprintf(s_state.net_detail, sizeof(s_state.net_detail), "Hub offline (%d)", status);
+                    snprintf(s_state.net_detail, sizeof(s_state.net_detail), "控制台离线 (%d)", status);
                 }
                 xSemaphoreGive(s_state_mux);
             }

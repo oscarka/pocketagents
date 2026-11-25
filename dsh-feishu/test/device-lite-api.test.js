@@ -4,6 +4,7 @@ import assert from 'node:assert/strict'
 import { HubCore } from '../../hub/hub-core.js'
 import { createHubServer } from '../../hub/server.js'
 import { resamplePcm16Mono } from '../../hub/voice-copilot.js'
+import { flushDeviceSummaryTasks, resetDeviceSummaryCache } from '../../hub/device-api.js'
 
 function seedDeviceHub(hub, nowMs) {
   hub.handleHeartbeat({
@@ -362,4 +363,171 @@ test('Generic Edge Device API: raw PCM16 voice-turn + 16kHz PCM TTS output & res
   assert.ok(Buffer.isBuffer(ttsRes.buffer))
   assert.equal(ttsRes.buffer.length, 320 * 2) // 480 samples @24kHz -> 320 samples @16kHz
   assert.match(ttsRes.headers['content-type'], /audio\/pcm; rate=16000/)
+})
+
+test('3-Tier Practical Chinese Localization: native ZH passthrough, 0ms rule map, async BYOK small-model cache, and L2 raw-cmd safety', async () => {
+  resetDeviceSummaryCache()
+  const nowMs = 1_796_100_000_000
+  const hub = new HubCore({ now: () => nowMs })
+
+  hub.handleHeartbeat({
+    hostId: 'mac-pro',
+    hostName: 'MacBook Pro',
+    bridgeState: {
+      tasks: [
+        { id: 't1', harness: 'claude', title: '修复支付单测', status: 'approval', updatedAt: nowMs - 1000, pendingApproval: true },
+        { id: 't2', harness: 'antigravity', title: '数据库迁移', status: 'approval', updatedAt: nowMs - 2000, pendingApproval: true },
+        { id: 't3', harness: 'codex', title: 'Release v0.9.21', status: 'approval', updatedAt: nowMs - 3000, pendingApproval: true },
+        { id: 't4', harness: 'codex', title: 'Clean Cache', status: 'approval', updatedAt: nowMs - 4000, pendingApproval: true },
+      ],
+      approvals: [
+        // Tier 2: Common English command -> 0ms rule localized + raw cmd preserved
+        {
+          code: 'R1',
+          agentId: 't1',
+          kind: 'approval',
+          toolName: 'Bash',
+          promptTitle: 'Allow running unit test suite?',
+          commandLine: 'npm test -- device-lite-api.test.js',
+          createdAt: nowMs - 40_000,
+          options: [{ index: 1, label: 'Allow once' }, { index: 2, label: 'Deny' }],
+        },
+        // Tier 1: Already Chinese question -> 0ms passthrough, ZERO LLM calls
+        {
+          code: 'ZH1',
+          agentId: 't2',
+          kind: 'question',
+          toolName: 'ask_question',
+          promptTitle: '请选择数据库迁移方式',
+          createdAt: nowMs - 30_000,
+          questions: [{
+            id: 'q_db',
+            question: '希望采用哪种迁移策略？',
+            options: [{ label: '只迁移测试库' }, { label: '灰度双写' }, { label: '暂缓执行' }],
+          }],
+        },
+        // Tier 3: Complex English multi-choice -> async BYOK small model -> cached Chinese
+        {
+          code: 'ENQ1',
+          agentId: 't3',
+          kind: 'question',
+          toolName: 'ask_question',
+          promptTitle: 'Select release rollout strategy for v0.9.21',
+          createdAt: nowMs - 20_000,
+          questions: [{
+            id: 'q_rel',
+            question: 'Choose rollout target:',
+            options: [{ label: 'Canary staging (10%)' }, { label: 'Full production rollout' }, { label: 'Hold and audit logs' }],
+          }],
+        },
+        // L2 High-Risk English destructive command -> raw cmd NEVER hidden, L2 badge preserved
+        {
+          code: 'L2D',
+          agentId: 't4',
+          kind: 'approval',
+          toolName: 'Bash',
+          promptTitle: 'Wipe build folder & force push?',
+          commandLine: 'rm -rf /tmp/old-build && git push --force origin main',
+          createdAt: nowMs - 10_000,
+          options: [{ index: 1, label: 'Allow' }, { index: 2, label: 'Deny' }],
+        },
+      ],
+    },
+  })
+
+  let llmCallCount = 0
+  const mockFetch = async () => {
+    llmCallCount += 1
+    return {
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => ({
+        choices: [{
+          message: {
+            content: JSON.stringify({
+              title: '选择 v0.9.21 发布策略',
+              options: ['灰度发布 10%', '全量正式上线', '暂缓并查日志'],
+            }),
+          },
+        }],
+      }),
+    }
+  }
+
+  const { dispatchRequest } = createHubServer({
+    hub,
+    token: 'zh-loc-token',
+    requireToken: true,
+    voiceVaultFile: '',
+    voiceFetch: mockFetch,
+  })
+  const headers = { 'x-hub-token': 'zh-loc-token' }
+
+  // Register a BYOK brain credential (DeepSeek / OpenAI-compat)
+  const cred = await dispatchRequest({
+    method: 'POST',
+    url: '/api/voice/credentials',
+    headers,
+    body: {
+      provider: 'openai_compat',
+      name: 'Fast Brain',
+      apiKey: 'sk-test-fast-brain',
+      baseUrl: 'https://api.openai.com/v1',
+      defaultModel: 'gpt-4o-mini',
+    },
+  })
+  assert.equal(cred.status, 200)
+
+  // Poll #1 (0ms non-blocking): Tier 1 & Tier 2 are ALREADY Chinese; Tier 3 kicks off 1 async LLM call
+  const poll1 = await dispatchRequest({ method: 'GET', url: '/api/device/digest', headers })
+  assert.equal(poll1.status, 200)
+  const [a1, a2, a3, a4] = poll1.json.approvals
+
+  // Tier 2 (Bash npm test): instant Chinese tool/title/options + verbatim raw command
+  assert.equal(a1.tool, '终端命令')
+  assert.equal(a1.title, '运行自动化测试')
+  assert.equal(a1.cmd, 'npm test -- device-lite-api.test.js')
+  assert.deepEqual(a1.options, ['本次允许', '拒绝'])
+
+  // Tier 1 (Native Chinese question): passed straight through
+  assert.equal(a2.tool, '请你选择')
+  assert.equal(a2.title, '请选择数据库迁移方式')
+  assert.deepEqual(a2.options, ['只迁移测试库', '灰度双写', '暂缓执行'])
+
+  // L2 High-Risk: explicit Chinese danger title + verbatim destructive command NEVER masked
+  assert.equal(a4.risk, 'L2')
+  assert.match(a4.title, /高危/)
+  assert.equal(a4.cmd, 'rm -rf /tmp/old-build && git push --force origin main')
+
+  // Wait for background Tier 3 small model to finish -> ONLY 1 LLM call (not 4!)
+  await flushDeviceSummaryTasks()
+  assert.equal(llmCallCount, 1, 'Only the complex English multi-choice should invoke the small model')
+
+  // Poll #2 with since=<poll1.rev> -> rev MUST flip because Tier 3 cache now has Chinese translation!
+  const poll2 = await dispatchRequest({
+    method: 'GET',
+    url: `/api/device/digest?since=${encodeURIComponent(poll1.json.rev)}`,
+    headers,
+  })
+  assert.equal(poll2.status, 200)
+  assert.equal(poll2.json.unchanged, false)
+  assert.notEqual(poll2.json.rev, poll1.json.rev)
+  const a3Zh = poll2.json.approvals[2]
+  assert.equal(a3Zh.title, '选择 v0.9.21 发布策略')
+  assert.deepEqual(a3Zh.options, ['灰度发布 10%', '全量正式上线', '暂缓并查日志'])
+
+  // Poll #3 hits cache cleanly with ZERO additional LLM calls
+  const poll3 = await dispatchRequest({
+    method: 'GET',
+    url: `/api/device/digest?since=${encodeURIComponent(poll2.json.rev)}`,
+    headers,
+  })
+  assert.equal(poll3.json.unchanged, true)
+  assert.equal(llmCallCount, 1)
+
+  // Explicit lang=en returns raw English untouched
+  const enPoll = await dispatchRequest({ method: 'GET', url: '/api/device/digest?lang=en', headers })
+  assert.equal(enPoll.json.approvals[0].tool, 'Bash')
+  assert.equal(enPoll.json.approvals[0].title, 'Allow running unit test suite?')
 })
