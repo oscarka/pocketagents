@@ -3,6 +3,68 @@
 export type EarconKind = 'listen' | 'done' | 'approval' | 'pin_ok' | 'alert';
 export type WalkAudioSessionMode = 'ambient' | 'transient' | 'play-and-record' | 'auto';
 
+export interface NativeAudioBridgeApi {
+  platform?: string;
+  version?: string;
+  setBackgroundKeepAlive?: (active: boolean, duckMusic?: boolean, keepMicWarm?: boolean) => Promise<boolean>;
+  playBase64Audio?: (
+    base64: string,
+    mimeType?: string,
+    opts?: { duckMusic?: boolean; keepSessionAfter?: boolean },
+  ) => Promise<boolean>;
+  speakSystemText?: (
+    text: string,
+    rate?: number,
+    opts?: { duckMusic?: boolean; keepSessionAfter?: boolean },
+  ) => Promise<boolean>;
+  stopPlayback?: (restoreIdle?: boolean) => Promise<boolean>;
+  playEarcon?: (kind: EarconKind) => Promise<boolean>;
+  startRecording?: (opts?: {
+    autoVad?: boolean;
+    vadSilenceMs?: number;
+    noSpeechTimeoutMs?: number;
+    maxDurationMs?: number;
+  }) => Promise<boolean>;
+  stopRecording?: () => Promise<WavRecordingResult | null>;
+  on?: (eventName: 'level' | 'recordingAutoStop', fn: (detail: any) => void) => () => void;
+}
+
+export function getNativeAudioBridge(): NativeAudioBridgeApi | null {
+  try {
+    if (typeof window === 'undefined') return null;
+    const api = (window as any).__dshNativeAudio;
+    return api && typeof api === 'object' ? (api as NativeAudioBridgeApi) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function isNativeIosShell(): boolean {
+  try {
+    if (typeof window === 'undefined') return false;
+    return Boolean((window as any).__dshNativeShell?.platform === 'ios-native' || (window as any).__dshNativeAudio?.platform === 'ios-native');
+  } catch {
+    return false;
+  }
+}
+
+export async function setWalkBackgroundKeepAlive(
+  active: boolean,
+  duckMusic = true,
+  keepMicWarm = false,
+): Promise<boolean> {
+  try {
+    if (typeof window !== 'undefined') {
+      (window as any).__dshWalkKeepAliveActive = Boolean(active);
+    }
+    const bridge = getNativeAudioBridge();
+    if (!bridge?.setBackgroundKeepAlive) return false;
+    return Boolean(await bridge.setBackgroundKeepAlive(Boolean(active), Boolean(duckMusic), Boolean(keepMicWarm)));
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Configure the W3C / iOS Safari 16.4+ Audio Session API (`navigator.audioSession`).
  * - `'ambient'`: idle listening to Apple Music / Spotify at full stereo quality
@@ -11,6 +73,7 @@ export type WalkAudioSessionMode = 'ambient' | 'transient' | 'play-and-record' |
  * - `'auto'`: release explicit audio session override when closing Walk Mode
  */
 export function setWalkAudioSessionMode(mode: WalkAudioSessionMode): boolean {
+  if (isNativeIosShell()) return true;
   try {
     const as = typeof navigator !== 'undefined' ? (navigator as any).audioSession : null;
     if (!as) return false;
@@ -51,6 +114,11 @@ function getAudioContext(): AudioContext | null {
 }
 
 export function playEarcon(kind: EarconKind): void {
+  const nativeBridge = getNativeAudioBridge();
+  if (nativeBridge?.playEarcon) {
+    void nativeBridge.playEarcon(kind).catch(() => {});
+    return;
+  }
   const ctx = getAudioContext();
   if (!ctx) return;
   try {
@@ -186,9 +254,18 @@ export class WalkWavRecorder {
   private hadSpeech = false;
   private lastVoiceAt = 0;
   private active = false;
+  private nativeMode = false;
+  private nativeUnsubs: Array<() => void> = [];
   private maxTimer: any = null;
   private noSpeechTimer: any = null;
   private onAutoStop: ((res: WavRecordingResult) => void) | null = null;
+
+  private clearNativeListeners(): void {
+    for (const fn of this.nativeUnsubs) {
+      try { fn(); } catch {}
+    }
+    this.nativeUnsubs = [];
+  }
 
   isRecording(): boolean {
     return this.active;
@@ -196,6 +273,51 @@ export class WalkWavRecorder {
 
   async start(opts: WalkRecorderOptions = {}): Promise<void> {
     if (this.active) return;
+
+    const nativeBridge = getNativeAudioBridge();
+    if (nativeBridge?.startRecording) {
+      this.active = true;
+      this.nativeMode = true;
+      this.onAutoStop = opts.onAutoStop || null;
+      this.clearNativeListeners();
+      if (nativeBridge.on) {
+        if (opts.onLevel) {
+          this.nativeUnsubs.push(
+            nativeBridge.on('level', detail => {
+              if (!this.active) return;
+              const lvl = typeof detail === 'number' ? detail : Number(detail?.level || 0);
+              opts.onLevel?.(lvl);
+            }),
+          );
+        }
+        this.nativeUnsubs.push(
+          nativeBridge.on('recordingAutoStop', detail => {
+            if (!this.active) return;
+            this.active = false;
+            this.nativeMode = false;
+            this.clearNativeListeners();
+            if (detail && this.onAutoStop) {
+              this.onAutoStop(detail as WavRecordingResult);
+            }
+          }),
+        );
+      }
+      try {
+        await nativeBridge.startRecording({
+          autoVad: Boolean(opts.autoVad),
+          vadSilenceMs: Math.max(400, Number(opts.vadSilenceMs) || 850),
+          noSpeechTimeoutMs: Number(opts.noSpeechTimeoutMs) || 0,
+          maxDurationMs: Math.max(3000, Number(opts.maxDurationMs) || 25000),
+        });
+        return;
+      } catch (err) {
+        this.active = false;
+        this.nativeMode = false;
+        this.clearNativeListeners();
+        throw err;
+      }
+    }
+
     if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
       throw new Error('当前浏览器不支持麦克风采集（需 HTTPS 或 localhost 环境）');
     }
@@ -305,8 +427,34 @@ export class WalkWavRecorder {
     }, maxDurationMs);
   }
 
+  async stopAsync(): Promise<WavRecordingResult | null> {
+    if (!this.active) return null;
+    if (this.nativeMode) {
+      this.active = false;
+      this.nativeMode = false;
+      this.clearNativeListeners();
+      const nativeBridge = getNativeAudioBridge();
+      if (!nativeBridge?.stopRecording) return null;
+      try {
+        const res = await nativeBridge.stopRecording();
+        return res && typeof res === 'object' && res.wavBase64 ? res : null;
+      } catch {
+        return null;
+      }
+    }
+    return this.stop();
+  }
+
   stop(): WavRecordingResult | null {
     if (!this.active) return null;
+    if (this.nativeMode) {
+      this.active = false;
+      this.nativeMode = false;
+      this.clearNativeListeners();
+      const nativeBridge = getNativeAudioBridge();
+      void nativeBridge?.stopRecording?.().catch(() => {});
+      return null;
+    }
     this.active = false;
     if (this.maxTimer) {
       clearTimeout(this.maxTimer);
@@ -429,10 +577,30 @@ export class WalkSpeechPlayer {
         window.speechSynthesis.cancel();
       }
     } catch {}
+    const nativeBridge = getNativeAudioBridge();
+    if (nativeBridge?.stopPlayback) {
+      void nativeBridge.stopPlayback(true).catch(() => {});
+    }
   }
 
-  async playAudioBase64(base64: string, mimeType = 'audio/mpeg'): Promise<boolean> {
+  async playAudioBase64(
+    base64: string,
+    mimeType = 'audio/mpeg',
+    opts: { duckMusic?: boolean; keepSessionAfter?: boolean } = {},
+  ): Promise<boolean> {
     const myRun = this.runId;
+    const nativeBridge = getNativeAudioBridge();
+    if (nativeBridge?.playBase64Audio) {
+      try {
+        const ok = await nativeBridge.playBase64Audio(base64, mimeType || 'audio/mpeg', {
+          duckMusic: opts.duckMusic !== false,
+          keepSessionAfter: Boolean(opts.keepSessionAfter),
+        });
+        return Boolean(ok) && this.runId === myRun;
+      } catch {
+        return false;
+      }
+    }
     const bin = atob(base64);
     const bytes = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
@@ -500,8 +668,24 @@ export class WalkSpeechPlayer {
     });
   }
 
-  speakNativeBrowser(text: string, rate = 1.0): Promise<boolean> {
+  async speakNativeBrowser(
+    text: string,
+    rate = 1.0,
+    opts: { duckMusic?: boolean; keepSessionAfter?: boolean } = {},
+  ): Promise<boolean> {
     const myRun = this.runId;
+    const nativeBridge = getNativeAudioBridge();
+    if (nativeBridge?.speakSystemText) {
+      try {
+        const ok = await nativeBridge.speakSystemText(text, rate, {
+          duckMusic: opts.duckMusic !== false,
+          keepSessionAfter: Boolean(opts.keepSessionAfter),
+        });
+        return Boolean(ok) && this.runId === myRun;
+      } catch {
+        return false;
+      }
+    }
     return new Promise<boolean>(resolve => {
       if (typeof window === 'undefined' || !window.speechSynthesis || typeof SpeechSynthesisUtterance === 'undefined') {
         resolve(false);
@@ -556,7 +740,10 @@ export class WalkSpeechPlayer {
 
     try {
       if (!useCloudTts) {
-        await this.speakNativeBrowser(list.join(' '), speechRate);
+        await this.speakNativeBrowser(list.join(' '), speechRate, {
+          duckMusic: duckMusicMode,
+          keepSessionAfter: keepAudioSessionAfter,
+        });
         return;
       }
 
@@ -577,14 +764,19 @@ export class WalkSpeechPlayer {
           onFirstLatency?.(res.latencyMs);
         }
 
+        const chunkOpts = {
+          duckMusic: duckMusicMode,
+          keepSessionAfter: keepAudioSessionAfter || i + 1 < list.length,
+        };
+
         if (res?.ok && res.audioBase64) {
-          const played = await this.playAudioBase64(res.audioBase64, res.mimeType || 'audio/mpeg');
+          const played = await this.playAudioBase64(res.audioBase64, res.mimeType || 'audio/mpeg', chunkOpts);
           if (!played && this.runId === myRun) {
-            await this.speakNativeBrowser(list[i], speechRate);
+            await this.speakNativeBrowser(list[i], speechRate, chunkOpts);
           }
         } else if (this.runId === myRun) {
           // Graceful fallback to native browser TTS if cloud TTS fails/unconfigured
-          await this.speakNativeBrowser(list[i], speechRate);
+          await this.speakNativeBrowser(list[i], speechRate, chunkOpts);
         }
       }
     } finally {
@@ -655,6 +847,8 @@ export function bindWalkMediaSession(handlers: {
   onNextBriefing: () => void;
   onStopSpeaking: () => void;
 }): () => void {
+  // Inside the native iOS shell, keep Lock Screen Now Playing owned by Apple Music / NetEase Music
+  if (isNativeIosShell()) return () => {};
   const ms = typeof navigator !== 'undefined' ? (navigator as any).mediaSession : null;
   if (!ms || typeof ms.setActionHandler !== 'function') return () => {};
   try {

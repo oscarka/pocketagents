@@ -5,8 +5,10 @@ import {
   WalkSpeechPlayer,
   WalkWakeLockManager,
   bindWalkMediaSession,
+  isNativeIosShell,
   playEarcon,
   setWalkAudioSessionMode,
+  setWalkBackgroundKeepAlive,
 } from '../voice/walkAudio';
 import {
   VoiceProviderSheet,
@@ -283,36 +285,38 @@ export function VoiceCopilotSheets() {
       if (chatDictRecorder?.isRecording()) {
         const prevBtn = document.getElementById(chatDictBtnId || btnId);
         prevBtn?.classList.remove('recording');
-        const rec = chatDictRecorder.stop();
+        const activeRec = chatDictRecorder;
         chatDictRecorder = null;
         chatDictBtnId = '';
-        if (!rec || rec.byteLength < 1200) {
-          showToastFn('⏹ 录音太短，已取消');
-          return true;
-        }
-        showToastFn('👂 BYOK 云端识别中…');
-        void apiCall('/api/voice/stt', {
-          method: 'POST',
-          body: JSON.stringify({
-            audioBase64: rec.wavBase64,
-            mimeType: 'audio/wav',
-            profileId: cfg.activeProfile.id,
-          }),
-        })
-          .then(r => r.json().catch(() => ({ ok: false })))
-          .then(data => {
-            if (data?.ok && String(data.text || '').trim()) {
-              const sep = input.value && !/\s$/.test(input.value) ? ' ' : '';
-              input.value = `${input.value}${sep}${String(data.text).trim()}`;
-              onComposerInputFn();
-              showToastFn(`✅ 识别完成 (${data.latencyMs ?? 0}ms)`);
-            } else if (data?.silence) {
-              showToastFn('未检测到清晰人声');
-            } else {
-              showToastFn(`⚠️ 云端识别失败：${data?.error || '请检查密钥'}`);
-            }
+        void activeRec.stopAsync().then(rec => {
+          if (!rec || rec.byteLength < 1200) {
+            showToastFn('⏹ 录音太短，已取消');
+            return;
+          }
+          showToastFn('👂 BYOK 云端识别中…');
+          return apiCall('/api/voice/stt', {
+            method: 'POST',
+            body: JSON.stringify({
+              audioBase64: rec.wavBase64,
+              mimeType: 'audio/wav',
+              profileId: cfg.activeProfile.id,
+            }),
           })
-          .catch(() => showToastFn('⚠️ 网络异常，云端识别失败'));
+            .then(r => r.json().catch(() => ({ ok: false })))
+            .then(data => {
+              if (data?.ok && String(data.text || '').trim()) {
+                const sep = input.value && !/\s$/.test(input.value) ? ' ' : '';
+                input.value = `${input.value}${sep}${String(data.text).trim()}`;
+                onComposerInputFn();
+                showToastFn(`✅ 识别完成 (${data.latencyMs ?? 0}ms)`);
+              } else if (data?.silence) {
+                showToastFn('未检测到清晰人声');
+              } else {
+                showToastFn(`⚠️ 云端识别失败：${data?.error || '请检查密钥'}`);
+              }
+            })
+            .catch(() => showToastFn('⚠️ 网络异常，云端识别失败'));
+        });
         return true;
       }
 
@@ -338,6 +342,7 @@ export function VoiceCopilotSheets() {
       clearTimeout(initTimer);
       playerRef.current?.stop();
       recorderRef.current?.stop();
+      void setWalkBackgroundKeepAlive(false, false, false);
       void wakeRef.current?.disable();
     };
   }, []);
@@ -358,7 +363,7 @@ export function VoiceCopilotSheets() {
     return () => clearInterval(timer);
   }, [activePin]);
 
-  // WakeLock + AirPods MediaSession + Safari AudioSession lifecycle when Walk Mode opens/closes
+  // WakeLock + AirPods MediaSession + Safari AudioSession + Native iOS Background Keepalive lifecycle
   useEffect(() => {
     if (!walkOpen) {
       playerRef.current?.stop();
@@ -366,6 +371,7 @@ export function VoiceCopilotSheets() {
       briefingQueueRef.current = [];
       drainingBriefingRef.current = false;
       focusedApprovalRef.current = null;
+      void setWalkBackgroundKeepAlive(false, false, false);
       setWalkAudioSessionMode('auto');
       void wakeRef.current?.disable();
       setWakeLocked(false);
@@ -379,9 +385,12 @@ export function VoiceCopilotSheets() {
     seenCompletedRef.current = new Set(snap.completedKeys.map(c => c.key));
 
     // Keep background music playing at full stereo quality while Walk Mode is idle
-    if (configRef.current?.prefs?.duckMusicMode !== false) {
+    const duckMusic = configRef.current?.prefs?.duckMusicMode !== false;
+    const keepMicWarm = Boolean(configRef.current?.prefs?.autoListenAfterBriefing);
+    if (duckMusic) {
       setWalkAudioSessionMode('ambient');
     }
+    void setWalkBackgroundKeepAlive(true, duckMusic, keepMicWarm);
 
     void wakeRef.current?.enable().then(ok => setWakeLocked(ok));
     const unbindMedia = bindWalkMediaSession({
@@ -399,6 +408,16 @@ export function VoiceCopilotSheets() {
       unbindMedia();
     };
   }, [walkOpen]);
+
+  // Keep native iOS background keepalive options in sync when user toggles footer switches inside Walk Mode
+  useEffect(() => {
+    if (!walkOpen) return;
+    void setWalkBackgroundKeepAlive(
+      true,
+      config.prefs.duckMusicMode !== false,
+      Boolean(config.prefs.autoListenAfterBriefing),
+    );
+  }, [walkOpen, config.prefs.duckMusicMode, config.prefs.autoListenAfterBriefing]);
 
   const drainBriefingQueue = async () => {
     if (drainingBriefingRef.current || !walkOpenRef.current) return;
@@ -846,8 +865,9 @@ export function VoiceCopilotSheets() {
     }
     if (walkPhaseRef.current === 'listening') {
       if (recorderRef.current?.isRecording()) {
-        const res = recorderRef.current.stop();
+        const res = await recorderRef.current.stopAsync();
         if (res) void handleWalkWavReady(res, false);
+        else setWalkPhase('idle');
       } else if (nativeRecRef.current) {
         try { nativeRecRef.current.stop(); } catch {}
       }
@@ -1018,7 +1038,7 @@ export function VoiceCopilotSheets() {
 
   const toggleBenchVoiceCapture = async () => {
     if (benchRecording) {
-      const rec = recorderRef.current?.stop();
+      const rec = await recorderRef.current?.stopAsync();
       setBenchRecording(false);
       if (!rec) return;
       const wavKb = Math.max(1, Math.round(rec.byteLength / 1024));
@@ -1064,6 +1084,7 @@ export function VoiceCopilotSheets() {
   };
 
   const activeProf = config.activeProfile || DEFAULT_CONFIG.activeProfile;
+  const nativeShell = isNativeIosShell();
   const openLabFromWalk = () => {
     setSoundCheckMsg(null);
     setLabInitialView('list');
@@ -1092,6 +1113,7 @@ export function VoiceCopilotSheets() {
               {hubSummary.approvals.length > 0 && (
                 <span class="walk-badge-warn">⚠️ {hubSummary.approvals.length} 待审批</span>
               )}
+              {nativeShell && <span class="walk-badge-subtle">🔒 后台常驻</span>}
               {wakeLocked && <span class="walk-badge-subtle">🔆 常亮</span>}
             </div>
             <div class="walk-top-right">

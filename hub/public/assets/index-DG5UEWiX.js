@@ -1145,6 +1145,33 @@ function G(n, t) {
 	return "function" == typeof t ? t(n) : t;
 }
 // hub/web/src/voice/walkAudio.ts
+function getNativeAudioBridge() {
+	try {
+		if (typeof window === "undefined") return null;
+		const api = window.__dshNativeAudio;
+		return api && typeof api === "object" ? api : null;
+	} catch {
+		return null;
+	}
+}
+function isNativeIosShell() {
+	try {
+		if (typeof window === "undefined") return false;
+		return Boolean(window.__dshNativeShell?.platform === "ios-native" || window.__dshNativeAudio?.platform === "ios-native");
+	} catch {
+		return false;
+	}
+}
+async function setWalkBackgroundKeepAlive(active, duckMusic = true, keepMicWarm = false) {
+	try {
+		if (typeof window !== "undefined") window.__dshWalkKeepAliveActive = Boolean(active);
+		const bridge = getNativeAudioBridge();
+		if (!bridge?.setBackgroundKeepAlive) return false;
+		return Boolean(await bridge.setBackgroundKeepAlive(Boolean(active), Boolean(duckMusic), Boolean(keepMicWarm)));
+	} catch {
+		return false;
+	}
+}
 /**
 * Configure the W3C / iOS Safari 16.4+ Audio Session API (`navigator.audioSession`).
 * - `'ambient'`: idle listening to Apple Music / Spotify at full stereo quality
@@ -1153,6 +1180,7 @@ function G(n, t) {
 * - `'auto'`: release explicit audio session override when closing Walk Mode
 */
 function setWalkAudioSessionMode(mode) {
+	if (isNativeIosShell()) return true;
 	try {
 		const as = typeof navigator !== "undefined" ? navigator.audioSession : null;
 		if (!as) return false;
@@ -1176,6 +1204,11 @@ function getAudioContext() {
 	}
 }
 function playEarcon(kind) {
+	const nativeBridge = getNativeAudioBridge();
+	if (nativeBridge?.playEarcon) {
+		nativeBridge.playEarcon(kind).catch(() => {});
+		return;
+	}
 	const ctx = getAudioContext();
 	if (!ctx) return;
 	try {
@@ -1284,14 +1317,57 @@ var WalkWavRecorder = class {
 	hadSpeech = false;
 	lastVoiceAt = 0;
 	active = false;
+	nativeMode = false;
+	nativeUnsubs = [];
 	maxTimer = null;
 	noSpeechTimer = null;
 	onAutoStop = null;
+	clearNativeListeners() {
+		for (const fn of this.nativeUnsubs) try {
+			fn();
+		} catch {}
+		this.nativeUnsubs = [];
+	}
 	isRecording() {
 		return this.active;
 	}
 	async start(opts = {}) {
 		if (this.active) return;
+		const nativeBridge = getNativeAudioBridge();
+		if (nativeBridge?.startRecording) {
+			this.active = true;
+			this.nativeMode = true;
+			this.onAutoStop = opts.onAutoStop || null;
+			this.clearNativeListeners();
+			if (nativeBridge.on) {
+				if (opts.onLevel) this.nativeUnsubs.push(nativeBridge.on("level", (detail) => {
+					if (!this.active) return;
+					const lvl = typeof detail === "number" ? detail : Number(detail?.level || 0);
+					opts.onLevel?.(lvl);
+				}));
+				this.nativeUnsubs.push(nativeBridge.on("recordingAutoStop", (detail) => {
+					if (!this.active) return;
+					this.active = false;
+					this.nativeMode = false;
+					this.clearNativeListeners();
+					if (detail && this.onAutoStop) this.onAutoStop(detail);
+				}));
+			}
+			try {
+				await nativeBridge.startRecording({
+					autoVad: Boolean(opts.autoVad),
+					vadSilenceMs: Math.max(400, Number(opts.vadSilenceMs) || 850),
+					noSpeechTimeoutMs: Number(opts.noSpeechTimeoutMs) || 0,
+					maxDurationMs: Math.max(3e3, Number(opts.maxDurationMs) || 25e3)
+				});
+				return;
+			} catch (err) {
+				this.active = false;
+				this.nativeMode = false;
+				this.clearNativeListeners();
+				throw err;
+			}
+		}
 		if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) throw new Error("当前浏览器不支持麦克风采集（需 HTTPS 或 localhost 环境）");
 		setWalkAudioSessionMode("play-and-record");
 		const audioConstraints = { audio: {
@@ -1373,8 +1449,32 @@ var WalkWavRecorder = class {
 			if (res && this.onAutoStop) this.onAutoStop(res);
 		}, maxDurationMs);
 	}
+	async stopAsync() {
+		if (!this.active) return null;
+		if (this.nativeMode) {
+			this.active = false;
+			this.nativeMode = false;
+			this.clearNativeListeners();
+			const nativeBridge = getNativeAudioBridge();
+			if (!nativeBridge?.stopRecording) return null;
+			try {
+				const res = await nativeBridge.stopRecording();
+				return res && typeof res === "object" && res.wavBase64 ? res : null;
+			} catch {
+				return null;
+			}
+		}
+		return this.stop();
+	}
 	stop() {
 		if (!this.active) return null;
+		if (this.nativeMode) {
+			this.active = false;
+			this.nativeMode = false;
+			this.clearNativeListeners();
+			getNativeAudioBridge()?.stopRecording?.().catch(() => {});
+			return null;
+		}
 		this.active = false;
 		if (this.maxTimer) {
 			clearTimeout(this.maxTimer);
@@ -1484,9 +1584,21 @@ var WalkSpeechPlayer = class {
 		try {
 			if (typeof window !== "undefined" && window.speechSynthesis) window.speechSynthesis.cancel();
 		} catch {}
+		const nativeBridge = getNativeAudioBridge();
+		if (nativeBridge?.stopPlayback) nativeBridge.stopPlayback(true).catch(() => {});
 	}
-	async playAudioBase64(base64, mimeType = "audio/mpeg") {
+	async playAudioBase64(base64, mimeType = "audio/mpeg", opts = {}) {
 		const myRun = this.runId;
+		const nativeBridge = getNativeAudioBridge();
+		if (nativeBridge?.playBase64Audio) try {
+			const ok = await nativeBridge.playBase64Audio(base64, mimeType || "audio/mpeg", {
+				duckMusic: opts.duckMusic !== false,
+				keepSessionAfter: Boolean(opts.keepSessionAfter)
+			});
+			return Boolean(ok) && this.runId === myRun;
+		} catch {
+			return false;
+		}
 		const bin = atob(base64);
 		const bytes = new Uint8Array(bin.length);
 		for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
@@ -1535,8 +1647,18 @@ var WalkSpeechPlayer = class {
 			if (p && typeof p.catch === "function") p.catch(() => cleanup(false));
 		});
 	}
-	speakNativeBrowser(text, rate = 1) {
+	async speakNativeBrowser(text, rate = 1, opts = {}) {
 		const myRun = this.runId;
+		const nativeBridge = getNativeAudioBridge();
+		if (nativeBridge?.speakSystemText) try {
+			const ok = await nativeBridge.speakSystemText(text, rate, {
+				duckMusic: opts.duckMusic !== false,
+				keepSessionAfter: Boolean(opts.keepSessionAfter)
+			});
+			return Boolean(ok) && this.runId === myRun;
+		} catch {
+			return false;
+		}
 		return new Promise((resolve) => {
 			if (typeof window === "undefined" || !window.speechSynthesis || typeof SpeechSynthesisUtterance === "undefined") {
 				resolve(false);
@@ -1567,7 +1689,10 @@ var WalkSpeechPlayer = class {
 		onStateChange?.(true);
 		try {
 			if (!useCloudTts) {
-				await this.speakNativeBrowser(list.join(" "), speechRate);
+				await this.speakNativeBrowser(list.join(" "), speechRate, {
+					duckMusic: duckMusicMode,
+					keepSessionAfter: keepAudioSessionAfter
+				});
 				return;
 			}
 			let nextPromise = fetchTts(list[0], ctrl.signal).catch(() => ({ ok: false }));
@@ -1578,9 +1703,13 @@ var WalkSpeechPlayer = class {
 				if (i + 1 < list.length) nextPromise = fetchTts(list[i + 1], ctrl.signal).catch(() => ({ ok: false }));
 				else nextPromise = null;
 				if (i === 0 && typeof res?.latencyMs === "number") onFirstLatency?.(res.latencyMs);
+				const chunkOpts = {
+					duckMusic: duckMusicMode,
+					keepSessionAfter: keepAudioSessionAfter || i + 1 < list.length
+				};
 				if (res?.ok && res.audioBase64) {
-					if (!await this.playAudioBase64(res.audioBase64, res.mimeType || "audio/mpeg") && this.runId === myRun) await this.speakNativeBrowser(list[i], speechRate);
-				} else if (this.runId === myRun) await this.speakNativeBrowser(list[i], speechRate);
+					if (!await this.playAudioBase64(res.audioBase64, res.mimeType || "audio/mpeg", chunkOpts) && this.runId === myRun) await this.speakNativeBrowser(list[i], speechRate, chunkOpts);
+				} else if (this.runId === myRun) await this.speakNativeBrowser(list[i], speechRate, chunkOpts);
 			}
 		} finally {
 			if (this.runId === myRun) {
@@ -1638,6 +1767,7 @@ var WalkWakeLockManager = class {
 	}
 };
 function bindWalkMediaSession(handlers) {
+	if (isNativeIosShell()) return () => {};
 	const ms = typeof navigator !== "undefined" ? navigator.mediaSession : null;
 	if (!ms || typeof ms.setActionHandler !== "function") return () => {};
 	try {
@@ -3181,30 +3311,32 @@ function VoiceCopilotSheets() {
 			if (!input) return false;
 			if (chatDictRecorder?.isRecording()) {
 				document.getElementById(chatDictBtnId || btnId)?.classList.remove("recording");
-				const rec = chatDictRecorder.stop();
+				const activeRec = chatDictRecorder;
 				chatDictRecorder = null;
 				chatDictBtnId = "";
-				if (!rec || rec.byteLength < 1200) {
-					showToastFn("⏹ 录音太短，已取消");
-					return true;
-				}
-				showToastFn("👂 BYOK 云端识别中…");
-				apiCall("/api/voice/stt", {
-					method: "POST",
-					body: JSON.stringify({
-						audioBase64: rec.wavBase64,
-						mimeType: "audio/wav",
-						profileId: cfg.activeProfile.id
-					})
-				}).then((r) => r.json().catch(() => ({ ok: false }))).then((data) => {
-					if (data?.ok && String(data.text || "").trim()) {
-						const sep = input.value && !/\s$/.test(input.value) ? " " : "";
-						input.value = `${input.value}${sep}${String(data.text).trim()}`;
-						onComposerInputFn();
-						showToastFn(`✅ 识别完成 (${data.latencyMs ?? 0}ms)`);
-					} else if (data?.silence) showToastFn("未检测到清晰人声");
-					else showToastFn(`⚠️ 云端识别失败：${data?.error || "请检查密钥"}`);
-				}).catch(() => showToastFn("⚠️ 网络异常，云端识别失败"));
+				activeRec.stopAsync().then((rec) => {
+					if (!rec || rec.byteLength < 1200) {
+						showToastFn("⏹ 录音太短，已取消");
+						return;
+					}
+					showToastFn("👂 BYOK 云端识别中…");
+					return apiCall("/api/voice/stt", {
+						method: "POST",
+						body: JSON.stringify({
+							audioBase64: rec.wavBase64,
+							mimeType: "audio/wav",
+							profileId: cfg.activeProfile.id
+						})
+					}).then((r) => r.json().catch(() => ({ ok: false }))).then((data) => {
+						if (data?.ok && String(data.text || "").trim()) {
+							const sep = input.value && !/\s$/.test(input.value) ? " " : "";
+							input.value = `${input.value}${sep}${String(data.text).trim()}`;
+							onComposerInputFn();
+							showToastFn(`✅ 识别完成 (${data.latencyMs ?? 0}ms)`);
+						} else if (data?.silence) showToastFn("未检测到清晰人声");
+						else showToastFn(`⚠️ 云端识别失败：${data?.error || "请检查密钥"}`);
+					}).catch(() => showToastFn("⚠️ 网络异常，云端识别失败"));
+				});
 				return true;
 			}
 			chatDictRecorder = new WalkWavRecorder();
@@ -3226,6 +3358,7 @@ function VoiceCopilotSheets() {
 			clearTimeout(initTimer);
 			playerRef.current?.stop();
 			recorderRef.current?.stop();
+			setWalkBackgroundKeepAlive(false, false, false);
 			wakeRef.current?.disable();
 		};
 	}, []);
@@ -3250,6 +3383,7 @@ function VoiceCopilotSheets() {
 			briefingQueueRef.current = [];
 			drainingBriefingRef.current = false;
 			focusedApprovalRef.current = null;
+			setWalkBackgroundKeepAlive(false, false, false);
 			setWalkAudioSessionMode("auto");
 			wakeRef.current?.disable();
 			setWakeLocked(false);
@@ -3260,7 +3394,10 @@ function VoiceCopilotSheets() {
 		setHubSummary(snap);
 		seenApprovalsRef.current = new Set(snap.approvals.map((a) => `${a.hostId}:${a.code}`));
 		seenCompletedRef.current = new Set(snap.completedKeys.map((c) => c.key));
-		if (configRef.current?.prefs?.duckMusicMode !== false) setWalkAudioSessionMode("ambient");
+		const duckMusic = configRef.current?.prefs?.duckMusicMode !== false;
+		const keepMicWarm = Boolean(configRef.current?.prefs?.autoListenAfterBriefing);
+		if (duckMusic) setWalkAudioSessionMode("ambient");
+		setWalkBackgroundKeepAlive(true, duckMusic, keepMicWarm);
 		wakeRef.current?.enable().then((ok) => setWakeLocked(ok));
 		const unbindMedia = bindWalkMediaSession({
 			onToggleListen: () => {
@@ -3279,6 +3416,14 @@ function VoiceCopilotSheets() {
 			unbindMedia();
 		};
 	}, [walkOpen]);
+	A(() => {
+		if (!walkOpen) return;
+		setWalkBackgroundKeepAlive(true, config.prefs.duckMusicMode !== false, Boolean(config.prefs.autoListenAfterBriefing));
+	}, [
+		walkOpen,
+		config.prefs.duckMusicMode,
+		config.prefs.autoListenAfterBriefing
+	]);
 	const drainBriefingQueue = async () => {
 		if (drainingBriefingRef.current || !walkOpenRef.current) return;
 		if (walkPhaseRef.current !== "idle") return;
@@ -3640,8 +3785,9 @@ function VoiceCopilotSheets() {
 		if (walkPhaseRef.current === "speaking") playerRef.current?.stop();
 		if (walkPhaseRef.current === "listening") {
 			if (recorderRef.current?.isRecording()) {
-				const res = recorderRef.current.stop();
+				const res = await recorderRef.current.stopAsync();
 				if (res) handleWalkWavReady(res, false);
+				else setWalkPhase("idle");
 			} else if (nativeRecRef.current) try {
 				nativeRecRef.current.stop();
 			} catch {}
@@ -3825,7 +3971,7 @@ function VoiceCopilotSheets() {
 	};
 	const toggleBenchVoiceCapture = async () => {
 		if (benchRecording) {
-			const rec = recorderRef.current?.stop();
+			const rec = await recorderRef.current?.stopAsync();
 			setBenchRecording(false);
 			if (!rec) return;
 			const wavKb = Math.max(1, Math.round(rec.byteLength / 1024));
@@ -3882,6 +4028,7 @@ function VoiceCopilotSheets() {
 		}
 	};
 	const activeProf = config.activeProfile || DEFAULT_CONFIG.activeProfile;
+	const nativeShell = isNativeIosShell();
 	const openLabFromWalk = () => {
 		setSoundCheckMsg(null);
 		setLabInitialView("list");
@@ -3899,7 +4046,7 @@ function VoiceCopilotSheets() {
 		class: "walk-profile-pill",
 		onClick: openLabFromWalk,
 		title: "点击快速切换语音配置"
-	}, /* @__PURE__ */ k$1("span", null, "🎧"), /* @__PURE__ */ k$1("span", { class: "walk-profile-name" }, activeProf.name), /* @__PURE__ */ k$1("span", null, "▾")), hubSummary.approvals.length > 0 && /* @__PURE__ */ k$1("span", { class: "walk-badge-warn" }, "⚠️ ", hubSummary.approvals.length, " 待审批"), wakeLocked && /* @__PURE__ */ k$1("span", { class: "walk-badge-subtle" }, "🔆 常亮")), /* @__PURE__ */ k$1("div", { class: "walk-top-right" }, /* @__PURE__ */ k$1("button", {
+	}, /* @__PURE__ */ k$1("span", null, "🎧"), /* @__PURE__ */ k$1("span", { class: "walk-profile-name" }, activeProf.name), /* @__PURE__ */ k$1("span", null, "▾")), hubSummary.approvals.length > 0 && /* @__PURE__ */ k$1("span", { class: "walk-badge-warn" }, "⚠️ ", hubSummary.approvals.length, " 待审批"), nativeShell && /* @__PURE__ */ k$1("span", { class: "walk-badge-subtle" }, "🔒 后台常驻"), wakeLocked && /* @__PURE__ */ k$1("span", { class: "walk-badge-subtle" }, "🔆 常亮")), /* @__PURE__ */ k$1("div", { class: "walk-top-right" }, /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: "walk-top-btn",
 		id: "walkOpenLabBtn",
@@ -21494,7 +21641,8 @@ function initHubController() {
 				const staleBootMismatch = bootedFromHashedBundle;
 				initialUiBuild = incomingBuild;
 				const isHidden = typeof document !== "undefined" && document.visibilityState === "hidden";
-				if ((staleBootMismatch || isHidden) && !hasActiveUserInputInProgress()) {
+				const walkKeepAlive = typeof window !== "undefined" && Boolean(window.__dshWalkKeepAliveActive);
+				if ((staleBootMismatch || isHidden) && !hasActiveUserInputInProgress() && !walkKeepAlive) {
 					reloadWithFreshAppShell(incomingBuild);
 					return;
 				}
@@ -21781,12 +21929,13 @@ function initHubController() {
 				sseConnected = false;
 				closeSSE();
 				if (isDemoMode || !getToken() && authLockConfirmed) return;
-				if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+				if (typeof document !== "undefined" && document.visibilityState === "hidden" && !(typeof window !== "undefined" && window.__dshWalkKeepAliveActive)) return;
 				sseErrorCount = Math.min(sseErrorCount + 1, 6);
 				const backoffMs = Math.min(12e3, Math.round(1e3 * Math.pow(1.6, sseErrorCount - 1)));
 				sseReconnectTimer = setTimeout(() => {
 					sseReconnectTimer = null;
-					if (!sseConnected && (typeof document === "undefined" || document.visibilityState !== "hidden")) connectSSE();
+					const stillPaused = typeof document !== "undefined" && document.visibilityState === "hidden" && !(typeof window !== "undefined" && window.__dshWalkKeepAliveActive);
+					if (!sseConnected && !stillPaused) connectSSE();
 				}, backoffMs);
 			};
 			thisSource.addEventListener("ping", (evt) => {
@@ -21900,7 +22049,7 @@ function initHubController() {
 				silent: true,
 				forceFresh: true
 			}).finally(() => {
-				if (typeof document === "undefined" || document.visibilityState !== "hidden") connectSSE();
+				if (!(typeof document !== "undefined" && document.visibilityState === "hidden" && !(typeof window !== "undefined" && window.__dshWalkKeepAliveActive))) connectSSE();
 			});
 		});
 		window.addEventListener("offline", () => {
@@ -22635,14 +22784,14 @@ function initHubController() {
 			silent: true,
 			forceFresh: true
 		}).finally(() => {
-			if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+			if (typeof document !== "undefined" && document.visibilityState === "hidden" && !(typeof window !== "undefined" && window.__dshWalkKeepAliveActive)) return;
 			if (needReconnect || !sseConnected) connectSSE();
 		});
 		else if (needReconnect) connectSSE();
 	}
 	if (typeof document !== "undefined") document.addEventListener("visibilitychange", () => {
 		if (document.visibilityState === "visible") resumeForegroundSync();
-		else if (document.visibilityState === "hidden" && pendingBackgroundUiReload && !hasActiveUserInputInProgress()) {
+		else if (document.visibilityState === "hidden" && pendingBackgroundUiReload && !hasActiveUserInputInProgress() && !(typeof window !== "undefined" && window.__dshWalkKeepAliveActive)) {
 			pendingBackgroundUiReload = false;
 			reloadWithFreshAppShell(pendingTargetUiBuild);
 		}
@@ -22736,7 +22885,7 @@ function initHubController() {
 		if (Date.now() < sseRotatingUntil) return;
 		if (!hasLoadedInitialState) return;
 		if (!getToken() && authLockConfirmed) return;
-		if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+		if (typeof document !== "undefined" && document.visibilityState === "hidden" && !(typeof window !== "undefined" && window.__dshWalkKeepAliveActive)) return;
 		if (Boolean(sseSource && sseSource.readyState === 0 && Date.now() - lastSseConnectAttemptAt < 15e3)) return;
 		const staleSse = !sseConnected || lastSseEventAt > 0 && Date.now() - lastSseEventAt > 35e3;
 		if (!stateFetchInFlight && staleSse) fetchState({ silent: true }).finally(() => {

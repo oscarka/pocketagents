@@ -10428,7 +10428,8 @@ export function initHubController() {
         const staleBootMismatch = bootedFromHashedBundle;
         initialUiBuild = incomingBuild;
         const isHidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
-        if ((staleBootMismatch || isHidden) && !hasActiveUserInputInProgress()) {
+        const walkKeepAlive = typeof window !== 'undefined' && Boolean(window.__dshWalkKeepAliveActive);
+        if ((staleBootMismatch || isHidden) && !hasActiveUserInputInProgress() && !walkKeepAlive) {
           reloadWithFreshAppShell(incomingBuild);
           return;
         }
@@ -10734,12 +10735,14 @@ export function initHubController() {
         // 改由我们用最新的 hubState.stateSeq 进行可控退避重建。
         closeSSE();
         if (isDemoMode || (!getToken() && authLockConfirmed)) return;
-        if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+        const bgSyncPaused = typeof document !== 'undefined' && document.visibilityState === 'hidden' && !(typeof window !== 'undefined' && window.__dshWalkKeepAliveActive);
+        if (bgSyncPaused) return;
         sseErrorCount = Math.min(sseErrorCount + 1, 6);
         const backoffMs = Math.min(12000, Math.round(1000 * Math.pow(1.6, sseErrorCount - 1)));
         sseReconnectTimer = setTimeout(() => {
           sseReconnectTimer = null;
-          if (!sseConnected && (typeof document === 'undefined' || document.visibilityState !== 'hidden')) {
+          const stillPaused = typeof document !== 'undefined' && document.visibilityState === 'hidden' && !(typeof window !== 'undefined' && window.__dshWalkKeepAliveActive);
+          if (!sseConnected && !stillPaused) {
             connectSSE();
           }
         }, backoffMs);
@@ -10853,7 +10856,8 @@ export function initHubController() {
       setConnectionBanner(false);
       closeSSE();
       void fetchState({ silent: true, forceFresh: true }).finally(() => {
-        if (typeof document === 'undefined' || document.visibilityState !== 'hidden') {
+        const bgSyncPaused = typeof document !== 'undefined' && document.visibilityState === 'hidden' && !(typeof window !== 'undefined' && window.__dshWalkKeepAliveActive);
+        if (!bgSyncPaused) {
           connectSSE();
         }
       });
@@ -11641,7 +11645,8 @@ export function initHubController() {
       // 先拉取最新 gzip 压缩的 /api/state 拿到最新 stateSeq，再建立 SSE 连接，
       // 彻底消除切回前台时 /api/state 与旧 seq SSE 并发撞车及 seq_mismatch
       void fetchState({ silent: true, forceFresh: true }).finally(() => {
-        if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+        const bgSyncPaused = typeof document !== 'undefined' && document.visibilityState === 'hidden' && !(typeof window !== 'undefined' && window.__dshWalkKeepAliveActive);
+        if (bgSyncPaused) return;
         if (needReconnect || !sseConnected) {
           connectSSE();
         }
@@ -11658,7 +11663,8 @@ export function initHubController() {
       } else if (
         document.visibilityState === 'hidden' &&
         pendingBackgroundUiReload &&
-        !hasActiveUserInputInProgress()
+        !hasActiveUserInputInProgress() &&
+        !(typeof window !== 'undefined' && window.__dshWalkKeepAliveActive)
       ) {
         pendingBackgroundUiReload = false;
         reloadWithFreshAppShell(pendingTargetUiBuild);
@@ -11768,7 +11774,7 @@ export function initHubController() {
     if (Date.now() < sseRotatingUntil) return;
     if (!hasLoadedInitialState) return;
     if (!getToken() && authLockConfirmed) return;
-    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden' && !(typeof window !== 'undefined' && window.__dshWalkKeepAliveActive)) return;
     const sseConnecting = Boolean(sseSource && sseSource.readyState === 0 && Date.now() - lastSseConnectAttemptAt < 15000);
     if (sseConnecting) return;
     const staleSse = !sseConnected || (lastSseEventAt > 0 && Date.now() - lastSseEventAt > 35000);

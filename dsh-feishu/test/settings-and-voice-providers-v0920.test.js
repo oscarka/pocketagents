@@ -690,3 +690,22 @@ test('v0.9.23 VoiceCopilot testCredential supports unsaved draft testing, SSRF &
   assert.equal(v3Req.body.model_id, 'doubao-seed-tts-3.0');
   assert.equal(Buffer.from(v3Res.audioBase64, 'base64').toString(), 'mp3part1mp3part2');
 });
+
+test('v0.9.29 native iOS shell audio bridge hooks and background SSE keepalive exemption', async () => {
+  const fs = await import('node:fs');
+  const walkAudioSrc = fs.readFileSync(new URL('../../hub/web/src/voice/walkAudio.ts', import.meta.url), 'utf8');
+  const voiceSheetsSrc = fs.readFileSync(new URL('../../hub/web/src/components/VoiceCopilotSheets.tsx', import.meta.url), 'utf8');
+  const controllerSrc = fs.readFileSync(new URL('../../hub/web/src/controller.js', import.meta.url), 'utf8');
+
+  assert.match(walkAudioSrc, /export function getNativeAudioBridge\(/);
+  assert.match(walkAudioSrc, /export function isNativeIosShell\(/);
+  assert.match(walkAudioSrc, /export async function setWalkBackgroundKeepAlive\(/);
+  assert.match(walkAudioSrc, /async stopAsync\(\): Promise<WavRecordingResult \| null>/);
+  assert.match(walkAudioSrc, /nativeBridge\.playBase64Audio/);
+  assert.match(walkAudioSrc, /nativeBridge\.speakSystemText/);
+  assert.match(walkAudioSrc, /nativeBridge\.startRecording/);
+  assert.match(voiceSheetsSrc, /setWalkBackgroundKeepAlive\(true,/);
+  assert.match(voiceSheetsSrc, /setWalkBackgroundKeepAlive\(false, false, false\)/);
+  assert.match(voiceSheetsSrc, /🔒 后台常驻/);
+  assert.match(controllerSrc, /__dshWalkKeepAliveActive/);
+});
