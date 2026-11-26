@@ -2,7 +2,11 @@
 // Clean single-line iOS grouped rows, crisp inline vector SVG icons, zero emoji clutter,
 // compact top host strip, and smooth drill-down sub-pages — fully isolated from controller.js core.
 
-import { formatVoiceCompactValue } from '../voice/provider-routing.js';
+import {
+  formatChatVoiceCompactValue,
+  formatModelsCompactValue,
+  formatVoiceCompactValue,
+} from '../voice/provider-routing.js';
 
 export const SETTINGS_SUBPAGE_TITLES = {
   hosts_list: '已接入电脑',
@@ -13,12 +17,15 @@ export const SETTINGS_SUBPAGE_TITLES = {
   password: '密码与配对登录',
   shares: '加密分享记录',
   capabilities: '各 AI 工具能力说明',
+  copilot: '目标副驾插件 (Beta)',
 };
 
 const SVG_ICONS = {
   plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
   laptop: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M2 20h20"/></svg>',
   headphones: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/></svg>',
+  models: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>',
+  mic: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0"/><path d="M12 17v5"/><path d="M9 22h6"/></svg>',
   bell: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>',
   sun: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>',
   globe: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>',
@@ -29,6 +36,7 @@ const SVG_ICONS = {
   grid: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>',
   chev: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>',
   back: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>',
+  target: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.5"/></svg>',
 };
 
 export function computePushBadgeMeta(statusText = '') {
@@ -155,7 +163,7 @@ export function createSettingsPanel(deps) {
     };
   }
 
-  function buildSignature(state, voiceCompact) {
+  function buildSignature(state, voiceSummaries) {
     const {
       hubState,
       themePref,
@@ -176,7 +184,8 @@ export function createSettingsPanel(deps) {
       activeHostId,
       themePref,
       langPref,
-      voiceCompact,
+      voiceSummaries,
+      copilotSummary: typeof deps.getCopilotSummaryText === 'function' ? deps.getCopilotSummaryText() : '',
       pushBadge: computePushBadgeMeta(cachedPushStatusText).text,
       tokenTail,
       enrollmentCode: hubState.enrollment?.code || '',
@@ -232,7 +241,8 @@ export function createSettingsPanel(deps) {
     `;
   }
 
-  function renderHomeHtml(state, voiceCompact) {
+  function renderHomeHtml(state, voiceSummaries) {
+    const { modelsCompact, voiceCompact, chatVoiceCompact } = voiceSummaries;
     const {
       hubState,
       themePref,
@@ -356,22 +366,64 @@ export function createSettingsPanel(deps) {
 
         ${hostStripHtml}
 
-        <!-- 分组：模型与偏好 -->
-        <section class="ios-section" data-settings-group="model-prefs">
-          <div class="ios-group-label settings-group-title">模型与偏好</div>
+        <!-- 分组：AI 与功能（底层模型池与上层 AI 功能彻底解耦） -->
+        <section class="ios-section" data-settings-group="ai-features">
+          <div class="ios-group-label settings-group-title">AI 与功能</div>
           <div class="ios-card">
             <button
               type="button"
               class="ios-row"
+              data-settings-row="ai_models"
+              onclick="openVoiceLab('models')"
+            >
+              <span class="ios-ico violet">${SVG_ICONS.models}</span>
+              <span class="ios-row-title">AI 模型与供应商</span>
+              <span class="ios-row-val" id="settingsModelsSummaryText">${deps.esc(modelsCompact)}</span>
+              <span class="ios-chev">${SVG_ICONS.chev}</span>
+            </button>
+
+            <button
+              type="button"
+              class="ios-row"
               data-settings-row="voice"
-              onclick="openVoiceLab('list')"
+              onclick="openVoiceLab('walk')"
             >
               <span class="ios-ico indigo">${SVG_ICONS.headphones}</span>
-              <span class="ios-row-title">边走边听</span>
+              <span class="ios-row-title">边走边听 (Beta)</span>
               <span class="ios-row-val" id="settingsVoiceSummaryText">${deps.esc(voiceCompact)}</span>
               <span class="ios-chev">${SVG_ICONS.chev}</span>
             </button>
 
+            <button
+              type="button"
+              class="ios-row"
+              data-settings-row="chat_voice"
+              onclick="openVoiceLab('chat')"
+            >
+              <span class="ios-ico emerald">${SVG_ICONS.mic}</span>
+              <span class="ios-row-title">聊天语音</span>
+              <span class="ios-row-val" id="settingsChatVoiceSummaryText">${deps.esc(chatVoiceCompact)}</span>
+              <span class="ios-chev">${SVG_ICONS.chev}</span>
+            </button>
+
+            <button
+              type="button"
+              class="ios-row"
+              data-settings-row="copilot"
+              onclick="openSettingsSubpage('copilot')"
+            >
+              <span class="ios-ico blue">${SVG_ICONS.target}</span>
+              <span class="ios-row-title">目标副驾插件 (Beta)</span>
+              <span class="ios-row-val" id="settingsCopilotSummaryText">${deps.esc(typeof deps.getCopilotSummaryText === 'function' ? deps.getCopilotSummaryText() : '未启用')}</span>
+              <span class="ios-chev">${SVG_ICONS.chev}</span>
+            </button>
+          </div>
+        </section>
+
+        <!-- 分组：通知与通用 -->
+        <section class="ios-section" data-settings-group="general">
+          <div class="ios-group-label settings-group-title">通知与通用</div>
+          <div class="ios-card">
             <button
               type="button"
               class="ios-row"
@@ -1036,8 +1088,13 @@ export function createSettingsPanel(deps) {
   function render(viewport, opts = {}) {
     if (!viewport) return;
     const state = deps.getState();
-    const voiceCompact = formatVoiceCompactValue(getVoiceConfig());
-    const signature = buildSignature(state, voiceCompact);
+    const voiceCfg = getVoiceConfig();
+    const voiceSummaries = {
+      modelsCompact: formatModelsCompactValue(voiceCfg),
+      voiceCompact: formatVoiceCompactValue(voiceCfg),
+      chatVoiceCompact: formatChatVoiceCompactValue(voiceCfg),
+    };
+    const signature = buildSignature(state, voiceSummaries);
 
     if (signature === lastRenderedKey && viewport.querySelector('.settings-wrap')) {
       syncPushSummaryBadge(state.cachedPushStatusText);
@@ -1065,8 +1122,15 @@ export function createSettingsPanel(deps) {
       html = renderSharesSubpageHtml(state);
     } else if (activeSubpage === 'capabilities') {
       html = renderCapabilitiesSubpageHtml();
+    } else if (activeSubpage === 'copilot') {
+      html = `
+        <div class="settings-wrap ios-settings-wrap ios-subpage-wrap" data-settings-subpage="copilot">
+          ${renderSubpageHeaderHtml(SETTINGS_SUBPAGE_TITLES.copilot)}
+          ${typeof deps.renderCopilotSettingsSubpageHtml === 'function' ? deps.renderCopilotSettingsSubpageHtml() : ''}
+        </div>
+      `;
     } else {
-      html = renderHomeHtml(state, voiceCompact);
+      html = renderHomeHtml(state, voiceSummaries);
     }
 
     viewport.innerHTML = html;

@@ -123,6 +123,8 @@ export const DEFAULT_VOICE_PREFS = Object.freeze({
   duckMusicMode: true,
   useByokForChatStt: false,
   useByokForChatTts: false,
+  chatSttTarget: 'native', // 'native' | 'follow_walk' | 'cred:<id>'
+  chatTtsTarget: 'native', // 'native' | 'follow_walk' | 'cred:<id>'
   autoPlayWalkReplies: true,
   speechRate: 1.0,
 })
@@ -333,9 +335,19 @@ function normalizeStageConfig(input = {}, stage = 'stt') {
   }
 }
 
+function normalizeFeatureTarget(rawTarget, legacyBool) {
+  const s = String(rawTarget ?? '').trim()
+  if (s === 'native' || s === 'follow_walk' || /^cred:[A-Za-z0-9_-]{1,80}$/.test(s)) {
+    return s
+  }
+  return legacyBool ? 'follow_walk' : 'native'
+}
+
 function normalizePrefs(input = {}) {
   const vadMs = Number(input?.vadSilenceMs)
   const speechRate = Number(input?.speechRate)
+  const chatSttTarget = normalizeFeatureTarget(input?.chatSttTarget, Boolean(input?.useByokForChatStt))
+  const chatTtsTarget = normalizeFeatureTarget(input?.chatTtsTarget, Boolean(input?.useByokForChatTts))
   return {
     activeProfileId: String(input?.activeProfileId || 'native').trim().slice(0, 80) || 'native',
     l2Policy: ALLOWED_L2_POLICIES.has(String(input?.l2Policy || '')) ? String(input.l2Policy) : 'pin',
@@ -349,8 +361,10 @@ function normalizePrefs(input = {}) {
     vadSilenceMs: Number.isFinite(vadMs) && vadMs >= 350 && vadMs <= 3000 ? Math.round(vadMs) : 850,
     autoListenAfterBriefing: input?.autoListenAfterBriefing !== undefined ? Boolean(input.autoListenAfterBriefing) : true,
     duckMusicMode: input?.duckMusicMode !== undefined ? Boolean(input.duckMusicMode) : true,
-    useByokForChatStt: Boolean(input?.useByokForChatStt),
-    useByokForChatTts: Boolean(input?.useByokForChatTts),
+    useByokForChatStt: chatSttTarget !== 'native',
+    useByokForChatTts: chatTtsTarget !== 'native',
+    chatSttTarget,
+    chatTtsTarget,
     autoPlayWalkReplies: input?.autoPlayWalkReplies !== undefined ? Boolean(input.autoPlayWalkReplies) : true,
     speechRate: Number.isFinite(speechRate) && speechRate >= 0.6 && speechRate <= 2.0
       ? Math.round(speechRate * 100) / 100
@@ -444,7 +458,10 @@ export class VoiceVault {
         decipher.setAuthTag(tag)
         const plainBuf = Buffer.concat([decipher.update(ciphertext), decipher.final()])
         const parsed = JSON.parse(plainBuf.toString('utf8'))
-        this._hydrateParsedState(parsed)
+        const migrated = this._hydrateParsedState(parsed)
+        if (migrated) {
+          await this.persist().catch(() => { })
+        }
       } catch {
         // missing file or unreadable vault starts cleanly with default native profile
         this.state = cloneDefaultState()
@@ -496,7 +513,37 @@ export class VoiceVault {
     if (!next.profiles.some(p => p.id === next.prefs.activeProfileId)) {
       next.prefs.activeProfileId = 'native'
     }
+    // Auto-migrate legacy `follow_walk` into explicit independent provider bindings so
+    // Chat Voice is never implicitly coupled to Walk Mode changes.
+    let migrated = false
+    const activeProf = next.profiles.find(p => p.id === next.prefs.activeProfileId) || next.profiles[0]
+    const matchStageCred = (stageCfg) => {
+      if (!stageCfg || !stageCfg.provider || stageCfg.provider === 'native') return null
+      const cid = String(stageCfg.credId || '').trim()
+      if (cid) {
+        const exact = next.credentials.find(c => c.id === cid && c.enabled !== false)
+        if (exact) return exact
+      }
+      return (
+        next.credentials.find(c => c.provider === stageCfg.provider && c.enabled !== false && c.active) ||
+        next.credentials.find(c => c.provider === stageCfg.provider && c.enabled !== false) ||
+        null
+      )
+    }
+    if (next.prefs.chatSttTarget === 'follow_walk') {
+      const matched = matchStageCred(activeProf?.stt)
+      next.prefs.chatSttTarget = matched ? `cred:${matched.id}` : 'native'
+      next.prefs.useByokForChatStt = next.prefs.chatSttTarget !== 'native'
+      migrated = true
+    }
+    if (next.prefs.chatTtsTarget === 'follow_walk') {
+      const matched = matchStageCred(activeProf?.tts)
+      next.prefs.chatTtsTarget = matched ? `cred:${matched.id}` : 'native'
+      next.prefs.useByokForChatTts = next.prefs.chatTtsTarget !== 'native'
+      migrated = true
+    }
     this.state = next
+    return migrated
   }
 
   async persist() {
@@ -737,6 +784,14 @@ export class VoiceVault {
         }
       }
     }
+    if (this.state.prefs.chatSttTarget === `cred:${cleanId}`) {
+      this.state.prefs.chatSttTarget = 'native'
+      this.state.prefs.useByokForChatStt = false
+    }
+    if (this.state.prefs.chatTtsTarget === `cred:${cleanId}`) {
+      this.state.prefs.chatTtsTarget = 'native'
+      this.state.prefs.useByokForChatTts = false
+    }
     await this.persist()
     return { ok: true, deletedId: cleanId, config: this.toPublicState() }
   }
@@ -803,7 +858,29 @@ export class VoiceVault {
   }
 
   async updatePrefs(patch = {}) {
-    const merged = { ...this.state.prefs, ...(patch && typeof patch === 'object' ? patch : {}) }
+    const cleanPatch = patch && typeof patch === 'object' ? { ...patch } : {}
+    const resolveLegacyFollow = (stage) => {
+      const profId = String(cleanPatch.activeProfileId || this.state.prefs.activeProfileId || 'native')
+      const activeProf = this.state.profiles.find(p => p.id === profId) || this.state.profiles[0]
+      const st = activeProf?.[stage]
+      if (!st || !st.provider || st.provider === 'native') return 'native'
+      const matched = this.resolveCredential({ provider: st.provider, credId: st.credId })
+      return matched ? `cred:${matched.id}` : 'native'
+    }
+    // Keep legacy boolean toggles in sync without coupling Chat Voice to Walk Mode
+    if ('useByokForChatStt' in cleanPatch && !('chatSttTarget' in cleanPatch)) {
+      cleanPatch.chatSttTarget = cleanPatch.useByokForChatStt ? resolveLegacyFollow('stt') : 'native'
+    }
+    if ('useByokForChatTts' in cleanPatch && !('chatTtsTarget' in cleanPatch)) {
+      cleanPatch.chatTtsTarget = cleanPatch.useByokForChatTts ? resolveLegacyFollow('tts') : 'native'
+    }
+    if (cleanPatch.chatSttTarget === 'follow_walk') {
+      cleanPatch.chatSttTarget = resolveLegacyFollow('stt')
+    }
+    if (cleanPatch.chatTtsTarget === 'follow_walk') {
+      cleanPatch.chatTtsTarget = resolveLegacyFollow('tts')
+    }
+    const merged = { ...this.state.prefs, ...cleanPatch }
     const normalized = normalizePrefs(merged)
     if (!this.state.profiles.some(p => p.id === normalized.activeProfileId)) {
       normalized.activeProfileId = 'native'

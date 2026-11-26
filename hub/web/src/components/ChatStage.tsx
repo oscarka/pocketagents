@@ -82,6 +82,12 @@ export function ChatStage() {
       </div>
 
       <div
+        class="copilot-review-card"
+        id="copilotReviewCard"
+        style="display:none;"
+      ></div>
+
+      <div
         class="composer-attachments-strip"
         id="composerAttachmentsStrip"
         style="display:none;"
@@ -188,6 +194,20 @@ export function ChatStage() {
               >
                 <span id="chatModelBtnLabel">🤖 默认模型</span>
                 <span style="opacity:0.65;font-size:10px;margin-left:2px;">▾</span>
+              </button>
+              <button
+                type="button"
+                class="voice-btn composer-mini-btn copilot-toggle-btn"
+                id="chatCopilotBtn"
+                style="display:none;"
+                title="调用外部插件分析当前回复"
+                onClick={e => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  (window as any).copilotOpenOrReview?.();
+                }}
+              >
+                🎯 副驾
               </button>
             </div>
             <button

@@ -20,6 +20,7 @@ import { HubCore } from './hub-core.js'
 import { captureStateDigest, buildStateDelta } from './delta-state.js'
 import { VoiceVault } from './voice-vault.js'
 import { VoiceCopilotEngine } from './voice-copilot.js'
+import { GoalCopilotBridge } from './goal-copilot-bridge.js'
 
 const gzipAsync = promisify(gzip)
 const HUB_MEDIA_CACHE_MAX_ITEM_BYTES = 1.5 * 1024 * 1024
@@ -374,6 +375,21 @@ export function createHubServer({
     fetchImpl: voiceFetch,
     now: hub.now,
   })
+  const resolvedCopilotConfigFile = hub.stateFile
+    ? join(dirname(hub.stateFile), 'copilot-plugin.json')
+    : ''
+  const goalCopilot = new GoalCopilotBridge({
+    hub,
+    voiceVault,
+    configFile: resolvedCopilotConfigFile,
+    fetchImpl: voiceFetch,
+    logger,
+  })
+  const prevOnTaskCompleted = hub.onTaskCompleted
+  hub.onTaskCompleted = payload => {
+    try { prevOnTaskCompleted?.(payload) } catch { }
+    void goalCopilot.handleTaskCompleted(payload)
+  }
 
   const authVerifyFailBuckets = new Map()
   const AUTH_VERIFY_WINDOW_MS = 60_000
@@ -1253,6 +1269,9 @@ export function createHubServer({
       if (method === 'POST' && hostCommandMatch) {
         const hostId = decodeURIComponent(hostCommandMatch[1])
         const outcome = hub.queueCommand(hostId, body)
+        if (outcome.ok && (body?.type === 'prompt' || body?.type === 'steer') && !body?.fromCopilot && body?.agentId) {
+          void goalCopilot.notifyUserSpoke({ hostId, agentId: body.agentId })
+        }
         const status = outcome.ok ? 200 : outcome.statusCode || 404
         return { status, json: outcome }
       }
@@ -1940,6 +1959,36 @@ export function createHubServer({
         if (method === 'POST' && pathname === '/api/voice/pin/clear') {
           voiceCopilot.pinStore.clear(body?.sessionId || 'default')
           return { status: 200, json: { ok: true } }
+        }
+      }
+
+      // Optional plug-and-play External Reply-Slot Plugin APIs (strictly behind admin HUB_TOKEN; zero impact when off)
+      if (pathname.startsWith('/api/copilot/')) {
+        if (method === 'GET' && pathname === '/api/copilot/config') {
+          return { status: 200, json: { ok: true, config: goalCopilot.getConfig() } }
+        }
+        if (method === 'POST' && pathname === '/api/copilot/config') {
+          const outcome = goalCopilot.updateConfig(body || {})
+          return { status: outcome.ok ? 200 : 400, json: outcome }
+        }
+        if (method === 'GET' && pathname === '/api/copilot/health') {
+          const overrideUrl = urlObj.searchParams.get('url') || ''
+          const outcome = await goalCopilot.checkHealth(overrideUrl)
+          return { status: 200, json: outcome }
+        }
+        if (method === 'GET' && pathname === '/api/copilot/panel') {
+          const outcome = goalCopilot.getCachedPanel({
+            hostId: urlObj.searchParams.get('hostId') || 'local',
+            agentId: urlObj.searchParams.get('agentId') || '',
+          })
+          return { status: 200, json: outcome }
+        }
+        if (method === 'POST' && pathname === '/api/copilot/panel/stream') {
+          return await goalCopilot.streamPanel({ ...(body || {}), signal })
+        }
+        if (method === 'POST' && pathname === '/api/copilot/action') {
+          const outcome = await goalCopilot.runAction(body || {})
+          return { status: outcome.ok ? 200 : 400, json: outcome }
         }
       }
 

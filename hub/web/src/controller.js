@@ -14,6 +14,7 @@ import {
   shouldShowInstallHint,
 } from './utils/format';
 import { createSettingsPanel } from './settings/settings-panel.js';
+import { createGoalCopilotUi } from './copilot/goal-copilot-ui.js';
 import {
   renderInlineMarkdown,
   renderMarkdownBlocks,
@@ -2356,14 +2357,232 @@ export function initHubController() {
     const myRunId = ++activeSpeechState.runId;
     releaseSpeechRuntimeHandles();
 
-    // Optional BYOK Cloud TTS for normal chat replies (strictly opt-in via Voice Lab settings, OFF by default)
-    const byokCfg = window.__dshVoiceConfig;
-    if (
-      byokCfg?.prefs?.useByokForChatTts &&
-      byokCfg?.activeProfile?.tts?.provider &&
-      byokCfg.activeProfile.tts.provider !== 'native' &&
-      typeof window.__dshVoiceByokSpeak === 'function'
-    ) {
+    // Always silence any active cloud/native TTS or WebKit speechSynthesis BEFORE starting a new
+    // utterance so two voices can NEVER talk over each other!
+    try { window.__dshVoiceByokStopSpeak?.(); } catch { }
+    try {
+      if (window.speechSynthesis && (window.speechSynthesis.speaking || window.speechSynthesis.pending || window.speechSynthesis.paused)) {
+        window.speechSynthesis.cancel();
+      }
+    } catch { }
+
+    const startNativeBrowserSpeechNow = () => {
+      if (activeSpeechState.runId !== myRunId) return;
+      const synth = window.speechSynthesis;
+      const wasSynthBusy = Boolean(synth.speaking || synth.pending || synth.paused);
+      if (wasSynthBusy) {
+        try {
+          synth.cancel();
+        } catch { }
+      }
+
+      const nowMs = Date.now();
+      activeSpeechState.playing = true;
+      activeSpeechState.sessionId = effectiveSessionId;
+      activeSpeechState.msgIdx = msgIdx;
+      activeSpeechState.rawSourceText = rawText;
+      activeSpeechState.hasDistinctSummary = prepared.hasDistinctSummary;
+      activeSpeechState.fullSpokenText = fullSpokenText;
+      activeSpeechState.docLang = prepared.docLang;
+      activeSpeechState.segmentBaseOffset = actualBaseOffset;
+      activeSpeechState.segmentStartedAt = nowMs;
+      activeSpeechState.segmentRate = activeSpeechState.rate;
+      activeSpeechState.boundaryCharOffset = -1;
+      activeSpeechState.boundaryUpdatedAt = 0;
+      syncSpeechFooterDom();
+      void acquireSpeechWakeLock(myRunId);
+
+      const voices = synth.getVoices() || [];
+      const chosenVoice = pickBestBrowserVoice(voices, prepared.docLang);
+      const isAppleWebKit = isIosDevice() || (/AppleWebKit/i.test(navigator.userAgent || '') && !/Chrome|Chromium|Edg/i.test(navigator.userAgent || ''));
+      const chunks = splitIntoContinuousBrowserChunks(remainingText, isAppleWebKit);
+
+      let runningChunkOffset = actualBaseOffset;
+      const chunkDescriptors = chunks.map(chunkText => {
+        const posInFull = fullSpokenText.indexOf(chunkText, runningChunkOffset);
+        const resolvedChunkBase = posInFull >= 0 ? posInFull : runningChunkOffset;
+        runningChunkOffset = resolvedChunkBase + chunkText.length;
+        return { text: chunkText, baseOffset: resolvedChunkBase };
+      });
+
+      let currentChunkIdx = -1;
+      let currentAdvanceFn = null;
+      let lastChunkStartAt = Date.now();
+      let lastSynthBusyAt = Date.now();
+      let errorSkipCount = 0;
+
+      const finishSpeechPlayback = () => {
+        if (activeSpeechState.runId !== myRunId) return;
+        activeSpeechState.playing = false;
+        activeSpeechState.sessionId = '';
+        activeSpeechState.msgIdx = -1;
+        activeSpeechState.rawSourceText = '';
+        releaseSpeechRuntimeHandles();
+        syncSpeechFooterDom();
+      };
+
+      const findNextSentenceOffset = fromCharOffset => {
+        const tail = fullSpokenText.slice(Math.max(0, fromCharOffset));
+        const m = /[。！？.!?\n]+\s*/.exec(tail);
+        if (!m) return -1;
+        const candidate = Math.max(0, fromCharOffset) + m.index + m[0].length;
+        return candidate < fullSpokenText.length - 2 ? candidate : -1;
+      };
+
+      const speakChunkAt = idx => {
+        if (activeSpeechState.runId !== myRunId || !activeSpeechState.playing) return;
+        if (idx >= chunkDescriptors.length) {
+          finishSpeechPlayback();
+          return;
+        }
+
+        currentChunkIdx = idx;
+        const desc = chunkDescriptors[idx];
+        const chunkNow = Date.now();
+        lastChunkStartAt = chunkNow;
+        lastSynthBusyAt = chunkNow;
+        activeSpeechState.segmentBaseOffset = desc.baseOffset;
+        activeSpeechState.segmentStartedAt = chunkNow;
+        activeSpeechState.segmentRate = activeSpeechState.rate;
+        activeSpeechState.boundaryCharOffset = desc.baseOffset;
+        activeSpeechState.boundaryUpdatedAt = chunkNow;
+
+        const u = new SpeechSynthesisUtterance(desc.text);
+        // Pin strong reference on window/state so JSC (iOS Safari) & V8 (Chromium) GC never collect active utterances mid-sentence!
+        activeSpeechState.pinnedUtterances.push(u);
+        window.__dshPinnedUtterances = activeSpeechState.pinnedUtterances;
+
+        u.lang = chosenVoice?.lang || (prepared.docLang === 'en' ? 'en-US' : 'zh-CN');
+        if (chosenVoice) {
+          u.voice = chosenVoice;
+        }
+        u.rate = activeSpeechState.rate;
+
+        let settled = false;
+        const unpinUtterance = () => {
+          const pos = activeSpeechState.pinnedUtterances.indexOf(u);
+          if (pos >= 0) activeSpeechState.pinnedUtterances.splice(pos, 1);
+        };
+        const advanceToNext = () => {
+          if (settled || activeSpeechState.runId !== myRunId) return;
+          settled = true;
+          currentAdvanceFn = null;
+          unpinUtterance();
+          if (idx + 1 < chunkDescriptors.length) {
+            speakChunkAt(idx + 1);
+          } else {
+            finishSpeechPlayback();
+          }
+        };
+        currentAdvanceFn = advanceToNext;
+
+        u.onstart = () => {
+          if (activeSpeechState.runId !== myRunId) return;
+          const t = Date.now();
+          lastChunkStartAt = t;
+          lastSynthBusyAt = t;
+          activeSpeechState.segmentStartedAt = t;
+        };
+        u.onboundary = ev => {
+          if (activeSpeechState.runId !== myRunId) return;
+          const t = Date.now();
+          lastSynthBusyAt = t;
+          if (ev && typeof ev.charIndex === 'number' && ev.charIndex >= 0) {
+            activeSpeechState.boundaryCharOffset = desc.baseOffset + ev.charIndex;
+            activeSpeechState.boundaryUpdatedAt = t;
+          }
+        };
+        u.onend = () => {
+          advanceToNext();
+        };
+        u.onerror = ev => {
+          if (settled || activeSpeechState.runId !== myRunId) return;
+          settled = true;
+          currentAdvanceFn = null;
+          unpinUtterance();
+          const errCode = String(ev?.error || '').toLowerCase();
+          if (errCode === 'not-allowed' || errCode === 'service-not-allowed') {
+            finishSpeechPlayback();
+            return;
+          }
+          // Auto-skip past a choked phrase/chunk instead of abruptly dying halfway through a code explanation
+          if (errorSkipCount < 3 && idx + 1 < chunkDescriptors.length) {
+            errorSkipCount += 1;
+            speakChunkAt(idx + 1);
+            return;
+          }
+          if (_recoveryDepth < 2 && chunkDescriptors.length === 1) {
+            const approxOffset = computeSpeechResumeOffset({
+              fullText: fullSpokenText,
+              docLang: prepared.docLang,
+              segmentBaseOffset: activeSpeechState.segmentBaseOffset,
+              segmentStartedAt: activeSpeechState.segmentStartedAt,
+              segmentRate: activeSpeechState.segmentRate,
+              boundaryCharOffset: activeSpeechState.boundaryCharOffset,
+              boundaryUpdatedAt: activeSpeechState.boundaryUpdatedAt,
+              nowMs: Date.now(),
+            });
+            const nextSentenceOffset = findNextSentenceOffset(Math.max(approxOffset, desc.baseOffset + 6));
+            if (nextSentenceOffset > desc.baseOffset) {
+              startAssistantSpeech(msgIdx, {
+                startOffset: nextSentenceOffset,
+                _recoveryDepth: _recoveryDepth + 1,
+                rawTextOverride: rawText,
+                sessionIdOverride: effectiveSessionId,
+              });
+              return;
+            }
+          }
+          finishSpeechPlayback();
+        };
+
+        try {
+          if (synth.paused) synth.resume();
+        } catch { }
+        synth.speak(u);
+      };
+
+      // Keepalive & silent-onend watchdog: un-pause wedged audio ducking and advance if WebKit/Blink drops `onend`
+      activeSpeechState.watchdogTimer = setInterval(() => {
+        if (activeSpeechState.runId !== myRunId || !activeSpeechState.playing) {
+          clearInterval(activeSpeechState.watchdogTimer);
+          activeSpeechState.watchdogTimer = null;
+          return;
+        }
+        try {
+          if (synth.paused) {
+            synth.resume();
+          }
+          if (synth.speaking || synth.pending) {
+            lastSynthBusyAt = Date.now();
+            return;
+          }
+          if (currentChunkIdx >= 0 && Date.now() - Math.max(lastChunkStartAt, lastSynthBusyAt) > 1600) {
+            if (typeof currentAdvanceFn === 'function') {
+              currentAdvanceFn();
+            } else {
+              finishSpeechPlayback();
+            }
+          }
+        } catch { }
+      }, 900);
+
+      // Fresh user tap (`!wasSynthBusy`) MUST call `synth.speak` synchronously to unlock iOS Safari audio;
+      // when cancelling an already-speaking utterance, give WebKit 30ms to settle its async `stopSpeaking` IPC.
+      if (wasSynthBusy && isAppleWebKit) {
+        activeSpeechState.handoffTimer = setTimeout(() => {
+          activeSpeechState.handoffTimer = null;
+          speakChunkAt(0);
+        }, 30);
+      } else {
+        speakChunkAt(0);
+      }
+    };
+
+    // Independent Chat Voice Cloud TTS routing: checks `chatTtsTarget` (via __dshVoiceByokCanSpeak),
+    // NEVER coupled to Walk Mode's activeProfile! If voice config hasn't hydrated yet on cold boot,
+    // wait briefly for it before ever falling back to native browser speech.
+    const launchCloudChatTts = () => {
       activeSpeechState.playing = true;
       activeSpeechState.sessionId = effectiveSessionId;
       activeSpeechState.msgIdx = msgIdx;
@@ -2381,218 +2600,44 @@ export function initHubController() {
         releaseSpeechRuntimeHandles();
         syncSpeechFooterDom();
       });
+    };
+
+    const hasCloudChatTtsConfigured = () => {
+      if (typeof window.__dshVoiceByokSpeak !== 'function') return false;
+      if (typeof window.__dshVoiceByokCanSpeak === 'function') {
+        return Boolean(window.__dshVoiceByokCanSpeak());
+      }
+      const cfg = window.__dshVoiceConfig;
+      const t = String(cfg?.prefs?.chatTtsTarget || '');
+      return t.startsWith('cred:') || Boolean(cfg?.prefs?.useByokForChatTts);
+    };
+
+    if (hasCloudChatTtsConfigured()) {
+      launchCloudChatTts();
       return;
     }
 
-    const synth = window.speechSynthesis;
-    const wasSynthBusy = Boolean(synth.speaking || synth.pending || synth.paused);
-    if (wasSynthBusy) {
-      try {
-        synth.cancel();
-      } catch { }
-    }
-
-    const nowMs = Date.now();
-    activeSpeechState.playing = true;
-    activeSpeechState.sessionId = effectiveSessionId;
-    activeSpeechState.msgIdx = msgIdx;
-    activeSpeechState.rawSourceText = rawText;
-    activeSpeechState.hasDistinctSummary = prepared.hasDistinctSummary;
-    activeSpeechState.fullSpokenText = fullSpokenText;
-    activeSpeechState.docLang = prepared.docLang;
-    activeSpeechState.segmentBaseOffset = actualBaseOffset;
-    activeSpeechState.segmentStartedAt = nowMs;
-    activeSpeechState.segmentRate = activeSpeechState.rate;
-    activeSpeechState.boundaryCharOffset = -1;
-    activeSpeechState.boundaryUpdatedAt = 0;
-    syncSpeechFooterDom();
-    void acquireSpeechWakeLock(myRunId);
-
-    const voices = synth.getVoices() || [];
-    const chosenVoice = pickBestBrowserVoice(voices, prepared.docLang);
-    const isAppleWebKit = isIosDevice() || (/AppleWebKit/i.test(navigator.userAgent || '') && !/Chrome|Chromium|Edg/i.test(navigator.userAgent || ''));
-    const chunks = splitIntoContinuousBrowserChunks(remainingText, isAppleWebKit);
-
-    let runningChunkOffset = actualBaseOffset;
-    const chunkDescriptors = chunks.map(chunkText => {
-      const posInFull = fullSpokenText.indexOf(chunkText, runningChunkOffset);
-      const resolvedChunkBase = posInFull >= 0 ? posInFull : runningChunkOffset;
-      runningChunkOffset = resolvedChunkBase + chunkText.length;
-      return { text: chunkText, baseOffset: resolvedChunkBase };
-    });
-
-    let currentChunkIdx = -1;
-    let currentAdvanceFn = null;
-    let lastChunkStartAt = Date.now();
-    let lastSynthBusyAt = Date.now();
-    let errorSkipCount = 0;
-
-    const finishSpeechPlayback = () => {
-      if (activeSpeechState.runId !== myRunId) return;
-      activeSpeechState.playing = false;
-      activeSpeechState.sessionId = '';
-      activeSpeechState.msgIdx = -1;
-      activeSpeechState.rawSourceText = '';
-      releaseSpeechRuntimeHandles();
+    // If voice config hasn't loaded yet on cold boot, hydrate it once before falling back to machine voice!
+    if (!window.__dshVoiceConfig && typeof window.__dshRefreshVoiceConfig === 'function') {
+      activeSpeechState.playing = true;
+      activeSpeechState.sessionId = effectiveSessionId;
+      activeSpeechState.msgIdx = msgIdx;
       syncSpeechFooterDom();
-    };
-
-    const findNextSentenceOffset = fromCharOffset => {
-      const tail = fullSpokenText.slice(Math.max(0, fromCharOffset));
-      const m = /[。！？.!?\n]+\s*/.exec(tail);
-      if (!m) return -1;
-      const candidate = Math.max(0, fromCharOffset) + m.index + m[0].length;
-      return candidate < fullSpokenText.length - 2 ? candidate : -1;
-    };
-
-    const speakChunkAt = idx => {
-      if (activeSpeechState.runId !== myRunId || !activeSpeechState.playing) return;
-      if (idx >= chunkDescriptors.length) {
-        finishSpeechPlayback();
-        return;
-      }
-
-      currentChunkIdx = idx;
-      const desc = chunkDescriptors[idx];
-      const chunkNow = Date.now();
-      lastChunkStartAt = chunkNow;
-      lastSynthBusyAt = chunkNow;
-      activeSpeechState.segmentBaseOffset = desc.baseOffset;
-      activeSpeechState.segmentStartedAt = chunkNow;
-      activeSpeechState.segmentRate = activeSpeechState.rate;
-      activeSpeechState.boundaryCharOffset = desc.baseOffset;
-      activeSpeechState.boundaryUpdatedAt = chunkNow;
-
-      const u = new SpeechSynthesisUtterance(desc.text);
-      // Pin strong reference on window/state so JSC (iOS Safari) & V8 (Chromium) GC never collect active utterances mid-sentence!
-      activeSpeechState.pinnedUtterances.push(u);
-      window.__dshPinnedUtterances = activeSpeechState.pinnedUtterances;
-
-      u.lang = chosenVoice?.lang || (prepared.docLang === 'en' ? 'en-US' : 'zh-CN');
-      if (chosenVoice) {
-        u.voice = chosenVoice;
-      }
-      u.rate = activeSpeechState.rate;
-
-      let settled = false;
-      const unpinUtterance = () => {
-        const pos = activeSpeechState.pinnedUtterances.indexOf(u);
-        if (pos >= 0) activeSpeechState.pinnedUtterances.splice(pos, 1);
-      };
-      const advanceToNext = () => {
-        if (settled || activeSpeechState.runId !== myRunId) return;
-        settled = true;
-        currentAdvanceFn = null;
-        unpinUtterance();
-        if (idx + 1 < chunkDescriptors.length) {
-          speakChunkAt(idx + 1);
+      void Promise.race([
+        Promise.resolve(window.__dshRefreshVoiceConfig()).catch(() => null),
+        new Promise(resolve => setTimeout(resolve, 2500)),
+      ]).then(() => {
+        if (activeSpeechState.runId !== myRunId) return;
+        if (hasCloudChatTtsConfigured()) {
+          launchCloudChatTts();
         } else {
-          finishSpeechPlayback();
+          startNativeBrowserSpeechNow();
         }
-      };
-      currentAdvanceFn = advanceToNext;
-
-      u.onstart = () => {
-        if (activeSpeechState.runId !== myRunId) return;
-        const t = Date.now();
-        lastChunkStartAt = t;
-        lastSynthBusyAt = t;
-        activeSpeechState.segmentStartedAt = t;
-      };
-      u.onboundary = ev => {
-        if (activeSpeechState.runId !== myRunId) return;
-        const t = Date.now();
-        lastSynthBusyAt = t;
-        if (ev && typeof ev.charIndex === 'number' && ev.charIndex >= 0) {
-          activeSpeechState.boundaryCharOffset = desc.baseOffset + ev.charIndex;
-          activeSpeechState.boundaryUpdatedAt = t;
-        }
-      };
-      u.onend = () => {
-        advanceToNext();
-      };
-      u.onerror = ev => {
-        if (settled || activeSpeechState.runId !== myRunId) return;
-        settled = true;
-        currentAdvanceFn = null;
-        unpinUtterance();
-        const errCode = String(ev?.error || '').toLowerCase();
-        if (errCode === 'not-allowed' || errCode === 'service-not-allowed') {
-          finishSpeechPlayback();
-          return;
-        }
-        // Auto-skip past a choked phrase/chunk instead of abruptly dying halfway through a code explanation
-        if (errorSkipCount < 3 && idx + 1 < chunkDescriptors.length) {
-          errorSkipCount += 1;
-          speakChunkAt(idx + 1);
-          return;
-        }
-        if (_recoveryDepth < 2 && chunkDescriptors.length === 1) {
-          const approxOffset = computeSpeechResumeOffset({
-            fullText: fullSpokenText,
-            docLang: prepared.docLang,
-            segmentBaseOffset: activeSpeechState.segmentBaseOffset,
-            segmentStartedAt: activeSpeechState.segmentStartedAt,
-            segmentRate: activeSpeechState.segmentRate,
-            boundaryCharOffset: activeSpeechState.boundaryCharOffset,
-            boundaryUpdatedAt: activeSpeechState.boundaryUpdatedAt,
-            nowMs: Date.now(),
-          });
-          const nextSentenceOffset = findNextSentenceOffset(Math.max(approxOffset, desc.baseOffset + 6));
-          if (nextSentenceOffset > desc.baseOffset) {
-            startAssistantSpeech(msgIdx, {
-              startOffset: nextSentenceOffset,
-              _recoveryDepth: _recoveryDepth + 1,
-              rawTextOverride: rawText,
-              sessionIdOverride: effectiveSessionId,
-            });
-            return;
-          }
-        }
-        finishSpeechPlayback();
-      };
-
-      try {
-        if (synth.paused) synth.resume();
-      } catch { }
-      synth.speak(u);
-    };
-
-    // Keepalive & silent-onend watchdog: un-pause wedged audio ducking and advance if WebKit/Blink drops `onend`
-    activeSpeechState.watchdogTimer = setInterval(() => {
-      if (activeSpeechState.runId !== myRunId || !activeSpeechState.playing) {
-        clearInterval(activeSpeechState.watchdogTimer);
-        activeSpeechState.watchdogTimer = null;
-        return;
-      }
-      try {
-        if (synth.paused) {
-          synth.resume();
-        }
-        if (synth.speaking || synth.pending) {
-          lastSynthBusyAt = Date.now();
-          return;
-        }
-        if (currentChunkIdx >= 0 && Date.now() - Math.max(lastChunkStartAt, lastSynthBusyAt) > 1600) {
-          if (typeof currentAdvanceFn === 'function') {
-            currentAdvanceFn();
-          } else {
-            finishSpeechPlayback();
-          }
-        }
-      } catch { }
-    }, 900);
-
-    // Fresh user tap (`!wasSynthBusy`) MUST call `synth.speak` synchronously to unlock iOS Safari audio;
-    // when cancelling an already-speaking utterance, give WebKit 30ms to settle its async `stopSpeaking` IPC.
-    if (wasSynthBusy && isAppleWebKit) {
-      activeSpeechState.handoffTimer = setTimeout(() => {
-        activeSpeechState.handoffTimer = null;
-        speakChunkAt(0);
-      }, 30);
-    } else {
-      speakChunkAt(0);
+      });
+      return;
     }
+
+    startNativeBrowserSpeechNow();
   }
 
   function toggleSpeakAssistantReply(msgIdx) {
@@ -2677,6 +2722,14 @@ export function initHubController() {
     }
 
     const chatHeaderTitle = stripRedundantProjectPrefix(s.title, s.project);
+    const copilotSessKey = `${s.hostId || 'local'}::${s.id || ''}`;
+    if (copilotSessKey !== lastCopilotSyncedSessionKey) {
+      lastCopilotSyncedSessionKey = copilotSessKey;
+      void goalCopilotUi.syncSessionGoal(s);
+    } else {
+      goalCopilotUi.handleSessionUpdate(s);
+      goalCopilotUi.renderForActiveSession();
+    }
     const chatTitleEl = document.getElementById('chatTitle');
     if (chatTitleEl && chatTitleEl.dataset.titleKey !== `${langPref}:${chatHeaderTitle}`) {
       chatTitleEl.dataset.titleKey = `${langPref}:${chatHeaderTitle}`;
@@ -8504,6 +8557,30 @@ export function initHubController() {
     }
   }
 
+  const goalCopilotUi = createGoalCopilotUi({
+    getToken,
+    getActiveSession: () => {
+      const f = findSessionGlobal(activeSessionId);
+      return f ? f.session : null;
+    },
+    esc,
+    showToast,
+    copyText,
+    autoGrowComposer,
+    sendPromptToActiveSession,
+    onPluginConfigChanged: () => {
+      lastRenderedSettingsKey = '';
+      settingsPanel.invalidate();
+      if (currentTab === 'settings') renderSettingsTab();
+    },
+    rerenderSettings: () => {
+      lastRenderedSettingsKey = '';
+      settingsPanel.invalidate();
+      if (currentTab === 'settings') renderSettingsTab();
+    },
+  });
+  let lastCopilotSyncedSessionKey = '';
+
   const settingsPanel = createSettingsPanel({
     getState: () => ({
       hubState,
@@ -8518,6 +8595,8 @@ export function initHubController() {
       tokenTail: getToken().slice(-4),
     }),
     getViewport: () => document.getElementById('mainViewport'),
+    getCopilotSummaryText: () => goalCopilotUi.getPluginSummaryText(),
+    renderCopilotSettingsSubpageHtml: () => goalCopilotUi.renderSettingsSubpageHtml(),
     isHostLiveOnline,
     formatHostTelemetry,
     compareSemver,
@@ -11078,6 +11157,9 @@ export function initHubController() {
     if (isDemoMode) return;
     if (urlParams.get('nosse') === '1') return;
     if (!getToken() && authLockConfirmed) return;
+    if (typeof goalCopilotUi !== 'undefined' && !goalCopilotUi.getPluginConfig().loaded) {
+      void goalCopilotUi.refreshConfig({ probeHealth: true });
+    }
     const prevSseEventAt = lastSseEventAt;
     closeSSE();
     const tk = getToken();
@@ -12147,6 +12229,7 @@ export function initHubController() {
   } else if (getToken()) {
     (async () => {
       await fetchState();
+      void goalCopilotUi.refreshConfig({ probeHealth: true });
       if (getToken() && !authLockConfirmed) {
         connectSSE();
       }

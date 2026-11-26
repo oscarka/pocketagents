@@ -10,9 +10,11 @@ import {
   extractHostFromUrl,
   formatVoiceCompactValue,
   getCredentialActiveRoles,
+  getCredentialFeatureUsages,
   getStageSelectValue,
   inferDefaultBrainModel,
   providerSupportsStage,
+  resolveFeatureStageConfig,
 } from '../voice/provider-routing.js';
 
 export interface PublicCredential {
@@ -61,6 +63,8 @@ export interface VoicePrefs {
   duckMusicMode: boolean;
   useByokForChatStt: boolean;
   useByokForChatTts: boolean;
+  chatSttTarget?: string;
+  chatTtsTarget?: string;
   autoPlayWalkReplies: boolean;
   speechRate: number;
 }
@@ -98,7 +102,7 @@ export interface VoiceProviderSheetProps {
   onClose: () => void;
   config: VoiceConfigState;
   loadingCfg: boolean;
-  initialView?: 'list' | 'add' | 'bench';
+  initialView?: 'models' | 'walk' | 'chat' | 'list' | 'add' | 'bench';
   onConfigChange: (next: VoiceConfigState) => void;
   onUpdatePrefs: (patch: Partial<VoicePrefs>) => Promise<void>;
   onSoundCheck: () => Promise<void>;
@@ -206,7 +210,10 @@ export function VoiceProviderSheet(props: VoiceProviderSheetProps) {
     toast,
   } = props;
 
-  const [viewMode, setViewMode] = useState<'list' | 'editor'>('list');
+  const [viewMode, setViewMode] = useState<'models' | 'walk' | 'chat' | 'editor'>('walk');
+  const [returnView, setReturnView] = useState<'models' | 'walk' | 'chat'>('models');
+  const [chatTestingTts, setChatTestingTts] = useState(false);
+  const [chatTtsMsg, setChatTtsMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [draft, setDraft] = useState<ProviderDraft>(() => makeBlankDraft());
   const [editingCredSummary, setEditingCredSummary] = useState('');
   const [savingEditor, setSavingEditor] = useState(false);
@@ -237,13 +244,24 @@ export function VoiceProviderSheet(props: VoiceProviderSheetProps) {
   useEffect(() => {
     if (!open) return;
     setRoutingMsg(null);
+    setChatTtsMsg(null);
     setEditorError('');
     if (initialView === 'add') {
       setDraft(makeBlankDraft());
       setEditingCredSummary('');
+      setReturnView('models');
       setViewMode('editor');
+    } else if (initialView === 'models') {
+      setReturnView('models');
+      setViewMode('models');
+      setGeekOpen(false);
+    } else if (initialView === 'chat') {
+      setReturnView('chat');
+      setViewMode('chat');
+      setGeekOpen(false);
     } else {
-      setViewMode('list');
+      setReturnView('walk');
+      setViewMode('walk');
       setGeekOpen(initialView === 'bench');
     }
   }, [open, initialView]);
@@ -456,6 +474,7 @@ export function VoiceProviderSheet(props: VoiceProviderSheetProps) {
     setEditingCredSummary('');
     setEditorError('');
     setDraftTestRes(null);
+    if (viewMode !== 'editor') setReturnView(viewMode);
     setViewMode('editor');
   };
 
@@ -464,7 +483,52 @@ export function VoiceProviderSheet(props: VoiceProviderSheetProps) {
     setEditingCredSummary(cred.authSummary || '');
     setEditorError('');
     setDraftTestRes(null);
+    if (viewMode !== 'editor') setReturnView(viewMode);
     setViewMode('editor');
+  };
+
+  const openModelsPoolFromFeature = (fromView: 'walk' | 'chat') => {
+    setReturnView(fromView);
+    setViewMode('models');
+  };
+
+  const handleTestChatTts = async () => {
+    onUnlockAudio?.();
+    const target = String(config.prefs.chatTtsTarget || (config.prefs.useByokForChatTts ? 'follow_walk' : 'native'));
+    const stageOverride = resolveFeatureStageConfig(target, 'tts', activeProf, creds);
+    const sample = '你好，这是聊天页消息朗读试听。';
+    setChatTestingTts(true);
+    setChatTtsMsg(null);
+    try {
+      if (!stageOverride) {
+        if (typeof window !== 'undefined' && window.speechSynthesis && typeof SpeechSynthesisUtterance !== 'undefined') {
+          window.speechSynthesis.cancel();
+          const u = new SpeechSynthesisUtterance(sample);
+          u.lang = 'zh-CN';
+          window.speechSynthesis.speak(u);
+        }
+        setChatTtsMsg({ ok: true, text: '免费本机播报已开始（请确保手机未静音）' });
+        return;
+      }
+      const res = await apiCall('/api/voice/tts', {
+        method: 'POST',
+        body: JSON.stringify({ text: sample, profileId: activeProf.id, stageOverride }),
+      });
+      const data = await res.json().catch(() => ({ ok: false, error: `HTTP ${res.status}` }));
+      if (!res.ok || !data?.ok || !data.audioBase64) {
+        setChatTtsMsg({ ok: false, text: `播报失败：${data?.error || '请检查密钥与模型'}` });
+        return;
+      }
+      const played = onPlayTestAudio ? await onPlayTestAudio(data.audioBase64, data.mimeType) : true;
+      setChatTtsMsg({
+        ok: Boolean(played),
+        text: played ? `云端人声正常 (${data.latencyMs ?? 0}ms)` : '音频已返回，但手机拦截了播放，请再点一次',
+      });
+    } catch (err: any) {
+      setChatTtsMsg({ ok: false, text: `试听异常：${err?.message || '网络失败'}` });
+    } finally {
+      setChatTestingTts(false);
+    }
   };
 
   const handleProtocolChange = (nextProv: ProviderDraft['provider']) => {
@@ -584,7 +648,7 @@ export function VoiceProviderSheet(props: VoiceProviderSheetProps) {
       }
 
       onConfigChange(latestCfg);
-      setViewMode('list');
+      setViewMode(returnView);
 
       const curRoles = getCredentialActiveRoles(savedCred.id, latestCfg.activeProfile, latestCfg.credentials);
       if (draft.setAsDefault) {
@@ -632,6 +696,26 @@ export function VoiceProviderSheet(props: VoiceProviderSheetProps) {
   const isVolcDraft = draft.provider === 'volcengine_asr' || draft.provider === 'volcengine_tts';
   const compactSummary = formatVoiceCompactValue(config);
 
+  const rawChatSttTarget = String(config.prefs.chatSttTarget || 'native');
+  const rawChatTtsTarget = String(config.prefs.chatTtsTarget || 'native');
+  const chatSttTargetVal =
+    rawChatSttTarget === 'follow_walk'
+      ? (sttVal.startsWith('cred:') ? sttVal : 'native')
+      : rawChatSttTarget;
+  const chatTtsTargetVal =
+    rawChatTtsTarget === 'follow_walk'
+      ? (ttsVal.startsWith('cred:') ? ttsVal : 'native')
+      : rawChatTtsTarget;
+  const navTitle =
+    viewMode === 'editor'
+      ? (draft.id ? '编辑 Provider' : '添加 Provider')
+      : viewMode === 'models'
+        ? 'AI 模型与供应商'
+        : viewMode === 'chat'
+          ? '聊天语音'
+          : '边走边听 (Beta)';
+  const showBackBtn = viewMode === 'editor' || (viewMode === 'models' && returnView !== 'models');
+
   return (
     <div
       id="voiceLabSheet"
@@ -646,14 +730,20 @@ export function VoiceProviderSheet(props: VoiceProviderSheetProps) {
         {/* 顶部栏：Apple 极简导航栏 */}
         <div class="vp-sheet-nav">
           <div class="vp-sheet-nav-left">
-            {viewMode === 'editor' && (
+            {showBackBtn && (
               <button
                 type="button"
                 class="vp-nav-back"
                 id="vpBackToListBtn"
                 onClick={() => {
                   setEditorError('');
-                  setViewMode('list');
+                  if (viewMode === 'editor') {
+                    setViewMode(returnView);
+                  } else {
+                    const target = returnView;
+                    setReturnView(target);
+                    setViewMode(target);
+                  }
                 }}
               >
                 <BackChevronSvg />
@@ -661,9 +751,7 @@ export function VoiceProviderSheet(props: VoiceProviderSheetProps) {
               </button>
             )}
           </div>
-          <div class="vp-sheet-nav-title">
-            {viewMode === 'list' ? '边走边听' : draft.id ? '编辑 Provider' : '添加 Provider'}
-          </div>
+          <div class="vp-sheet-nav-title">{navTitle}</div>
           <div class="vp-sheet-nav-right">
             <button
               type="button"
@@ -676,8 +764,218 @@ export function VoiceProviderSheet(props: VoiceProviderSheetProps) {
           </div>
         </div>
 
-        {viewMode === 'list' ? (
-          <div class="voice-lab-body vp-ios-body">
+        {viewMode === 'models' ? (
+          /* 视图 A：全局 AI 模型与供应商池（底座资源层，全 App 任何 AI 功能共用） */
+          <div class="voice-lab-body vp-ios-body" id="aiModelsPoolView">
+            {loadingCfg && <div class="vp-subtle-note">正在读取配置…</div>}
+            <div class="vp-subtle-note" style="margin-bottom:4px;">
+              全局共用一套供应商密钥池，下方不同 AI 功能按需独立调用，无需重复填写 Key
+            </div>
+
+            {routingMsg && (
+              <div
+                id="vpHeroStatusBanner"
+                class={`vp-inline-notice ${routingMsg.ok ? 'ok' : 'err'}`}
+                style="margin-bottom:10px;"
+                onClick={() => setRoutingMsg(null)}
+              >
+                {routingMsg.text}
+              </div>
+            )}
+
+            <div class="vp-sec-head" id="voiceProviderListHeader">
+              <span class="vp-sec-label">{`Provider 列表 (${creds.length})`}</span>
+              <button
+                type="button"
+                id="voiceAddProviderBtn"
+                class="vp-sec-add-btn"
+                onClick={openAddEditor}
+              >
+                <PlusSvg />
+                <span>添加</span>
+              </button>
+            </div>
+
+            <div class="vp-ios-card" id="voiceProviderListSection">
+              {creds.length === 0 ? (
+                <div class="vp-ios-empty">
+                  <div class="vp-empty-title">暂未添加 Provider</div>
+                  <div class="vp-empty-desc">
+                    统一支持 OpenAI 兼容接口（火山方舟、DeepSeek、OpenAI、中转站、Ollama）及原生语音接口
+                  </div>
+                  <button
+                    type="button"
+                    class="vp-btn-primary"
+                    style="margin-top:12px;padding:8px 18px;"
+                    onClick={openAddEditor}
+                  >
+                    添加 Provider
+                  </button>
+                </div>
+              ) : (
+                creds.map(cred => {
+                  const roles = getCredentialActiveRoles(cred.id, activeProf, creds);
+                  const usages = getCredentialFeatureUsages(cred.id, activeProf, config.prefs, creds);
+                  const host = extractHostFromUrl(cred.baseUrl);
+                  const modelOrRes = cred.defaultModel || cred.resourceId || '';
+                  const testRes = testResults[cred.id];
+                  const isPrimaryDefault = (cred.provider === 'gemini' && roles.length === 3)
+                    || (cred.provider === 'volcengine_asr' && roles.includes('stt'))
+                    || (cred.provider === 'volcengine_tts' && roles.includes('tts'))
+                    || (cred.provider === 'openai_compat' && roles.includes('brain'));
+
+                  return (
+                    <div key={cred.id} class="vp-ios-item">
+                      <div class="vp-ios-item-top">
+                        <div class="vp-ios-item-title-wrap">
+                          <span class="vp-ios-item-name">{cred.label}</span>
+                          <span class="vp-proto-chip">
+                            {PROTOCOL_LABELS[cred.provider as keyof typeof PROTOCOL_LABELS] || cred.provider}
+                          </span>
+                        </div>
+                        {usages.length > 0 && (
+                          <div class="vp-role-badges">
+                            {usages.map(u => (
+                              <span key={u.key} class={`vp-role-pill ${u.tone}`}>{u.label}</span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      <div class="vp-ios-item-meta">
+                        {[
+                          host,
+                          modelOrRes,
+                          cred.defaultVoice && cred.provider !== 'volcengine_asr' ? cred.defaultVoice : '',
+                          cred.authSummary,
+                        ].filter(Boolean).join(' · ')}
+                      </div>
+
+                      {testRes && (
+                        <div class={`vp-inline-notice ${testRes.ok ? 'ok' : 'err'}`} style="margin-top:6px;">
+                          {testRes.summary}
+                        </div>
+                      )}
+
+                      <div class="vp-ios-item-actions">
+                        <button
+                          type="button"
+                          class={`vp-text-act ${isPrimaryDefault ? 'muted' : 'primary'}`}
+                          disabled={routingSaving}
+                          onClick={() => void handleSetProviderDefault(cred)}
+                        >
+                          {isPrimaryDefault ? '已用于随行' : '设为随行默认'}
+                        </button>
+                        <button
+                          type="button"
+                          class="vp-text-act"
+                          disabled={testingCredId === cred.id}
+                          onClick={() => void handleTestProvider(cred.id)}
+                        >
+                          {testingCredId === cred.id ? '测试中…' : '测试'}
+                        </button>
+                        <button
+                          type="button"
+                          class="vp-text-act"
+                          onClick={() => openEditEditor(cred)}
+                        >
+                          编辑
+                        </button>
+                        <button
+                          type="button"
+                          class="vp-text-act danger"
+                          onClick={() => void handleDeleteProvider(cred)}
+                        >
+                          删除
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        ) : viewMode === 'chat' ? (
+          /* 视图 B：聊天语音独立配置（按需从全局模型池挑选，与边走边听彻底解耦） */
+          <div class="voice-lab-body vp-ios-body" id="chatVoiceSettingsView">
+            {loadingCfg && <div class="vp-subtle-note">正在读取配置…</div>}
+            <div class="vp-subtle-note" style="margin-bottom:4px;">
+              聊天输入框语音听写与消息朗读可独立选用模型，与「边走边听 (Beta)」互不影响
+            </div>
+
+            <div class="vp-sec-head">
+              <span class="vp-sec-label">本功能调用的模型</span>
+              <button
+                type="button"
+                class="vp-sec-link"
+                onClick={() => openModelsPoolFromFeature('chat')}
+              >
+                管理模型池 ›
+              </button>
+            </div>
+            <div class="vp-ios-card">
+              <div class="vp-select-row">
+                <span class="vp-select-label">语音输入（听写）</span>
+                <select
+                  id="chatVoiceSttSelect"
+                  class="vp-select-ctrl"
+                  value={chatSttTargetVal}
+                  onChange={(e: any) => void onUpdatePrefs({ chatSttTarget: e.target.value })}
+                >
+                  <option value="native">手机自带免费</option>
+                  {sttCreds.map(c => (
+                    <option key={c.id} value={`cred:${c.id}`}>
+                      {c.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div class="vp-select-row">
+                <span class="vp-select-label">消息朗读（播报）</span>
+                <select
+                  id="chatVoiceTtsSelect"
+                  class="vp-select-ctrl"
+                  value={chatTtsTargetVal}
+                  onChange={(e: any) => void onUpdatePrefs({ chatTtsTarget: e.target.value })}
+                >
+                  <option value="native">手机自带免费</option>
+                  {ttsCreds.map(c => (
+                    <option key={c.id} value={`cred:${c.id}`}>
+                      {c.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div class="vp-ios-card" style="padding:12px 14px;margin-top:12px;">
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+                <span style="font-size:13px;font-weight:600;color:var(--text);">快速测试聊天朗读</span>
+                <button
+                  type="button"
+                  id="chatVoiceTestTtsBtn"
+                  class="vp-btn-ghost"
+                  disabled={chatTestingTts}
+                  onClick={() => void handleTestChatTts()}
+                >
+                  {chatTestingTts ? '试音中…' : '试听聊天朗读'}
+                </button>
+              </div>
+              {chatTtsMsg && (
+                <div
+                  class={`vp-inline-notice ${chatTtsMsg.ok ? 'ok' : 'err'}`}
+                  style="margin-top:8px;"
+                  onClick={() => setChatTtsMsg(null)}
+                >
+                  {chatTtsMsg.text}
+                </div>
+              )}
+            </div>
+          </div>
+        ) : viewMode === 'walk' ? (
+          /* 视图 C：边走边听功能独立配置（专注模型选型 + 播报与语音行为 + 延迟压测） */
+          <div class="voice-lab-body vp-ios-body" id="walkModeSettingsView">
             {loadingCfg && <div class="vp-subtle-note">正在读取配置…</div>}
 
             {/* 1. 当前方案 + 进入随行 / 试听 */}
@@ -739,19 +1037,29 @@ export function VoiceProviderSheet(props: VoiceProviderSheetProps) {
               )}
             </div>
 
-            {/* 2. 默认分配（听写 / 大脑 / 播报） */}
+            {/* 2. 本功能调用的模型（从全局模型池按需挑选） */}
             <div class="vp-sec-head">
-              <span class="vp-sec-label">默认分配</span>
-              {activeProf.id !== 'native' && (
+              <span class="vp-sec-label">本功能调用的模型</span>
+              <div style="display:inline-flex;align-items:center;gap:10px;">
+                {activeProf.id !== 'native' && (
+                  <button
+                    type="button"
+                    class="vp-sec-link"
+                    disabled={routingSaving}
+                    onClick={() => void persistRouting('native', 'native', 'native')}
+                  >
+                    恢复免费本机
+                  </button>
+                )}
                 <button
                   type="button"
+                  id="walkManageModelsPoolBtn"
                   class="vp-sec-link"
-                  disabled={routingSaving}
-                  onClick={() => void persistRouting('native', 'native', 'native')}
+                  onClick={() => openModelsPoolFromFeature('walk')}
                 >
-                  恢复免费本机
+                  管理模型池 ›
                 </button>
-              )}
+              </div>
             </div>
             <div class="vp-ios-card">
               <div class="vp-select-row">
@@ -818,123 +1126,37 @@ export function VoiceProviderSheet(props: VoiceProviderSheetProps) {
               </div>
             </div>
 
-            {/* 3. Provider 列表（DSH 统一协议列表） */}
-            <div class="vp-sec-head" id="voiceProviderListHeader">
-              <span class="vp-sec-label">{`Provider 列表 (${creds.length})`}</span>
-              <button
-                type="button"
-                id="voiceAddProviderBtn"
-                class="vp-sec-add-btn"
-                onClick={openAddEditor}
-              >
-                <PlusSvg />
-                <span>添加</span>
-              </button>
-            </div>
-
-            <div class="vp-ios-card" id="voiceProviderListSection">
-              {creds.length === 0 ? (
-                <div class="vp-ios-empty">
-                  <div class="vp-empty-title">暂未添加 Provider</div>
-                  <div class="vp-empty-desc">
-                    统一支持 OpenAI 兼容接口（火山方舟、DeepSeek、OpenAI、中转站、Ollama）及原生语音接口
-                  </div>
-                  <button
-                    type="button"
-                    class="vp-btn-primary"
-                    style="margin-top:12px;padding:8px 18px;"
-                    onClick={openAddEditor}
-                  >
-                    添加 Provider
-                  </button>
-                </div>
-              ) : (
-                creds.map(cred => {
-                  const roles = getCredentialActiveRoles(cred.id, activeProf, creds);
-                  const host = extractHostFromUrl(cred.baseUrl);
-                  const modelOrRes = cred.defaultModel || cred.resourceId || '';
-                  const testRes = testResults[cred.id];
-                  const isPrimaryDefault = (cred.provider === 'gemini' && roles.length === 3)
-                    || (cred.provider === 'volcengine_asr' && roles.includes('stt'))
-                    || (cred.provider === 'volcengine_tts' && roles.includes('tts'))
-                    || (cred.provider === 'openai_compat' && roles.includes('brain'));
-
-                  return (
-                    <div key={cred.id} class="vp-ios-item">
-                      <div class="vp-ios-item-top">
-                        <div class="vp-ios-item-title-wrap">
-                          <span class="vp-ios-item-name">{cred.label}</span>
-                          <span class="vp-proto-chip">
-                            {PROTOCOL_LABELS[cred.provider as keyof typeof PROTOCOL_LABELS] || cred.provider}
-                          </span>
-                        </div>
-                        {roles.length > 0 && (
-                          <div class="vp-role-badges">
-                            {roles.includes('stt') && <span class="vp-role-pill stt">听</span>}
-                            {roles.includes('brain') && <span class="vp-role-pill brain">想</span>}
-                            {roles.includes('tts') && <span class="vp-role-pill tts">说</span>}
-                          </div>
-                        )}
-                      </div>
-
-                      <div class="vp-ios-item-meta">
-                        {[
-                          host,
-                          modelOrRes,
-                          cred.defaultVoice && cred.provider !== 'volcengine_asr' ? cred.defaultVoice : '',
-                          cred.authSummary,
-                        ].filter(Boolean).join(' · ')}
-                      </div>
-
-                      {testRes && (
-                        <div class={`vp-inline-notice ${testRes.ok ? 'ok' : 'err'}`} style="margin-top:6px;">
-                          {testRes.summary}
-                        </div>
-                      )}
-
-                      <div class="vp-ios-item-actions">
-                        <button
-                          type="button"
-                          class={`vp-text-act ${isPrimaryDefault ? 'muted' : 'primary'}`}
-                          disabled={routingSaving}
-                          onClick={() => void handleSetProviderDefault(cred)}
-                        >
-                          {isPrimaryDefault ? '已默认' : '设为默认'}
-                        </button>
-                        <button
-                          type="button"
-                          class="vp-text-act"
-                          disabled={testingCredId === cred.id}
-                          onClick={() => void handleTestProvider(cred.id)}
-                        >
-                          {testingCredId === cred.id ? '测试中…' : '测试'}
-                        </button>
-                        <button
-                          type="button"
-                          class="vp-text-act"
-                          onClick={() => openEditEditor(cred)}
-                        >
-                          编辑
-                        </button>
-                        <button
-                          type="button"
-                          class="vp-text-act danger"
-                          onClick={() => void handleDeleteProvider(cred)}
-                        >
-                          删除
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })
-              )}
-            </div>
-
-            {/* 4. 行为与安全 */}
+            {/* 3. 播报与交互行为 */}
             <div class="vp-sec-head">
-              <span class="vp-sec-label">行为与安全</span>
+              <span class="vp-sec-label">播报与交互行为</span>
             </div>
             <div class="vp-ios-card">
+              <div class="vp-select-row">
+                <span class="vp-select-label">主动播报</span>
+                <select
+                  class="vp-select-ctrl"
+                  value={config.prefs.proactiveBriefing}
+                  onChange={(e: any) => void onUpdatePrefs({ proactiveBriefing: e.target.value })}
+                >
+                  <option value="approvals">仅审批提醒</option>
+                  <option value="all">审批与完成</option>
+                  <option value="manual">仅手动播报</option>
+                </select>
+              </div>
+
+              <div class="vp-select-row">
+                <span class="vp-select-label">播报详略</span>
+                <select
+                  class="vp-select-ctrl"
+                  value={config.prefs.briefingDetail || 'detailed'}
+                  onChange={(e: any) => void onUpdatePrefs({ briefingDetail: e.target.value })}
+                >
+                  <option value="detailed">详细要点</option>
+                  <option value="verbatim">原文精读</option>
+                  <option value="concise">极简一句</option>
+                </select>
+              </div>
+
               <div class="vp-select-row">
                 <span class="vp-select-label">高危操作确认</span>
                 <select
@@ -959,9 +1181,22 @@ export function VoiceProviderSheet(props: VoiceProviderSheetProps) {
                   onChange={(e: any) => void onUpdatePrefs({ autoListenAfterBriefing: e.target.checked })}
                 />
               </div>
+
+              <div class="vp-switch-row">
+                <div>
+                  <div class="vp-switch-title">听歌时压低背景音乐</div>
+                  <div class="vp-switch-sub">播报时自动降低音量，说完恢复</div>
+                </div>
+                <input
+                  type="checkbox"
+                  class="voice-switch"
+                  checked={config.prefs.duckMusicMode}
+                  onChange={(e: any) => void onUpdatePrefs({ duckMusicMode: e.target.checked })}
+                />
+              </div>
             </div>
 
-            {/* 5. 高级与延迟压测 */}
+            {/* 4. 高级与延迟压测 */}
             <details
               class="vp-ios-details"
               open={geekOpen}
@@ -969,41 +1204,6 @@ export function VoiceProviderSheet(props: VoiceProviderSheetProps) {
             >
               <summary>高级选项与延迟压测</summary>
               <div class="vp-ios-card" style="margin-top:8px;">
-                <div class="vp-switch-row">
-                  <div>
-                    <div class="vp-switch-title">听歌时压低背景音乐</div>
-                    <div class="vp-switch-sub">播报时自动降低音量，说完恢复</div>
-                  </div>
-                  <input
-                    type="checkbox"
-                    class="voice-switch"
-                    checked={config.prefs.duckMusicMode}
-                    onChange={(e: any) => void onUpdatePrefs({ duckMusicMode: e.target.checked })}
-                  />
-                </div>
-                <div class="vp-switch-row">
-                  <div>
-                    <div class="vp-switch-title">聊天页朗读复用云端播报</div>
-                  </div>
-                  <input
-                    type="checkbox"
-                    class="voice-switch"
-                    checked={config.prefs.useByokForChatTts}
-                    onChange={(e: any) => void onUpdatePrefs({ useByokForChatTts: e.target.checked })}
-                  />
-                </div>
-                <div class="vp-switch-row">
-                  <div>
-                    <div class="vp-switch-title">聊天页语音输入复用云端听写</div>
-                  </div>
-                  <input
-                    type="checkbox"
-                    class="voice-switch"
-                    checked={config.prefs.useByokForChatStt}
-                    onChange={(e: any) => void onUpdatePrefs({ useByokForChatStt: e.target.checked })}
-                  />
-                </div>
-
                 <div class="vp-bench-block">
                   <div class="vp-switch-row" style="padding:0 0 8px;border:none;">
                     <div>

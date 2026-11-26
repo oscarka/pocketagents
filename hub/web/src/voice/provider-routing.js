@@ -560,3 +560,121 @@ export function formatVoiceCompactValue(voiceCfg) {
   }
   return parts.join(' · ') || '已配置';
 }
+
+/**
+ * Ultra-concise right-side value for global "AI 模型与供应商" row on Settings Home.
+ */
+export function formatModelsCompactValue(voiceCfg) {
+  const creds = Array.isArray(voiceCfg?.credentials) ? voiceCfg.credentials : [];
+  if (creds.length === 0) return '去添加';
+  return `${creds.length} 个供应商`;
+}
+
+/**
+ * Ultra-concise right-side value for independent "聊天语音" row on Settings Home.
+ */
+export function formatChatVoiceCompactValue(voiceCfg) {
+  const prefs = voiceCfg?.prefs || {};
+  const creds = Array.isArray(voiceCfg?.credentials) ? voiceCfg.credentials : [];
+  const activeProf = voiceCfg?.activeProfile || null;
+  const resolveLegacyTarget = (raw, stage) => {
+    const s = String(raw || 'native').trim();
+    if (s === 'follow_walk') {
+      const st = activeProf?.[stage];
+      if (!st || !st.provider || st.provider === 'native') return 'native';
+      const cid = String(st.credId || '').trim();
+      const matched =
+        (cid && creds.find(c => c.id === cid)) ||
+        creds.find(c => c.provider === st.provider && c.active) ||
+        creds.find(c => c.provider === st.provider);
+      return matched ? `cred:${matched.id}` : 'native';
+    }
+    return s || 'native';
+  };
+  const sttTarget = resolveLegacyTarget(prefs.chatSttTarget || (prefs.useByokForChatStt ? 'follow_walk' : 'native'), 'stt');
+  const ttsTarget = resolveLegacyTarget(prefs.chatTtsTarget || (prefs.useByokForChatTts ? 'follow_walk' : 'native'), 'tts');
+  if (sttTarget === 'native' && ttsTarget === 'native') return '免费本机';
+  const labelFor = target => {
+    if (target === 'native') return '';
+    if (target.startsWith('cred:')) {
+      const id = target.slice(5);
+      const found = creds.find(c => c.id === id);
+      if (!found) return '';
+      const raw = String(found.label || '').trim();
+      if (/火山|豆包/i.test(raw)) return '豆包';
+      return raw.replace(/\s*\((ASR|TTS)\)\s*/gi, '').replace(/官方$/g, '').trim() || raw;
+    }
+    return '';
+  };
+  const parts = [];
+  const s = labelFor(sttTarget);
+  const t = labelFor(ttsTarget);
+  if (s) parts.push(s);
+  if (t && t !== s) parts.push(t);
+  return parts.join(' · ') || '免费本机';
+}
+
+/**
+ * Resolve a concrete stageOverride config for an independent feature route (`'native' | 'follow_walk' | 'cred:<id>'`).
+ * Returns `null` when the feature should fall back to free device-native speech.
+ */
+export function resolveFeatureStageConfig(target, stage, activeProfile, credentials = []) {
+  const clean = String(target || 'native').trim();
+  if (!clean || clean === 'native') return null;
+  if (clean === 'follow_walk') {
+    const st = activeProfile?.[stage];
+    if (!st || !st.provider || st.provider === 'native') return null;
+    return { ...st };
+  }
+  if (clean.startsWith('cred:')) {
+    const cid = clean.slice(5);
+    const cred = (credentials || []).find(c => c.id === cid);
+    if (!cred || !providerSupportsStage(cred.provider, stage)) return null;
+    if (stage === 'stt') {
+      return {
+        provider: cred.provider,
+        credId: cred.id,
+        model: inferStageModelForCred(cred, 'stt'),
+        language: 'zh-CN',
+        thinkingLevel: 'low',
+        fallbackChain: [],
+      };
+    }
+    if (stage === 'tts') {
+      return {
+        provider: cred.provider,
+        credId: cred.id,
+        model: inferStageModelForCred(cred, 'tts'),
+        voice: inferStageVoiceForCred(cred),
+        format: 'mp3',
+        speed: 1.0,
+      };
+    }
+    return {
+      provider: cred.provider,
+      credId: cred.id,
+      model: inferDefaultBrainModel(cred),
+      thinkingLevel: 'off',
+      maxTokens: 320,
+    };
+  }
+  return null;
+}
+
+/**
+ * List concise feature-level usage pills for a Provider card in global "AI 模型与供应商".
+ */
+export function getCredentialFeatureUsages(credId, activeProfile, prefs = {}, credentials = []) {
+  const tags = [];
+  const walkRoles = getCredentialActiveRoles(credId, activeProfile, credentials);
+  if (walkRoles.includes('stt')) tags.push({ key: 'walk_stt', label: '随行·听', tone: 'stt' });
+  if (walkRoles.includes('brain')) tags.push({ key: 'walk_brain', label: '随行·想', tone: 'brain' });
+  if (walkRoles.includes('tts')) tags.push({ key: 'walk_tts', label: '随行·说', tone: 'tts' });
+  if (String(prefs?.chatSttTarget || '') === `cred:${credId}`) {
+    tags.push({ key: 'chat_stt', label: '聊天·听', tone: 'stt' });
+  }
+  if (String(prefs?.chatTtsTarget || '') === `cred:${credId}`) {
+    tags.push({ key: 'chat_tts', label: '聊天·说', tone: 'tts' });
+  }
+  return tags;
+}

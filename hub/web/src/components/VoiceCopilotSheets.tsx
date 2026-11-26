@@ -19,6 +19,7 @@ import {
   type VoiceConfigState,
   type VoicePrefs,
 } from './VoiceProviderSheet';
+import { resolveFeatureStageConfig } from '../voice/provider-routing.js';
 
 interface PinChallenge {
   id: string;
@@ -56,6 +57,8 @@ const DEFAULT_CONFIG: VoiceConfigState = {
     duckMusicMode: true,
     useByokForChatStt: false,
     useByokForChatTts: false,
+    chatSttTarget: 'native',
+    chatTtsTarget: 'native',
     autoPlayWalkReplies: true,
     speechRate: 1.0,
   },
@@ -138,7 +141,7 @@ export function VoiceCopilotSheets() {
   const [walkExpanded, setWalkExpanded] = useState(false); // Full-screen canvas vs minimized Apple Music-style Mini Bar
   const [chatScreenOpen, setChatScreenOpen] = useState(false);
   const [labOpen, setLabOpen] = useState(false);
-  const [labInitialView, setLabInitialView] = useState<'list' | 'add' | 'bench'>('list');
+  const [labInitialView, setLabInitialView] = useState<'models' | 'walk' | 'chat' | 'add' | 'bench'>('walk');
   const [config, setConfig] = useState<VoiceConfigState>(DEFAULT_CONFIG);
   const [loadingCfg, setLoadingCfg] = useState(false);
   const [soundChecking, setSoundChecking] = useState(false);
@@ -240,6 +243,7 @@ export function VoiceCopilotSheets() {
   const walkOpenRef = useRef(false);
   const walkPhaseRef = useRef(walkPhase);
   const configRef = useRef(config);
+  const configLoadedRef = useRef(false);
 
   useEffect(() => { walkOpenRef.current = walkOpen; }, [walkOpen]);
   useEffect(() => { walkPhaseRef.current = walkPhase; }, [walkPhase]);
@@ -264,6 +268,8 @@ export function VoiceCopilotSheets() {
           activeProfile: data.activeProfile || DEFAULT_CONFIG.activeProfile,
           activePin: data.activePin || null,
         };
+        configLoadedRef.current = true;
+        configRef.current = next;
         setConfig(next);
         if (data.activePin) setActivePin(data.activePin);
         (window as any).__dshVoiceConfig = next;
@@ -292,9 +298,19 @@ export function VoiceCopilotSheets() {
       setWalkExpanded(false);
       setWalkOpen(false);
     };
-    (window as any).openVoiceLab = (tab?: 'simple' | 'profiles' | 'keys' | 'bench' | 'add' | 'list') => {
+    (window as any).openVoiceLab = (tab?: 'models' | 'walk' | 'chat' | 'simple' | 'profiles' | 'keys' | 'bench' | 'add' | 'list') => {
       setSoundCheckMsg(null);
-      setLabInitialView(tab === 'bench' ? 'bench' : tab === 'add' ? 'add' : 'list');
+      const nextView =
+        tab === 'models' || tab === 'keys'
+          ? 'models'
+          : tab === 'chat'
+            ? 'chat'
+            : tab === 'bench'
+              ? 'bench'
+              : tab === 'add'
+                ? 'add'
+                : 'walk';
+      setLabInitialView(nextView);
       setLabOpen(true);
       void refreshConfig(false);
     };
@@ -307,10 +323,10 @@ export function VoiceCopilotSheets() {
         notifyNativeBackgroundWakeDone();
         return false;
       }
-      // Immediately disarm native Siri 4.5s fallback when cloud TTS (Doubao / OpenAI / Gemini) is configured,
-      // so the real cloud voice ALWAYS plays instead of getting hijacked by Apple AVSpeechSynthesizer!
+      // Immediately disarm native Siri fallback whenever cloud TTS is configured (or config hasn't
+      // finished hydrating yet), so Doubao / cloud voice ALWAYS wins instead of Apple machine voice!
       const ttsProv = configRef.current?.activeProfile?.tts?.provider || 'native';
-      if (ttsProv !== 'native') {
+      if (!configLoadedRef.current || ttsProv !== 'native') {
         claimNativeBackgroundWakeForCloudTts();
       }
 
@@ -411,16 +427,26 @@ export function VoiceCopilotSheets() {
       return true;
     };
 
-    // Optional BYOK chat TTS helper invoked by controller.js ONLY when user enables `useByokForChatTts`
-    (window as any).__dshVoiceByokSpeak = async (text: string, onDone?: () => void) => {
+    // Independent Chat Read-Aloud TTS helpers: ALWAYS check `chatTtsTarget` (independent of Walk Mode!)
+    const resolveChatTtsStageOverride = () => {
       const cfg = configRef.current;
-      if (!cfg?.prefs?.useByokForChatTts || !cfg?.activeProfile || cfg.activeProfile.tts?.provider === 'native') {
+      const ttsTarget = String(cfg?.prefs?.chatTtsTarget || (cfg?.prefs?.useByokForChatTts ? 'follow_walk' : 'native'));
+      return resolveFeatureStageConfig(ttsTarget, 'tts', cfg?.activeProfile, cfg?.credentials || []);
+    };
+    (window as any).__dshVoiceByokCanSpeak = () => Boolean(resolveChatTtsStageOverride());
+    (window as any).__dshVoiceByokSpeak = async (text: string, onDone?: () => void) => {
+      if (!configLoadedRef.current) {
+        await refreshConfig(true);
+      }
+      const cfg = configRef.current;
+      const stageOverride = resolveChatTtsStageOverride();
+      if (!stageOverride) {
         return false;
       }
       const chunks = String(text || '')
         .split(/(?<=[。！？.!?\n])\s*/)
         .map(s => s.trim())
-        .filter(Boolean)
+        .filter(s => Boolean(s) && /[\p{L}\p{N}]/u.test(s))
         .reduce<string[]>((acc, s) => {
           const lim = acc.length === 0 ? 48 : 160;
           if (!acc.length || acc[acc.length - 1].length + s.length > lim) acc.push(s);
@@ -430,14 +456,22 @@ export function VoiceCopilotSheets() {
       if (!chunks.length) return false;
       await playerRef.current!.speakChunksProgressive(chunks, {
         useCloudTts: true,
+        allowNativeFallback: false,
         speechRate: cfg.prefs.speechRate || 1.0,
         fetchTts: async (chunk, signal) => {
           const r = await apiCall('/api/voice/tts', {
             method: 'POST',
             signal,
-            body: JSON.stringify({ text: chunk, profileId: cfg.activeProfile.id }),
+            body: JSON.stringify({
+              text: chunk,
+              profileId: cfg.activeProfile.id,
+              stageOverride,
+            }),
           });
           return r.json().catch(() => ({ ok: false }));
+        },
+        onCloudTtsError: () => {
+          toast('⚠️ 云端语音合成偶发波动，已自动跳过该句（未混入机器音）');
         },
         onStateChange: playing => {
           if (!playing) onDone?.();
@@ -449,7 +483,7 @@ export function VoiceCopilotSheets() {
       playerRef.current?.stop();
     };
 
-    // Optional BYOK chat STT dictation helper (strictly opt-in via `useByokForChatStt`, OFF by default)
+    // Independent Chat Voice Dictation helper: routes via `chatSttTarget` ('native' | 'follow_walk' | 'cred:<id>')
     let chatDictRecorder: WalkWavRecorder | null = null;
     let chatDictBtnId = '';
     (window as any).__dshVoiceByokToggleDictation = (
@@ -459,7 +493,9 @@ export function VoiceCopilotSheets() {
       onComposerInputFn: () => void,
     ) => {
       const cfg = configRef.current;
-      if (!cfg?.prefs?.useByokForChatStt || !cfg?.activeProfile || cfg.activeProfile.stt?.provider === 'native') {
+      const sttTarget = String(cfg?.prefs?.chatSttTarget || (cfg?.prefs?.useByokForChatStt ? 'follow_walk' : 'native'));
+      const stageOverride = resolveFeatureStageConfig(sttTarget, 'stt', cfg?.activeProfile, cfg?.credentials || []);
+      if (!stageOverride) {
         return false;
       }
       const btn = document.getElementById(btnId);
@@ -477,13 +513,14 @@ export function VoiceCopilotSheets() {
             showToastFn('⏹ 录音太短，已取消');
             return;
           }
-          showToastFn('👂 BYOK 云端识别中…');
+          showToastFn('👂 云端语音识别中…');
           return apiCall('/api/voice/stt', {
             method: 'POST',
             body: JSON.stringify({
               audioBase64: rec.wavBase64,
               mimeType: 'audio/wav',
               profileId: cfg.activeProfile.id,
+              stageOverride,
             }),
           })
             .then(r => r.json().catch(() => ({ ok: false })))
@@ -517,10 +554,10 @@ export function VoiceCopilotSheets() {
       return true;
     };
 
-    // Initial background sync once authenticated
+    // Initial background sync once authenticated (fast hydration so Chat 🔊 Listen always uses cloud TTS)
     const initTimer = setTimeout(() => {
       void refreshConfig(true);
-    }, 800);
+    }, 120);
 
     return () => {
       clearTimeout(initTimer);
@@ -574,10 +611,11 @@ export function VoiceCopilotSheets() {
     const duckMusic = configRef.current?.prefs?.duckMusicMode !== false;
     const keepMicWarm = Boolean(configRef.current?.prefs?.autoListenAfterBriefing);
     const proactiveBriefing = configRef.current?.prefs?.proactiveBriefing || 'approvals';
+    const walkUsesCloudTts = (configRef.current?.activeProfile?.tts?.provider || 'native') !== 'native';
     if (duckMusic) {
       setWalkAudioSessionMode('ambient');
     }
-    void setWalkBackgroundKeepAlive(true, duckMusic, keepMicWarm, proactiveBriefing);
+    void setWalkBackgroundKeepAlive(true, duckMusic, keepMicWarm, proactiveBriefing, walkUsesCloudTts);
 
     void wakeRef.current?.enable().then(ok => setWakeLocked(ok));
     const unbindMedia = bindWalkMediaSession({
@@ -604,8 +642,9 @@ export function VoiceCopilotSheets() {
       config.prefs.duckMusicMode !== false,
       Boolean(config.prefs.autoListenAfterBriefing),
       config.prefs.proactiveBriefing || 'approvals',
+      (config.activeProfile?.tts?.provider || 'native') !== 'native',
     );
-  }, [walkOpen, config.prefs.duckMusicMode, config.prefs.autoListenAfterBriefing, config.prefs.proactiveBriefing]);
+  }, [walkOpen, config.prefs.duckMusicMode, config.prefs.autoListenAfterBriefing, config.prefs.proactiveBriefing, config.activeProfile?.tts?.provider]);
 
   const drainBriefingQueue = async () => {
     if (drainingBriefingRef.current || !walkOpenRef.current) return;
@@ -678,7 +717,10 @@ export function VoiceCopilotSheets() {
       );
       const micReadyForAutoListen = wantsAutoListen ? await canNativeAutoListenNow() : false;
 
-      await speakWalkReply(chunks, undefined, { keepAudioSessionAfter: micReadyForAutoListen });
+      await speakWalkReply(chunks, undefined, {
+        keepAudioSessionAfter: micReadyForAutoListen,
+        allowNativeFallback: nextItem.kind === 'approval',
+      });
 
       if (micReadyForAutoListen && walkOpenRef.current && walkPhaseRef.current === 'idle') {
         startedAutoListen = true;
@@ -701,6 +743,9 @@ export function VoiceCopilotSheets() {
   // Subscribe to live Hub SSE state updates for proactive Walk Mode briefings
   useEffect(() => {
     const onHubState = (ev: any) => {
+      if (!configLoadedRef.current) {
+        void refreshConfig(true);
+      }
       const snap = summarizeHubState(ev?.detail || (window as any).__dshLastHubState);
       setHubSummary(snap);
       if (!walkOpenRef.current) return;
@@ -770,7 +815,7 @@ export function VoiceCopilotSheets() {
   const speakWalkReply = async (
     chunks: string[],
     onFirstTtsMs?: (ms: number) => void,
-    opts: { keepAudioSessionAfter?: boolean } = {},
+    opts: { keepAudioSessionAfter?: boolean; allowNativeFallback?: boolean } = {},
   ) => {
     const cfg = configRef.current;
     const duckMusic = cfg.prefs.duckMusicMode !== false;
@@ -785,6 +830,7 @@ export function VoiceCopilotSheets() {
     setWalkPhase('speaking');
     await playerRef.current!.speakChunksProgressive(chunks, {
       useCloudTts: Boolean(useCloud),
+      allowNativeFallback: Boolean(opts.allowNativeFallback),
       speechRate: cfg.prefs.speechRate || 1.0,
       duckMusicMode: duckMusic,
       keepAudioSessionAfter: Boolean(opts.keepAudioSessionAfter),
@@ -797,6 +843,9 @@ export function VoiceCopilotSheets() {
         return r.json().catch(() => ({ ok: false }));
       },
       onFirstLatency: onFirstTtsMs,
+      onCloudTtsError: () => {
+        toast('⚠️ 豆包语音偶发波动，已跳过该段（未混入机器音）');
+      },
       onStateChange: playing => {
         if (!playing && walkPhaseRef.current === 'speaking') {
           setWalkPhase('idle');
@@ -1318,7 +1367,7 @@ export function VoiceCopilotSheets() {
   const nativeShell = isNativeIosShell();
   const openLabFromWalk = () => {
     setSoundCheckMsg(null);
-    setLabInitialView('list');
+    setLabInitialView('walk');
     setLabOpen(true);
     void refreshConfig(false);
   };

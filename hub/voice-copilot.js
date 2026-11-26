@@ -2233,6 +2233,20 @@ export class VoiceCopilotEngine {
     const stageCfg = profile.tts || {}
     const provider = String(stageCfg.provider || 'native').toLowerCase()
 
+    // Skip pure-punctuation / symbol-only chunks cleanly so cloud TTS (e.g. Volcengine Seed-TTS 3.0)
+    // never returns 502 "no audio" mid-stream and causes awkward gaps or fallbacks.
+    if (!/[\p{L}\p{N}]/u.test(cleanText)) {
+      return {
+        ok: true,
+        skippedEmpty: true,
+        provider,
+        audioBase64: '',
+        mimeType: 'audio/mpeg',
+        byteLength: 0,
+        latencyMs: 0,
+      }
+    }
+
     if (provider === 'native') {
       return {
         ok: true,
@@ -2296,113 +2310,147 @@ export class VoiceCopilotEngine {
           },
           ...(effectiveSpeed !== 1.0 ? { voice_settings: { speed: effectiveSpeed } } : {}),
         }
-        let resp3
-        try {
-          resp3 = await fetchWithTimeout(this.fetch, url3, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'X-Api-Key': cred.apiKey,
-              'X-Request-Id': randomUUID(),
-            },
-            body: JSON.stringify(reqBody3),
-          })
-        } catch (err) {
-          return {
-            ok: false,
-            provider,
-            model: modelId3,
-            voice: speaker3,
-            credId: cred.id,
-            latencyMs: this.now() - t0,
-            error: this._explainVoiceError(formatFetchError(err), 'volcengine_tts_v3'),
+        let lastSeedTts3Err = null
+        for (let attempt = 0; attempt < 2; attempt++) {
+          if (attempt > 0) {
+            await new Promise(resolve => setTimeout(resolve, 350))
           }
-        }
-        const latencyMs = this.now() - t0
-        const contentType = String(resp3.headers?.get?.('content-type') || '').toLowerCase()
-        if (!resp3.ok) {
-          const errText = await resp3.text().catch(() => '')
-          let cleanErr = ''
+          let resp3
           try {
-            const parsed = JSON.parse(errText)
-            const pMsg = parsed?.error?.message || parsed?.header?.message || parsed?.message || ''
-            const pCode = parsed?.error?.code || parsed?.header?.code || parsed?.code || ''
-            if (pMsg) cleanErr = pCode ? `${pMsg} (${pCode})` : String(pMsg)
-          } catch {
-            // non-json error body
+            resp3 = await fetchWithTimeout(this.fetch, url3, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Api-Key': cred.apiKey,
+                'X-Request-Id': randomUUID(),
+              },
+              body: JSON.stringify(reqBody3),
+            })
+          } catch (err) {
+            lastSeedTts3Err = {
+              ok: false,
+              provider,
+              model: modelId3,
+              voice: speaker3,
+              credId: cred.id,
+              latencyMs: this.now() - t0,
+              error: this._explainVoiceError(formatFetchError(err), 'volcengine_tts_v3'),
+            }
+            continue
           }
-          const rawErr = cleanErr || errText.slice(0, 180) || `Volcengine Seed-TTS 3.0 HTTP ${resp3.status}`
-          return {
-            ok: false,
-            provider,
-            model: modelId3,
-            voice: speaker3,
-            credId: cred.id,
-            latencyMs,
-            error: this._explainVoiceError(rawErr, 'volcengine_tts_v3'),
+          const latencyMs = this.now() - t0
+          const contentType = String(resp3.headers?.get?.('content-type') || '').toLowerCase()
+          if (!resp3.ok) {
+            const errText = await resp3.text().catch(() => '')
+            let cleanErr = ''
+            try {
+              const parsed = JSON.parse(errText)
+              const pMsg = parsed?.error?.message || parsed?.header?.message || parsed?.message || ''
+              const pCode = parsed?.error?.code || parsed?.header?.code || parsed?.code || ''
+              if (pMsg) cleanErr = pCode ? `${pMsg} (${pCode})` : String(pMsg)
+            } catch {
+              // non-json error body
+            }
+            const rawErr = cleanErr || errText.slice(0, 180) || `Volcengine Seed-TTS 3.0 HTTP ${resp3.status}`
+            lastSeedTts3Err = {
+              ok: false,
+              provider,
+              model: modelId3,
+              voice: speaker3,
+              credId: cred.id,
+              latencyMs,
+              error: this._explainVoiceError(rawErr, 'volcengine_tts_v3'),
+            }
+            // Retry once on transient rate limit / upstream 5xx errors
+            if (attempt === 0 && (resp3.status === 429 || resp3.status >= 500)) {
+              continue
+            }
+            return lastSeedTts3Err
           }
-        }
-        if (contentType.startsWith('audio/')) {
-          const audioBuf = Buffer.from(await resp3.arrayBuffer())
+          if (contentType.startsWith('audio/')) {
+            const audioBuf = Buffer.from(await resp3.arrayBuffer())
+            if (audioBuf.length > 0) {
+              return {
+                ok: true,
+                provider,
+                model: modelId3,
+                voice: speaker3,
+                credId: cred.id,
+                mimeType: contentType.split(';')[0] || 'audio/mpeg',
+                audioBase64: audioBuf.toString('base64'),
+                byteLength: audioBuf.length,
+                latencyMs,
+              }
+            }
+            lastSeedTts3Err = {
+              ok: false,
+              provider,
+              model: modelId3,
+              voice: speaker3,
+              credId: cred.id,
+              latencyMs,
+              error: '火山语音合成 3.0 返回空音频流',
+            }
+            continue
+          }
+          const rawBody3 = await resp3.text()
+          const audioParts3 = []
+          let apiError3 = ''
+          for (const line of rawBody3.split(/\r?\n/)) {
+            const trimmed = line.trim()
+            if (!trimmed) continue
+            try {
+              const obj = JSON.parse(trimmed)
+              if (obj.event === 'error') {
+                const eMsg = obj?.error?.message || obj?.message || 'Seed-TTS 3.0 error'
+                const eCode = obj?.error?.code || obj?.code || ''
+                apiError3 = eCode ? `${eMsg} (${eCode})` : String(eMsg)
+              }
+              if (obj.event === 'audio' && typeof obj.audio === 'string' && obj.audio.length > 0) {
+                audioParts3.push(Buffer.from(obj.audio, 'base64'))
+              } else if (typeof obj.data === 'string' && obj.data.length > 0) {
+                audioParts3.push(Buffer.from(obj.data, 'base64'))
+              }
+            } catch {
+              // ignore non-json fragment
+            }
+          }
+          if (audioParts3.length === 0) {
+            const rawErr = apiError3 || '火山语音合成 3.0 未返回音频数据'
+            lastSeedTts3Err = {
+              ok: false,
+              provider,
+              model: modelId3,
+              voice: speaker3,
+              credId: cred.id,
+              latencyMs,
+              error: apiError3
+                ? this._explainVoiceError(rawErr, 'volcengine_tts_v3')
+                : '火山语音合成 3.0 未返回音频数据（请检查音色 ID 与账号开通状态）',
+            }
+            continue
+          }
+          const merged3 = Buffer.concat(audioParts3)
           return {
             ok: true,
             provider,
             model: modelId3,
             voice: speaker3,
             credId: cred.id,
-            mimeType: contentType.split(';')[0] || 'audio/mpeg',
-            audioBase64: audioBuf.toString('base64'),
-            byteLength: audioBuf.length,
+            mimeType: 'audio/mpeg',
+            audioBase64: merged3.toString('base64'),
+            byteLength: merged3.length,
             latencyMs,
           }
         }
-        const rawBody3 = await resp3.text()
-        const audioParts3 = []
-        let apiError3 = ''
-        for (const line of rawBody3.split(/\r?\n/)) {
-          const trimmed = line.trim()
-          if (!trimmed) continue
-          try {
-            const obj = JSON.parse(trimmed)
-            if (obj.event === 'error') {
-              const eMsg = obj?.error?.message || obj?.message || 'Seed-TTS 3.0 error'
-              const eCode = obj?.error?.code || obj?.code || ''
-              apiError3 = eCode ? `${eMsg} (${eCode})` : String(eMsg)
-            }
-            if (obj.event === 'audio' && typeof obj.audio === 'string' && obj.audio.length > 0) {
-              audioParts3.push(Buffer.from(obj.audio, 'base64'))
-            } else if (typeof obj.data === 'string' && obj.data.length > 0) {
-              audioParts3.push(Buffer.from(obj.data, 'base64'))
-            }
-          } catch {
-            // ignore non-json fragment
-          }
-        }
-        if (audioParts3.length === 0) {
-          const rawErr = apiError3 || '火山语音合成 3.0 未返回音频数据'
-          return {
-            ok: false,
-            provider,
-            model: modelId3,
-            voice: speaker3,
-            credId: cred.id,
-            latencyMs,
-            error: apiError3
-              ? this._explainVoiceError(rawErr, 'volcengine_tts_v3')
-              : '火山语音合成 3.0 未返回音频数据（请检查音色 ID 与账号开通状态）',
-          }
-        }
-        const merged3 = Buffer.concat(audioParts3)
-        return {
-          ok: true,
+        return lastSeedTts3Err || {
+          ok: false,
           provider,
           model: modelId3,
           voice: speaker3,
           credId: cred.id,
-          mimeType: 'audio/mpeg',
-          audioBase64: merged3.toString('base64'),
-          byteLength: merged3.length,
-          latencyMs,
+          latencyMs: this.now() - t0,
+          error: '火山语音合成 3.0 暂时不可用',
         }
       }
 

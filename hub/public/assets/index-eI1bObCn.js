@@ -714,6 +714,10 @@ function ChatStage() {
 		class: "stop-task-btn",
 		onClick: () => window.stopActiveSession?.()
 	}, "⏹ 立即停止")), /* @__PURE__ */ k$1("div", {
+		class: "copilot-review-card",
+		id: "copilotReviewCard",
+		style: "display:none;"
+	}), /* @__PURE__ */ k$1("div", {
 		class: "composer-attachments-strip",
 		id: "composerAttachmentsStrip",
 		style: "display:none;"
@@ -803,7 +807,18 @@ function ChatStage() {
 			e.stopPropagation();
 			window.openModelPickerSheet?.("chat");
 		}
-	}, /* @__PURE__ */ k$1("span", { id: "chatModelBtnLabel" }, "🤖 默认模型"), /* @__PURE__ */ k$1("span", { style: "opacity:0.65;font-size:10px;margin-left:2px;" }, "▾"))), /* @__PURE__ */ k$1("button", {
+	}, /* @__PURE__ */ k$1("span", { id: "chatModelBtnLabel" }, "🤖 默认模型"), /* @__PURE__ */ k$1("span", { style: "opacity:0.65;font-size:10px;margin-left:2px;" }, "▾")), /* @__PURE__ */ k$1("button", {
+		type: "button",
+		class: "voice-btn composer-mini-btn copilot-toggle-btn",
+		id: "chatCopilotBtn",
+		style: "display:none;",
+		title: "调用外部插件分析当前回复",
+		onClick: (e) => {
+			e.preventDefault();
+			e.stopPropagation();
+			window.copilotOpenOrReview?.();
+		}
+	}, "🎯 副驾")), /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: "send-btn composer-send-btn",
 		id: "chatSendBtn",
@@ -1230,6 +1245,48 @@ var EXACT_ZH_TO_EN = {
 	"✏️ 编辑": "✏️ Edit",
 	"电脑与连接": "Computers & Connections",
 	"模型与偏好": "Models & Preferences",
+	"AI 与功能": "AI & Features",
+	"通知与通用": "Notifications & General",
+	"AI 模型与供应商": "AI Models & Providers",
+	"边走边听 (Beta)": "Walk Mode (Beta)",
+	"目标副驾插件 (Beta)": "Goal Copilot (Beta)",
+	"目标副驾插件": "Goal Copilot",
+	"启用外部辅助插件": "Enable External Plugin",
+	"关闭时对话界面零痕迹；开启后在 AI 回复下方显示插件返回的展示栏与快捷选项": "Zero UI footprint when off; shows plugin panel & quick reply options below AI replies when enabled.",
+	"插件服务地址（需你的 Hub 服务端可直接访问，如本机 127.0.0.1:8789 或 HTTPS 域名）": "Plugin Endpoint URL (reachable from your Hub server, e.g. 127.0.0.1:8789 or HTTPS)",
+	"可选：复用全局模型池（仅 127.0.0.1 本机回环时透传，与「边走边听」互不影响）": "Optional: Reuse Global Model Pool (forwarded only to loopback 127.0.0.1, independent of Walk Mode)",
+	"由插件自行管理（不透传密钥）": "Managed by Plugin (no key forwarded)",
+	"保存并连接": "Save & Connect",
+	"测试连通性": "Test Connection",
+	"当前插件状态": "Plugin Status",
+	"未启用": "Off",
+	"已连接": "Connected",
+	"未连接": "Disconnected",
+	"展开详情 ⌄": "Show Details ⌄",
+	"收起详情 ⌃": "Hide Details ⌃",
+	"发送给插件": "Send to Plugin",
+	"已填入输入框，可修改后发送": "Filled into composer — edit or send",
+	"🎯 副驾": "🎯 Copilot",
+	"聊天语音": "Chat Voice",
+	"跟随随行": "Follow Walk Mode",
+	"跟随「边走边听」": "Follow Walk Mode",
+	"本功能调用的模型": "Models for This Feature",
+	"管理模型池 ›": "Manage Model Pool ›",
+	"播报与交互行为": "Briefing & Interaction",
+	"语音输入（听写）": "Voice Input (STT)",
+	"消息朗读（播报）": "Read Aloud (TTS)",
+	"试听聊天朗读": "Preview Chat TTS",
+	"全局共用一套供应商密钥池，下方不同 AI 功能按需独立调用，无需重复填写 Key": "One shared API provider pool for the entire app — each AI feature picks its own model independently.",
+	"聊天输入框语音听写与消息朗读可独立选用模型，与「边走边听 (Beta)」互不影响": "Choose models for chat dictation and read-aloud independently from Walk Mode (Beta).",
+	"聊天输入框语音听写与消息朗读可独立选用模型，与「边走边听」互不影响": "Choose models for chat dictation and read-aloud independently from Walk Mode.",
+	"随行·听": "Walk·STT",
+	"随行·想": "Walk·Brain",
+	"随行·说": "Walk·TTS",
+	"聊天·听": "Chat·STT",
+	"聊天·说": "Chat·TTS",
+	"设为随行默认": "Use for Walk",
+	"已用于随行": "Walk Active",
+	"去添加": "Add",
 	"安全与隐私": "Security & Privacy",
 	"关于与工具": "About & Tools",
 	"更多": "More",
@@ -2246,6 +2303,7 @@ var REGEX_ZH_TO_EN = [
 	[/^(\d+) 会话$/, "$1 chats"],
 	[/^Provider 列表 \((\d+)\)$/, "Providers ($1)"],
 	[/^免费本机 · (\d+) 个$/, "Free Native · $1 saved"],
+	[/^(\d+) 个供应商$/, "$1 providers"],
 	[/^(.+) 密钥缺失$/, (_, stages) => {
 		return `${stages.replace(/听写/g, "STT").replace(/大脑/g, "Brain").replace(/播报/g, "TTS")} key missing`;
 	}],
@@ -2492,12 +2550,12 @@ function isNativeIosShell() {
 		return false;
 	}
 }
-async function setWalkBackgroundKeepAlive(active, duckMusic = true, keepMicWarm = false, proactiveBriefing = "approvals") {
+async function setWalkBackgroundKeepAlive(active, duckMusic = true, keepMicWarm = false, proactiveBriefing = "approvals", useCloudTts = false) {
 	try {
 		if (typeof window !== "undefined") window.__dshWalkKeepAliveActive = Boolean(active);
 		const bridge = getNativeAudioBridge();
 		if (!bridge?.setBackgroundKeepAlive) return false;
-		return Boolean(await bridge.setBackgroundKeepAlive(Boolean(active), Boolean(duckMusic), Boolean(keepMicWarm), String(proactiveBriefing || "approvals")));
+		return Boolean(await bridge.setBackgroundKeepAlive(Boolean(active), Boolean(duckMusic), Boolean(keepMicWarm), String(proactiveBriefing || "approvals"), Boolean(useCloudTts)));
 	} catch {
 		return false;
 	}
@@ -2950,6 +3008,9 @@ var WalkSpeechPlayer = class {
 	}
 	async playAudioBase64(base64, mimeType = "audio/mpeg", opts = {}) {
 		const myRun = this.runId;
+		try {
+			if (typeof window !== "undefined" && window.speechSynthesis && (window.speechSynthesis.speaking || window.speechSynthesis.pending)) window.speechSynthesis.cancel();
+		} catch {}
 		const nativeBridge = getNativeAudioBridge();
 		if (nativeBridge?.playBase64Audio) try {
 			const ok = await nativeBridge.playBase64Audio(base64, mimeType || "audio/mpeg", {
@@ -3038,9 +3099,9 @@ var WalkSpeechPlayer = class {
 			}
 		});
 	}
-	async speakChunksProgressive(chunks, { useCloudTts, fetchTts, speechRate = 1, duckMusicMode = false, keepAudioSessionAfter = false, onFirstLatency, onStateChange }) {
+	async speakChunksProgressive(chunks, { useCloudTts, fetchTts, speechRate = 1, duckMusicMode = false, keepAudioSessionAfter = false, allowNativeFallback = false, onFirstLatency, onStateChange, onCloudTtsError }) {
 		this.stop();
-		const list = (chunks || []).map((c) => String(c || "").trim()).filter(Boolean);
+		const list = (chunks || []).map((c) => String(c || "").trim()).filter((c) => Boolean(c) && /[\p{L}\p{N}]/u.test(c));
 		if (list.length === 0) return;
 		const myRun = this.runId;
 		const ctrl = new AbortController();
@@ -3048,6 +3109,45 @@ var WalkSpeechPlayer = class {
 		this.playing = true;
 		if (duckMusicMode) setWalkAudioSessionMode("transient");
 		onStateChange?.(true);
+		const fetchChunkWithRetry = async (text) => {
+			const delays = [
+				0,
+				450,
+				1e3
+			];
+			let lastRes = {
+				ok: false,
+				error: "TTS failed"
+			};
+			for (let attempt = 0; attempt < delays.length; attempt += 1) {
+				if (this.runId !== myRun || ctrl.signal.aborted) return {
+					ok: false,
+					aborted: true
+				};
+				if (delays[attempt] > 0) {
+					await new Promise((resolve) => setTimeout(resolve, delays[attempt]));
+					if (this.runId !== myRun || ctrl.signal.aborted) return {
+						ok: false,
+						aborted: true
+					};
+				}
+				try {
+					const r = await fetchTts(text, ctrl.signal);
+					if (r?.skippedEmpty || r?.ok && r.audioBase64 || r?.useBrowserSpeech) return r;
+					lastRes = r || { ok: false };
+				} catch (err) {
+					if (ctrl.signal.aborted || err?.name === "AbortError") return {
+						ok: false,
+						aborted: true
+					};
+					lastRes = {
+						ok: false,
+						error: String(err?.message || "network error")
+					};
+				}
+			}
+			return lastRes;
+		};
 		try {
 			if (!useCloudTts) {
 				await this.speakNativeBrowser(list.join(" "), speechRate, {
@@ -3056,21 +3156,31 @@ var WalkSpeechPlayer = class {
 				});
 				return;
 			}
-			let nextPromise = fetchTts(list[0], ctrl.signal).catch(() => ({ ok: false }));
+			let anyCloudPlayed = false;
+			let reportedCloudErr = false;
+			let nextPromise = fetchChunkWithRetry(list[0]);
 			for (let i = 0; i < list.length; i += 1) {
 				if (this.runId !== myRun) break;
 				const res = await nextPromise;
-				if (this.runId !== myRun) break;
-				if (i + 1 < list.length) nextPromise = fetchTts(list[i + 1], ctrl.signal).catch(() => ({ ok: false }));
+				if (this.runId !== myRun || res?.aborted) break;
+				if (i + 1 < list.length) nextPromise = fetchChunkWithRetry(list[i + 1]);
 				else nextPromise = null;
 				if (i === 0 && typeof res?.latencyMs === "number") onFirstLatency?.(res.latencyMs);
+				if (res?.skippedEmpty) continue;
 				const chunkOpts = {
 					duckMusic: duckMusicMode,
 					keepSessionAfter: keepAudioSessionAfter || i + 1 < list.length
 				};
 				if (res?.ok && res.audioBase64) {
-					if (!await this.playAudioBase64(res.audioBase64, res.mimeType || "audio/mpeg", chunkOpts) && this.runId === myRun) await this.speakNativeBrowser(list[i], speechRate, chunkOpts);
-				} else if (this.runId === myRun) await this.speakNativeBrowser(list[i], speechRate, chunkOpts);
+					if (await this.playAudioBase64(res.audioBase64, res.mimeType || "audio/mpeg", chunkOpts)) anyCloudPlayed = true;
+					else if (this.runId === myRun && !anyCloudPlayed && allowNativeFallback) await this.speakNativeBrowser(list[i], speechRate, chunkOpts);
+				} else if (this.runId === myRun) {
+					if (!anyCloudPlayed && allowNativeFallback) await this.speakNativeBrowser(list[i], speechRate, chunkOpts);
+					else if (!reportedCloudErr) {
+						reportedCloudErr = true;
+						onCloudTtsError?.(String(res?.error || "云端语音合成暂时失败，已跳过该段"));
+					}
+				}
 			}
 		} finally {
 			if (this.runId === myRun) {
@@ -3526,6 +3636,129 @@ function formatVoiceCompactValue(voiceCfg) {
 	if (brainCred && (!parts.length || compactName(brainCred.label) !== parts[0])) parts.push(compactName(brainCred.label));
 	return parts.join(" · ") || "已配置";
 }
+/**
+* Ultra-concise right-side value for global "AI 模型与供应商" row on Settings Home.
+*/
+function formatModelsCompactValue(voiceCfg) {
+	const creds = Array.isArray(voiceCfg?.credentials) ? voiceCfg.credentials : [];
+	if (creds.length === 0) return "去添加";
+	return `${creds.length} 个供应商`;
+}
+/**
+* Ultra-concise right-side value for independent "聊天语音" row on Settings Home.
+*/
+function formatChatVoiceCompactValue(voiceCfg) {
+	const prefs = voiceCfg?.prefs || {};
+	const creds = Array.isArray(voiceCfg?.credentials) ? voiceCfg.credentials : [];
+	const activeProf = voiceCfg?.activeProfile || null;
+	const resolveLegacyTarget = (raw, stage) => {
+		const s = String(raw || "native").trim();
+		if (s === "follow_walk") {
+			const st = activeProf?.[stage];
+			if (!st || !st.provider || st.provider === "native") return "native";
+			const cid = String(st.credId || "").trim();
+			const matched = cid && creds.find((c) => c.id === cid) || creds.find((c) => c.provider === st.provider && c.active) || creds.find((c) => c.provider === st.provider);
+			return matched ? `cred:${matched.id}` : "native";
+		}
+		return s || "native";
+	};
+	const sttTarget = resolveLegacyTarget(prefs.chatSttTarget || (prefs.useByokForChatStt ? "follow_walk" : "native"), "stt");
+	const ttsTarget = resolveLegacyTarget(prefs.chatTtsTarget || (prefs.useByokForChatTts ? "follow_walk" : "native"), "tts");
+	if (sttTarget === "native" && ttsTarget === "native") return "免费本机";
+	const labelFor = (target) => {
+		if (target === "native") return "";
+		if (target.startsWith("cred:")) {
+			const id = target.slice(5);
+			const found = creds.find((c) => c.id === id);
+			if (!found) return "";
+			const raw = String(found.label || "").trim();
+			if (/火山|豆包/i.test(raw)) return "豆包";
+			return raw.replace(/\s*\((ASR|TTS)\)\s*/gi, "").replace(/官方$/g, "").trim() || raw;
+		}
+		return "";
+	};
+	const parts = [];
+	const s = labelFor(sttTarget);
+	const t = labelFor(ttsTarget);
+	if (s) parts.push(s);
+	if (t && t !== s) parts.push(t);
+	return parts.join(" · ") || "免费本机";
+}
+/**
+* Resolve a concrete stageOverride config for an independent feature route (`'native' | 'follow_walk' | 'cred:<id>'`).
+* Returns `null` when the feature should fall back to free device-native speech.
+*/
+function resolveFeatureStageConfig(target, stage, activeProfile, credentials = []) {
+	const clean = String(target || "native").trim();
+	if (!clean || clean === "native") return null;
+	if (clean === "follow_walk") {
+		const st = activeProfile?.[stage];
+		if (!st || !st.provider || st.provider === "native") return null;
+		return { ...st };
+	}
+	if (clean.startsWith("cred:")) {
+		const cid = clean.slice(5);
+		const cred = (credentials || []).find((c) => c.id === cid);
+		if (!cred || !providerSupportsStage(cred.provider, stage)) return null;
+		if (stage === "stt") return {
+			provider: cred.provider,
+			credId: cred.id,
+			model: inferStageModelForCred(cred, "stt"),
+			language: "zh-CN",
+			thinkingLevel: "low",
+			fallbackChain: []
+		};
+		if (stage === "tts") return {
+			provider: cred.provider,
+			credId: cred.id,
+			model: inferStageModelForCred(cred, "tts"),
+			voice: inferStageVoiceForCred(cred),
+			format: "mp3",
+			speed: 1
+		};
+		return {
+			provider: cred.provider,
+			credId: cred.id,
+			model: inferDefaultBrainModel(cred),
+			thinkingLevel: "off",
+			maxTokens: 320
+		};
+	}
+	return null;
+}
+/**
+* List concise feature-level usage pills for a Provider card in global "AI 模型与供应商".
+*/
+function getCredentialFeatureUsages(credId, activeProfile, prefs = {}, credentials = []) {
+	const tags = [];
+	const walkRoles = getCredentialActiveRoles(credId, activeProfile, credentials);
+	if (walkRoles.includes("stt")) tags.push({
+		key: "walk_stt",
+		label: "随行·听",
+		tone: "stt"
+	});
+	if (walkRoles.includes("brain")) tags.push({
+		key: "walk_brain",
+		label: "随行·想",
+		tone: "brain"
+	});
+	if (walkRoles.includes("tts")) tags.push({
+		key: "walk_tts",
+		label: "随行·说",
+		tone: "tts"
+	});
+	if (String(prefs?.chatSttTarget || "") === `cred:${credId}`) tags.push({
+		key: "chat_stt",
+		label: "聊天·听",
+		tone: "stt"
+	});
+	if (String(prefs?.chatTtsTarget || "") === `cred:${credId}`) tags.push({
+		key: "chat_tts",
+		label: "聊天·说",
+		tone: "tts"
+	});
+	return tags;
+}
 // hub/web/src/components/VoiceProviderSheet.tsx
 var BackChevronSvg = () => /* @__PURE__ */ k$1("svg", {
 	width: "18",
@@ -3595,7 +3828,10 @@ function makeDraftFromCredential(cred) {
 }
 function VoiceProviderSheet(props) {
 	const { open, onClose, config, loadingCfg, initialView = "list", onConfigChange, onUpdatePrefs, onSoundCheck, onUnlockAudio, onPlayTestAudio, soundChecking, soundCheckMsg, onClearSoundCheckMsg, onRunBenchTurn, onToggleBenchVoice, benchDryRun, onSetBenchDryRun, benchText, onSetBenchText, benchRunning, benchRecording, benchReport, apiCall, toast } = props;
-	const [viewMode, setViewMode] = d("list");
+	const [viewMode, setViewMode] = d("walk");
+	const [returnView, setReturnView] = d("models");
+	const [chatTestingTts, setChatTestingTts] = d(false);
+	const [chatTtsMsg, setChatTtsMsg] = d(null);
 	const [draft, setDraft] = d(() => makeBlankDraft());
 	const [editingCredSummary, setEditingCredSummary] = d("");
 	const [savingEditor, setSavingEditor] = d(false);
@@ -3621,13 +3857,24 @@ function VoiceProviderSheet(props) {
 	A(() => {
 		if (!open) return;
 		setRoutingMsg(null);
+		setChatTtsMsg(null);
 		setEditorError("");
 		if (initialView === "add") {
 			setDraft(makeBlankDraft());
 			setEditingCredSummary("");
+			setReturnView("models");
 			setViewMode("editor");
+		} else if (initialView === "models") {
+			setReturnView("models");
+			setViewMode("models");
+			setGeekOpen(false);
+		} else if (initialView === "chat") {
+			setReturnView("chat");
+			setViewMode("chat");
+			setGeekOpen(false);
 		} else {
-			setViewMode("list");
+			setReturnView("walk");
+			setViewMode("walk");
 			setGeekOpen(initialView === "bench");
 		}
 	}, [open, initialView]);
@@ -3829,6 +4076,7 @@ function VoiceProviderSheet(props) {
 		setEditingCredSummary("");
 		setEditorError("");
 		setDraftTestRes(null);
+		if (viewMode !== "editor") setReturnView(viewMode);
 		setViewMode("editor");
 	};
 	const openEditEditor = (cred) => {
@@ -3836,7 +4084,65 @@ function VoiceProviderSheet(props) {
 		setEditingCredSummary(cred.authSummary || "");
 		setEditorError("");
 		setDraftTestRes(null);
+		if (viewMode !== "editor") setReturnView(viewMode);
 		setViewMode("editor");
+	};
+	const openModelsPoolFromFeature = (fromView) => {
+		setReturnView(fromView);
+		setViewMode("models");
+	};
+	const handleTestChatTts = async () => {
+		onUnlockAudio?.();
+		const stageOverride = resolveFeatureStageConfig(String(config.prefs.chatTtsTarget || (config.prefs.useByokForChatTts ? "follow_walk" : "native")), "tts", activeProf, creds);
+		const sample = "你好，这是聊天页消息朗读试听。";
+		setChatTestingTts(true);
+		setChatTtsMsg(null);
+		try {
+			if (!stageOverride) {
+				if (typeof window !== "undefined" && window.speechSynthesis && typeof SpeechSynthesisUtterance !== "undefined") {
+					window.speechSynthesis.cancel();
+					const u = new SpeechSynthesisUtterance(sample);
+					u.lang = "zh-CN";
+					window.speechSynthesis.speak(u);
+				}
+				setChatTtsMsg({
+					ok: true,
+					text: "免费本机播报已开始（请确保手机未静音）"
+				});
+				return;
+			}
+			const res = await apiCall("/api/voice/tts", {
+				method: "POST",
+				body: JSON.stringify({
+					text: sample,
+					profileId: activeProf.id,
+					stageOverride
+				})
+			});
+			const data = await res.json().catch(() => ({
+				ok: false,
+				error: `HTTP ${res.status}`
+			}));
+			if (!res.ok || !data?.ok || !data.audioBase64) {
+				setChatTtsMsg({
+					ok: false,
+					text: `播报失败：${data?.error || "请检查密钥与模型"}`
+				});
+				return;
+			}
+			const played = onPlayTestAudio ? await onPlayTestAudio(data.audioBase64, data.mimeType) : true;
+			setChatTtsMsg({
+				ok: Boolean(played),
+				text: played ? `云端人声正常 (${data.latencyMs ?? 0}ms)` : "音频已返回，但手机拦截了播放，请再点一次"
+			});
+		} catch (err) {
+			setChatTtsMsg({
+				ok: false,
+				text: `试听异常：${err?.message || "网络失败"}`
+			});
+		} finally {
+			setChatTestingTts(false);
+		}
 	};
 	const handleProtocolChange = (nextProv) => {
 		setEditorError("");
@@ -3932,7 +4238,7 @@ function VoiceProviderSheet(props) {
 				}
 			}
 			onConfigChange(latestCfg);
-			setViewMode("list");
+			setViewMode(returnView);
 			const curRoles = getCredentialActiveRoles(savedCred.id, latestCfg.activeProfile, latestCfg.credentials);
 			if (draft.setAsDefault) {
 				const nextSel = computeSmartDefaultSelection(savedCred, {
@@ -3956,26 +4262,145 @@ function VoiceProviderSheet(props) {
 	}] : TTS_VOICE_OPTIONS[draft.provider] || [];
 	const isVolcDraft = draft.provider === "volcengine_asr" || draft.provider === "volcengine_tts";
 	const compactSummary = formatVoiceCompactValue(config);
+	const rawChatSttTarget = String(config.prefs.chatSttTarget || "native");
+	const rawChatTtsTarget = String(config.prefs.chatTtsTarget || "native");
+	const chatSttTargetVal = rawChatSttTarget === "follow_walk" ? sttVal.startsWith("cred:") ? sttVal : "native" : rawChatSttTarget;
+	const chatTtsTargetVal = rawChatTtsTarget === "follow_walk" ? ttsVal.startsWith("cred:") ? ttsVal : "native" : rawChatTtsTarget;
+	const navTitle = viewMode === "editor" ? draft.id ? "编辑 Provider" : "添加 Provider" : viewMode === "models" ? "AI 模型与供应商" : viewMode === "chat" ? "聊天语音" : "边走边听 (Beta)";
 	return /* @__PURE__ */ k$1("div", {
 		id: "voiceLabSheet",
 		class: "sheet-backdrop open voice-lab-backdrop",
 		onClick: (e) => {
 			if (e.target === e.currentTarget) onClose();
 		}
-	}, /* @__PURE__ */ k$1("div", { class: "sheet-panel voice-lab-panel vp-ios-sheet" }, /* @__PURE__ */ k$1("div", { class: "sheet-handle" }), /* @__PURE__ */ k$1("div", { class: "vp-sheet-nav" }, /* @__PURE__ */ k$1("div", { class: "vp-sheet-nav-left" }, viewMode === "editor" && /* @__PURE__ */ k$1("button", {
+	}, /* @__PURE__ */ k$1("div", { class: "sheet-panel voice-lab-panel vp-ios-sheet" }, /* @__PURE__ */ k$1("div", { class: "sheet-handle" }), /* @__PURE__ */ k$1("div", { class: "vp-sheet-nav" }, /* @__PURE__ */ k$1("div", { class: "vp-sheet-nav-left" }, (viewMode === "editor" || viewMode === "models" && returnView !== "models") && /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: "vp-nav-back",
 		id: "vpBackToListBtn",
 		onClick: () => {
 			setEditorError("");
-			setViewMode("list");
+			if (viewMode === "editor") setViewMode(returnView);
+			else {
+				const target = returnView;
+				setReturnView(target);
+				setViewMode(target);
+			}
 		}
-	}, /* @__PURE__ */ k$1(BackChevronSvg, null), /* @__PURE__ */ k$1("span", null, "返回"))), /* @__PURE__ */ k$1("div", { class: "vp-sheet-nav-title" }, viewMode === "list" ? "边走边听" : draft.id ? "编辑 Provider" : "添加 Provider"), /* @__PURE__ */ k$1("div", { class: "vp-sheet-nav-right" }, /* @__PURE__ */ k$1("button", {
+	}, /* @__PURE__ */ k$1(BackChevronSvg, null), /* @__PURE__ */ k$1("span", null, "返回"))), /* @__PURE__ */ k$1("div", { class: "vp-sheet-nav-title" }, navTitle), /* @__PURE__ */ k$1("div", { class: "vp-sheet-nav-right" }, /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: "vp-nav-close",
 		"aria-label": "关闭语音配置",
 		onClick: onClose
-	}, /* @__PURE__ */ k$1(CloseSvg, null)))), viewMode === "list" ? /* @__PURE__ */ k$1("div", { class: "voice-lab-body vp-ios-body" }, loadingCfg && /* @__PURE__ */ k$1("div", { class: "vp-subtle-note" }, "正在读取配置…"), /* @__PURE__ */ k$1("div", { class: "vp-ios-card vp-hero-card" }, /* @__PURE__ */ k$1("div", { class: "vp-hero-row" }, /* @__PURE__ */ k$1("div", { class: "vp-hero-info" }, /* @__PURE__ */ k$1("div", { class: "vp-hero-k" }, "当前生效"), /* @__PURE__ */ k$1("div", { class: "vp-hero-v" }, compactSummary)), /* @__PURE__ */ k$1("div", { class: "vp-hero-actions" }, /* @__PURE__ */ k$1("button", {
+	}, /* @__PURE__ */ k$1(CloseSvg, null)))), viewMode === "models" ? /* @__PURE__ */ k$1("div", {
+		class: "voice-lab-body vp-ios-body",
+		id: "aiModelsPoolView"
+	}, loadingCfg && /* @__PURE__ */ k$1("div", { class: "vp-subtle-note" }, "正在读取配置…"), /* @__PURE__ */ k$1("div", {
+		class: "vp-subtle-note",
+		style: "margin-bottom:4px;"
+	}, "全局共用一套供应商密钥池，下方不同 AI 功能按需独立调用，无需重复填写 Key"), routingMsg && /* @__PURE__ */ k$1("div", {
+		id: "vpHeroStatusBanner",
+		class: `vp-inline-notice ${routingMsg.ok ? "ok" : "err"}`,
+		style: "margin-bottom:10px;",
+		onClick: () => setRoutingMsg(null)
+	}, routingMsg.text), /* @__PURE__ */ k$1("div", {
+		class: "vp-sec-head",
+		id: "voiceProviderListHeader"
+	}, /* @__PURE__ */ k$1("span", { class: "vp-sec-label" }, `Provider 列表 (${creds.length})`), /* @__PURE__ */ k$1("button", {
+		type: "button",
+		id: "voiceAddProviderBtn",
+		class: "vp-sec-add-btn",
+		onClick: openAddEditor
+	}, /* @__PURE__ */ k$1(PlusSvg, null), /* @__PURE__ */ k$1("span", null, "添加"))), /* @__PURE__ */ k$1("div", {
+		class: "vp-ios-card",
+		id: "voiceProviderListSection"
+	}, creds.length === 0 ? /* @__PURE__ */ k$1("div", { class: "vp-ios-empty" }, /* @__PURE__ */ k$1("div", { class: "vp-empty-title" }, "暂未添加 Provider"), /* @__PURE__ */ k$1("div", { class: "vp-empty-desc" }, "统一支持 OpenAI 兼容接口（火山方舟、DeepSeek、OpenAI、中转站、Ollama）及原生语音接口"), /* @__PURE__ */ k$1("button", {
+		type: "button",
+		class: "vp-btn-primary",
+		style: "margin-top:12px;padding:8px 18px;",
+		onClick: openAddEditor
+	}, "添加 Provider")) : creds.map((cred) => {
+		const roles = getCredentialActiveRoles(cred.id, activeProf, creds);
+		const usages = getCredentialFeatureUsages(cred.id, activeProf, config.prefs, creds);
+		const host = extractHostFromUrl(cred.baseUrl);
+		const modelOrRes = cred.defaultModel || cred.resourceId || "";
+		const testRes = testResults[cred.id];
+		const isPrimaryDefault = cred.provider === "gemini" && roles.length === 3 || cred.provider === "volcengine_asr" && roles.includes("stt") || cred.provider === "volcengine_tts" && roles.includes("tts") || cred.provider === "openai_compat" && roles.includes("brain");
+		return /* @__PURE__ */ k$1("div", {
+			key: cred.id,
+			class: "vp-ios-item"
+		}, /* @__PURE__ */ k$1("div", { class: "vp-ios-item-top" }, /* @__PURE__ */ k$1("div", { class: "vp-ios-item-title-wrap" }, /* @__PURE__ */ k$1("span", { class: "vp-ios-item-name" }, cred.label), /* @__PURE__ */ k$1("span", { class: "vp-proto-chip" }, PROTOCOL_LABELS[cred.provider] || cred.provider)), usages.length > 0 && /* @__PURE__ */ k$1("div", { class: "vp-role-badges" }, usages.map((u) => /* @__PURE__ */ k$1("span", {
+			key: u.key,
+			class: `vp-role-pill ${u.tone}`
+		}, u.label)))), /* @__PURE__ */ k$1("div", { class: "vp-ios-item-meta" }, [
+			host,
+			modelOrRes,
+			cred.defaultVoice && cred.provider !== "volcengine_asr" ? cred.defaultVoice : "",
+			cred.authSummary
+		].filter(Boolean).join(" · ")), testRes && /* @__PURE__ */ k$1("div", {
+			class: `vp-inline-notice ${testRes.ok ? "ok" : "err"}`,
+			style: "margin-top:6px;"
+		}, testRes.summary), /* @__PURE__ */ k$1("div", { class: "vp-ios-item-actions" }, /* @__PURE__ */ k$1("button", {
+			type: "button",
+			class: `vp-text-act ${isPrimaryDefault ? "muted" : "primary"}`,
+			disabled: routingSaving,
+			onClick: () => void handleSetProviderDefault(cred)
+		}, isPrimaryDefault ? "已用于随行" : "设为随行默认"), /* @__PURE__ */ k$1("button", {
+			type: "button",
+			class: "vp-text-act",
+			disabled: testingCredId === cred.id,
+			onClick: () => void handleTestProvider(cred.id)
+		}, testingCredId === cred.id ? "测试中…" : "测试"), /* @__PURE__ */ k$1("button", {
+			type: "button",
+			class: "vp-text-act",
+			onClick: () => openEditEditor(cred)
+		}, "编辑"), /* @__PURE__ */ k$1("button", {
+			type: "button",
+			class: "vp-text-act danger",
+			onClick: () => void handleDeleteProvider(cred)
+		}, "删除")));
+	}))) : viewMode === "chat" ? /* @__PURE__ */ k$1("div", {
+		class: "voice-lab-body vp-ios-body",
+		id: "chatVoiceSettingsView"
+	}, loadingCfg && /* @__PURE__ */ k$1("div", { class: "vp-subtle-note" }, "正在读取配置…"), /* @__PURE__ */ k$1("div", {
+		class: "vp-subtle-note",
+		style: "margin-bottom:4px;"
+	}, "聊天输入框语音听写与消息朗读可独立选用模型，与「边走边听 (Beta)」互不影响"), /* @__PURE__ */ k$1("div", { class: "vp-sec-head" }, /* @__PURE__ */ k$1("span", { class: "vp-sec-label" }, "本功能调用的模型"), /* @__PURE__ */ k$1("button", {
+		type: "button",
+		class: "vp-sec-link",
+		onClick: () => openModelsPoolFromFeature("chat")
+	}, "管理模型池 ›")), /* @__PURE__ */ k$1("div", { class: "vp-ios-card" }, /* @__PURE__ */ k$1("div", { class: "vp-select-row" }, /* @__PURE__ */ k$1("span", { class: "vp-select-label" }, "语音输入（听写）"), /* @__PURE__ */ k$1("select", {
+		id: "chatVoiceSttSelect",
+		class: "vp-select-ctrl",
+		value: chatSttTargetVal,
+		onChange: (e) => void onUpdatePrefs({ chatSttTarget: e.target.value })
+	}, /* @__PURE__ */ k$1("option", { value: "native" }, "手机自带免费"), sttCreds.map((c) => /* @__PURE__ */ k$1("option", {
+		key: c.id,
+		value: `cred:${c.id}`
+	}, c.label)))), /* @__PURE__ */ k$1("div", { class: "vp-select-row" }, /* @__PURE__ */ k$1("span", { class: "vp-select-label" }, "消息朗读（播报）"), /* @__PURE__ */ k$1("select", {
+		id: "chatVoiceTtsSelect",
+		class: "vp-select-ctrl",
+		value: chatTtsTargetVal,
+		onChange: (e) => void onUpdatePrefs({ chatTtsTarget: e.target.value })
+	}, /* @__PURE__ */ k$1("option", { value: "native" }, "手机自带免费"), ttsCreds.map((c) => /* @__PURE__ */ k$1("option", {
+		key: c.id,
+		value: `cred:${c.id}`
+	}, c.label))))), /* @__PURE__ */ k$1("div", {
+		class: "vp-ios-card",
+		style: "padding:12px 14px;margin-top:12px;"
+	}, /* @__PURE__ */ k$1("div", { style: "display:flex;align-items:center;justify-content:space-between;gap:10px;" }, /* @__PURE__ */ k$1("span", { style: "font-size:13px;font-weight:600;color:var(--text);" }, "快速测试聊天朗读"), /* @__PURE__ */ k$1("button", {
+		type: "button",
+		id: "chatVoiceTestTtsBtn",
+		class: "vp-btn-ghost",
+		disabled: chatTestingTts,
+		onClick: () => void handleTestChatTts()
+	}, chatTestingTts ? "试音中…" : "试听聊天朗读")), chatTtsMsg && /* @__PURE__ */ k$1("div", {
+		class: `vp-inline-notice ${chatTtsMsg.ok ? "ok" : "err"}`,
+		style: "margin-top:8px;",
+		onClick: () => setChatTtsMsg(null)
+	}, chatTtsMsg.text))) : viewMode === "walk" ? /* @__PURE__ */ k$1("div", {
+		class: "voice-lab-body vp-ios-body",
+		id: "walkModeSettingsView"
+	}, loadingCfg && /* @__PURE__ */ k$1("div", { class: "vp-subtle-note" }, "正在读取配置…"), /* @__PURE__ */ k$1("div", { class: "vp-ios-card vp-hero-card" }, /* @__PURE__ */ k$1("div", { class: "vp-hero-row" }, /* @__PURE__ */ k$1("div", { class: "vp-hero-info" }, /* @__PURE__ */ k$1("div", { class: "vp-hero-k" }, "当前生效"), /* @__PURE__ */ k$1("div", { class: "vp-hero-v" }, compactSummary)), /* @__PURE__ */ k$1("div", { class: "vp-hero-actions" }, /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: "vp-btn-primary",
 		id: "vpOpenWalkModeBtn",
@@ -4003,12 +4428,17 @@ function VoiceProviderSheet(props) {
 			setRoutingMsg(null);
 			onClearSoundCheckMsg();
 		}
-	}, (soundCheckMsg || routingMsg).text)), /* @__PURE__ */ k$1("div", { class: "vp-sec-head" }, /* @__PURE__ */ k$1("span", { class: "vp-sec-label" }, "默认分配"), activeProf.id !== "native" && /* @__PURE__ */ k$1("button", {
+	}, (soundCheckMsg || routingMsg).text)), /* @__PURE__ */ k$1("div", { class: "vp-sec-head" }, /* @__PURE__ */ k$1("span", { class: "vp-sec-label" }, "本功能调用的模型"), /* @__PURE__ */ k$1("div", { style: "display:inline-flex;align-items:center;gap:10px;" }, activeProf.id !== "native" && /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: "vp-sec-link",
 		disabled: routingSaving,
 		onClick: () => void persistRouting("native", "native", "native")
-	}, "恢复免费本机")), /* @__PURE__ */ k$1("div", { class: "vp-ios-card" }, /* @__PURE__ */ k$1("div", { class: "vp-select-row" }, /* @__PURE__ */ k$1("span", { class: "vp-select-label" }, "听写"), /* @__PURE__ */ k$1("select", {
+	}, "恢复免费本机"), /* @__PURE__ */ k$1("button", {
+		type: "button",
+		id: "walkManageModelsPoolBtn",
+		class: "vp-sec-link",
+		onClick: () => openModelsPoolFromFeature("walk")
+	}, "管理模型池 ›"))), /* @__PURE__ */ k$1("div", { class: "vp-ios-card" }, /* @__PURE__ */ k$1("div", { class: "vp-select-row" }, /* @__PURE__ */ k$1("span", { class: "vp-select-label" }, "听写"), /* @__PURE__ */ k$1("select", {
 		id: "voiceStageSttSelect",
 		class: "vp-select-ctrl",
 		disabled: routingSaving,
@@ -4035,59 +4465,15 @@ function VoiceProviderSheet(props) {
 	}, /* @__PURE__ */ k$1("option", { value: "native" }, "手机自带免费"), ttsVal.startsWith("missing:") && /* @__PURE__ */ k$1("option", { value: ttsVal }, "密钥缺失"), ttsCreds.map((c) => /* @__PURE__ */ k$1("option", {
 		key: c.id,
 		value: `cred:${c.id}`
-	}, c.label))))), /* @__PURE__ */ k$1("div", {
-		class: "vp-sec-head",
-		id: "voiceProviderListHeader"
-	}, /* @__PURE__ */ k$1("span", { class: "vp-sec-label" }, `Provider 列表 (${creds.length})`), /* @__PURE__ */ k$1("button", {
-		type: "button",
-		id: "voiceAddProviderBtn",
-		class: "vp-sec-add-btn",
-		onClick: openAddEditor
-	}, /* @__PURE__ */ k$1(PlusSvg, null), /* @__PURE__ */ k$1("span", null, "添加"))), /* @__PURE__ */ k$1("div", {
-		class: "vp-ios-card",
-		id: "voiceProviderListSection"
-	}, creds.length === 0 ? /* @__PURE__ */ k$1("div", { class: "vp-ios-empty" }, /* @__PURE__ */ k$1("div", { class: "vp-empty-title" }, "暂未添加 Provider"), /* @__PURE__ */ k$1("div", { class: "vp-empty-desc" }, "统一支持 OpenAI 兼容接口（火山方舟、DeepSeek、OpenAI、中转站、Ollama）及原生语音接口"), /* @__PURE__ */ k$1("button", {
-		type: "button",
-		class: "vp-btn-primary",
-		style: "margin-top:12px;padding:8px 18px;",
-		onClick: openAddEditor
-	}, "添加 Provider")) : creds.map((cred) => {
-		const roles = getCredentialActiveRoles(cred.id, activeProf, creds);
-		const host = extractHostFromUrl(cred.baseUrl);
-		const modelOrRes = cred.defaultModel || cred.resourceId || "";
-		const testRes = testResults[cred.id];
-		const isPrimaryDefault = cred.provider === "gemini" && roles.length === 3 || cred.provider === "volcengine_asr" && roles.includes("stt") || cred.provider === "volcengine_tts" && roles.includes("tts") || cred.provider === "openai_compat" && roles.includes("brain");
-		return /* @__PURE__ */ k$1("div", {
-			key: cred.id,
-			class: "vp-ios-item"
-		}, /* @__PURE__ */ k$1("div", { class: "vp-ios-item-top" }, /* @__PURE__ */ k$1("div", { class: "vp-ios-item-title-wrap" }, /* @__PURE__ */ k$1("span", { class: "vp-ios-item-name" }, cred.label), /* @__PURE__ */ k$1("span", { class: "vp-proto-chip" }, PROTOCOL_LABELS[cred.provider] || cred.provider)), roles.length > 0 && /* @__PURE__ */ k$1("div", { class: "vp-role-badges" }, roles.includes("stt") && /* @__PURE__ */ k$1("span", { class: "vp-role-pill stt" }, "听"), roles.includes("brain") && /* @__PURE__ */ k$1("span", { class: "vp-role-pill brain" }, "想"), roles.includes("tts") && /* @__PURE__ */ k$1("span", { class: "vp-role-pill tts" }, "说"))), /* @__PURE__ */ k$1("div", { class: "vp-ios-item-meta" }, [
-			host,
-			modelOrRes,
-			cred.defaultVoice && cred.provider !== "volcengine_asr" ? cred.defaultVoice : "",
-			cred.authSummary
-		].filter(Boolean).join(" · ")), testRes && /* @__PURE__ */ k$1("div", {
-			class: `vp-inline-notice ${testRes.ok ? "ok" : "err"}`,
-			style: "margin-top:6px;"
-		}, testRes.summary), /* @__PURE__ */ k$1("div", { class: "vp-ios-item-actions" }, /* @__PURE__ */ k$1("button", {
-			type: "button",
-			class: `vp-text-act ${isPrimaryDefault ? "muted" : "primary"}`,
-			disabled: routingSaving,
-			onClick: () => void handleSetProviderDefault(cred)
-		}, isPrimaryDefault ? "已默认" : "设为默认"), /* @__PURE__ */ k$1("button", {
-			type: "button",
-			class: "vp-text-act",
-			disabled: testingCredId === cred.id,
-			onClick: () => void handleTestProvider(cred.id)
-		}, testingCredId === cred.id ? "测试中…" : "测试"), /* @__PURE__ */ k$1("button", {
-			type: "button",
-			class: "vp-text-act",
-			onClick: () => openEditEditor(cred)
-		}, "编辑"), /* @__PURE__ */ k$1("button", {
-			type: "button",
-			class: "vp-text-act danger",
-			onClick: () => void handleDeleteProvider(cred)
-		}, "删除")));
-	})), /* @__PURE__ */ k$1("div", { class: "vp-sec-head" }, /* @__PURE__ */ k$1("span", { class: "vp-sec-label" }, "行为与安全")), /* @__PURE__ */ k$1("div", { class: "vp-ios-card" }, /* @__PURE__ */ k$1("div", { class: "vp-select-row" }, /* @__PURE__ */ k$1("span", { class: "vp-select-label" }, "高危操作确认"), /* @__PURE__ */ k$1("select", {
+	}, c.label))))), /* @__PURE__ */ k$1("div", { class: "vp-sec-head" }, /* @__PURE__ */ k$1("span", { class: "vp-sec-label" }, "播报与交互行为")), /* @__PURE__ */ k$1("div", { class: "vp-ios-card" }, /* @__PURE__ */ k$1("div", { class: "vp-select-row" }, /* @__PURE__ */ k$1("span", { class: "vp-select-label" }, "主动播报"), /* @__PURE__ */ k$1("select", {
+		class: "vp-select-ctrl",
+		value: config.prefs.proactiveBriefing,
+		onChange: (e) => void onUpdatePrefs({ proactiveBriefing: e.target.value })
+	}, /* @__PURE__ */ k$1("option", { value: "approvals" }, "仅审批提醒"), /* @__PURE__ */ k$1("option", { value: "all" }, "审批与完成"), /* @__PURE__ */ k$1("option", { value: "manual" }, "仅手动播报"))), /* @__PURE__ */ k$1("div", { class: "vp-select-row" }, /* @__PURE__ */ k$1("span", { class: "vp-select-label" }, "播报详略"), /* @__PURE__ */ k$1("select", {
+		class: "vp-select-ctrl",
+		value: config.prefs.briefingDetail || "detailed",
+		onChange: (e) => void onUpdatePrefs({ briefingDetail: e.target.value })
+	}, /* @__PURE__ */ k$1("option", { value: "detailed" }, "详细要点"), /* @__PURE__ */ k$1("option", { value: "verbatim" }, "原文精读"), /* @__PURE__ */ k$1("option", { value: "concise" }, "极简一句"))), /* @__PURE__ */ k$1("div", { class: "vp-select-row" }, /* @__PURE__ */ k$1("span", { class: "vp-select-label" }, "高危操作确认"), /* @__PURE__ */ k$1("select", {
 		class: "vp-select-ctrl",
 		value: config.prefs.l2Policy,
 		onChange: (e) => void onUpdatePrefs({ l2Policy: e.target.value })
@@ -4096,6 +4482,11 @@ function VoiceProviderSheet(props) {
 		class: "voice-switch",
 		checked: config.prefs.autoListenAfterBriefing,
 		onChange: (e) => void onUpdatePrefs({ autoListenAfterBriefing: e.target.checked })
+	})), /* @__PURE__ */ k$1("div", { class: "vp-switch-row" }, /* @__PURE__ */ k$1("div", null, /* @__PURE__ */ k$1("div", { class: "vp-switch-title" }, "听歌时压低背景音乐"), /* @__PURE__ */ k$1("div", { class: "vp-switch-sub" }, "播报时自动降低音量，说完恢复")), /* @__PURE__ */ k$1("input", {
+		type: "checkbox",
+		class: "voice-switch",
+		checked: config.prefs.duckMusicMode,
+		onChange: (e) => void onUpdatePrefs({ duckMusicMode: e.target.checked })
 	}))), /* @__PURE__ */ k$1("details", {
 		class: "vp-ios-details",
 		open: geekOpen,
@@ -4103,22 +4494,7 @@ function VoiceProviderSheet(props) {
 	}, /* @__PURE__ */ k$1("summary", null, "高级选项与延迟压测"), /* @__PURE__ */ k$1("div", {
 		class: "vp-ios-card",
 		style: "margin-top:8px;"
-	}, /* @__PURE__ */ k$1("div", { class: "vp-switch-row" }, /* @__PURE__ */ k$1("div", null, /* @__PURE__ */ k$1("div", { class: "vp-switch-title" }, "听歌时压低背景音乐"), /* @__PURE__ */ k$1("div", { class: "vp-switch-sub" }, "播报时自动降低音量，说完恢复")), /* @__PURE__ */ k$1("input", {
-		type: "checkbox",
-		class: "voice-switch",
-		checked: config.prefs.duckMusicMode,
-		onChange: (e) => void onUpdatePrefs({ duckMusicMode: e.target.checked })
-	})), /* @__PURE__ */ k$1("div", { class: "vp-switch-row" }, /* @__PURE__ */ k$1("div", null, /* @__PURE__ */ k$1("div", { class: "vp-switch-title" }, "聊天页朗读复用云端播报")), /* @__PURE__ */ k$1("input", {
-		type: "checkbox",
-		class: "voice-switch",
-		checked: config.prefs.useByokForChatTts,
-		onChange: (e) => void onUpdatePrefs({ useByokForChatTts: e.target.checked })
-	})), /* @__PURE__ */ k$1("div", { class: "vp-switch-row" }, /* @__PURE__ */ k$1("div", null, /* @__PURE__ */ k$1("div", { class: "vp-switch-title" }, "聊天页语音输入复用云端听写")), /* @__PURE__ */ k$1("input", {
-		type: "checkbox",
-		class: "voice-switch",
-		checked: config.prefs.useByokForChatStt,
-		onChange: (e) => void onUpdatePrefs({ useByokForChatStt: e.target.checked })
-	})), /* @__PURE__ */ k$1("div", { class: "vp-bench-block" }, /* @__PURE__ */ k$1("div", {
+	}, /* @__PURE__ */ k$1("div", { class: "vp-bench-block" }, /* @__PURE__ */ k$1("div", {
 		class: "vp-switch-row",
 		style: "padding:0 0 8px;border:none;"
 	}, /* @__PURE__ */ k$1("div", null, /* @__PURE__ */ k$1("div", { class: "vp-switch-title" }, "安全试跑压测（不操作电脑）")), /* @__PURE__ */ k$1("input", {
@@ -4455,6 +4831,8 @@ var DEFAULT_CONFIG = {
 		duckMusicMode: true,
 		useByokForChatStt: false,
 		useByokForChatTts: false,
+		chatSttTarget: "native",
+		chatTtsTarget: "native",
 		autoPlayWalkReplies: true,
 		speechRate: 1
 	},
@@ -4554,7 +4932,7 @@ function VoiceCopilotSheets() {
 	const [walkExpanded, setWalkExpanded] = d(false);
 	const [chatScreenOpen, setChatScreenOpen] = d(false);
 	const [labOpen, setLabOpen] = d(false);
-	const [labInitialView, setLabInitialView] = d("list");
+	const [labInitialView, setLabInitialView] = d("walk");
 	const [config, setConfig] = d(DEFAULT_CONFIG);
 	const [loadingCfg, setLoadingCfg] = d(false);
 	const [soundChecking, setSoundChecking] = d(false);
@@ -4643,6 +5021,7 @@ function VoiceCopilotSheets() {
 	const walkOpenRef = T(false);
 	const walkPhaseRef = T(walkPhase);
 	const configRef = T(config);
+	const configLoadedRef = T(false);
 	A(() => {
 		walkOpenRef.current = walkOpen;
 	}, [walkOpen]);
@@ -4673,6 +5052,8 @@ function VoiceCopilotSheets() {
 					activeProfile: data.activeProfile || DEFAULT_CONFIG.activeProfile,
 					activePin: data.activePin || null
 				};
+				configLoadedRef.current = true;
+				configRef.current = next;
 				setConfig(next);
 				if (data.activePin) setActivePin(data.activePin);
 				window.__dshVoiceConfig = next;
@@ -4699,7 +5080,7 @@ function VoiceCopilotSheets() {
 		};
 		window.openVoiceLab = (tab) => {
 			setSoundCheckMsg(null);
-			setLabInitialView(tab === "bench" ? "bench" : tab === "add" ? "add" : "list");
+			setLabInitialView(tab === "models" || tab === "keys" ? "models" : tab === "chat" ? "chat" : tab === "bench" ? "bench" : tab === "add" ? "add" : "walk");
 			setLabOpen(true);
 			refreshConfig(false);
 		};
@@ -4712,7 +5093,8 @@ function VoiceCopilotSheets() {
 				notifyNativeBackgroundWakeDone();
 				return false;
 			}
-			if ((configRef.current?.activeProfile?.tts?.provider || "native") !== "native") claimNativeBackgroundWakeForCloudTts();
+			const ttsProv = configRef.current?.activeProfile?.tts?.provider || "native";
+			if (!configLoadedRef.current || ttsProv !== "native") claimNativeBackgroundWakeForCloudTts();
 			const mode = configRef.current?.prefs?.proactiveBriefing || "approvals";
 			const evType = String(payload?.type || "").trim();
 			const hostId = String(payload?.hostId || "").trim();
@@ -4796,10 +5178,17 @@ function VoiceCopilotSheets() {
 			}, 260);
 			return true;
 		};
-		window.__dshVoiceByokSpeak = async (text, onDone) => {
+		const resolveChatTtsStageOverride = () => {
 			const cfg = configRef.current;
-			if (!cfg?.prefs?.useByokForChatTts || !cfg?.activeProfile || cfg.activeProfile.tts?.provider === "native") return false;
-			const chunks = String(text || "").split(/(?<=[。！？.!?\n])\s*/).map((s) => s.trim()).filter(Boolean).reduce((acc, s) => {
+			return resolveFeatureStageConfig(String(cfg?.prefs?.chatTtsTarget || (cfg?.prefs?.useByokForChatTts ? "follow_walk" : "native")), "tts", cfg?.activeProfile, cfg?.credentials || []);
+		};
+		window.__dshVoiceByokCanSpeak = () => Boolean(resolveChatTtsStageOverride());
+		window.__dshVoiceByokSpeak = async (text, onDone) => {
+			if (!configLoadedRef.current) await refreshConfig(true);
+			const cfg = configRef.current;
+			const stageOverride = resolveChatTtsStageOverride();
+			if (!stageOverride) return false;
+			const chunks = String(text || "").split(/(?<=[。！？.!?\n])\s*/).map((s) => s.trim()).filter((s) => Boolean(s) && /[\p{L}\p{N}]/u.test(s)).reduce((acc, s) => {
 				const lim = acc.length === 0 ? 48 : 160;
 				if (!acc.length || acc[acc.length - 1].length + s.length > lim) acc.push(s);
 				else acc[acc.length - 1] += s;
@@ -4808,6 +5197,7 @@ function VoiceCopilotSheets() {
 			if (!chunks.length) return false;
 			await playerRef.current.speakChunksProgressive(chunks, {
 				useCloudTts: true,
+				allowNativeFallback: false,
 				speechRate: cfg.prefs.speechRate || 1,
 				fetchTts: async (chunk, signal) => {
 					return (await apiCall("/api/voice/tts", {
@@ -4815,9 +5205,13 @@ function VoiceCopilotSheets() {
 						signal,
 						body: JSON.stringify({
 							text: chunk,
-							profileId: cfg.activeProfile.id
+							profileId: cfg.activeProfile.id,
+							stageOverride
 						})
 					})).json().catch(() => ({ ok: false }));
+				},
+				onCloudTtsError: () => {
+					toast("⚠️ 云端语音合成偶发波动，已自动跳过该句（未混入机器音）");
 				},
 				onStateChange: (playing) => {
 					if (!playing) onDone?.();
@@ -4832,7 +5226,8 @@ function VoiceCopilotSheets() {
 		let chatDictBtnId = "";
 		window.__dshVoiceByokToggleDictation = (targetInputId, btnId, showToastFn, onComposerInputFn) => {
 			const cfg = configRef.current;
-			if (!cfg?.prefs?.useByokForChatStt || !cfg?.activeProfile || cfg.activeProfile.stt?.provider === "native") return false;
+			const stageOverride = resolveFeatureStageConfig(String(cfg?.prefs?.chatSttTarget || (cfg?.prefs?.useByokForChatStt ? "follow_walk" : "native")), "stt", cfg?.activeProfile, cfg?.credentials || []);
+			if (!stageOverride) return false;
 			const btn = document.getElementById(btnId);
 			const input = document.getElementById(targetInputId);
 			if (!input) return false;
@@ -4846,13 +5241,14 @@ function VoiceCopilotSheets() {
 						showToastFn("⏹ 录音太短，已取消");
 						return;
 					}
-					showToastFn("👂 BYOK 云端识别中…");
+					showToastFn("👂 云端语音识别中…");
 					return apiCall("/api/voice/stt", {
 						method: "POST",
 						body: JSON.stringify({
 							audioBase64: rec.wavBase64,
 							mimeType: "audio/wav",
-							profileId: cfg.activeProfile.id
+							profileId: cfg.activeProfile.id,
+							stageOverride
 						})
 					}).then((r) => r.json().catch(() => ({ ok: false }))).then((data) => {
 						if (data?.ok && String(data.text || "").trim()) {
@@ -4880,7 +5276,7 @@ function VoiceCopilotSheets() {
 		};
 		const initTimer = setTimeout(() => {
 			refreshConfig(true);
-		}, 800);
+		}, 120);
 		return () => {
 			clearTimeout(initTimer);
 			playerRef.current?.stop();
@@ -4926,8 +5322,9 @@ function VoiceCopilotSheets() {
 		const duckMusic = configRef.current?.prefs?.duckMusicMode !== false;
 		const keepMicWarm = Boolean(configRef.current?.prefs?.autoListenAfterBriefing);
 		const proactiveBriefing = configRef.current?.prefs?.proactiveBriefing || "approvals";
+		const walkUsesCloudTts = (configRef.current?.activeProfile?.tts?.provider || "native") !== "native";
 		if (duckMusic) setWalkAudioSessionMode("ambient");
-		setWalkBackgroundKeepAlive(true, duckMusic, keepMicWarm, proactiveBriefing);
+		setWalkBackgroundKeepAlive(true, duckMusic, keepMicWarm, proactiveBriefing, walkUsesCloudTts);
 		wakeRef.current?.enable().then((ok) => setWakeLocked(ok));
 		const unbindMedia = bindWalkMediaSession({
 			onToggleListen: () => {
@@ -4948,12 +5345,13 @@ function VoiceCopilotSheets() {
 	}, [walkOpen]);
 	A(() => {
 		if (!walkOpen) return;
-		setWalkBackgroundKeepAlive(true, config.prefs.duckMusicMode !== false, Boolean(config.prefs.autoListenAfterBriefing), config.prefs.proactiveBriefing || "approvals");
+		setWalkBackgroundKeepAlive(true, config.prefs.duckMusicMode !== false, Boolean(config.prefs.autoListenAfterBriefing), config.prefs.proactiveBriefing || "approvals", (config.activeProfile?.tts?.provider || "native") !== "native");
 	}, [
 		walkOpen,
 		config.prefs.duckMusicMode,
 		config.prefs.autoListenAfterBriefing,
-		config.prefs.proactiveBriefing
+		config.prefs.proactiveBriefing,
+		config.activeProfile?.tts?.provider
 	]);
 	const drainBriefingQueue = async () => {
 		if (drainingBriefingRef.current || !walkOpenRef.current) return;
@@ -4999,7 +5397,10 @@ function VoiceCopilotSheets() {
 			setLastReplyText(spokenText);
 			setLastActionBadge(nextItem.kind === "approval" ? `🔔 ${data?.approval?.slot ? `${data.approval.slot}号` : "新"}待审批 ${nextItem.code || ""}` : `✅ 任务完成${data?.summarizedByBrain ? " · AI 摘要" : ""}`);
 			const micReadyForAutoListen = Boolean(cfg.prefs.autoListenAfterBriefing && walkOpenRef.current && (nextItem.kind === "approval" || nextItem.kind === "completed" || Boolean(data?.expectReply))) ? await canNativeAutoListenNow() : false;
-			await speakWalkReply(chunks, void 0, { keepAudioSessionAfter: micReadyForAutoListen });
+			await speakWalkReply(chunks, void 0, {
+				keepAudioSessionAfter: micReadyForAutoListen,
+				allowNativeFallback: nextItem.kind === "approval"
+			});
 			if (micReadyForAutoListen && walkOpenRef.current && walkPhaseRef.current === "idle") {
 				startedAutoListen = true;
 				startWalkListening({ isAutoFollowUp: true });
@@ -5016,6 +5417,7 @@ function VoiceCopilotSheets() {
 	};
 	A(() => {
 		const onHubState = (ev) => {
+			if (!configLoadedRef.current) refreshConfig(true);
 			const snap = summarizeHubState(ev?.detail || window.__dshLastHubState);
 			setHubSummary(snap);
 			if (!walkOpenRef.current) return;
@@ -5082,6 +5484,7 @@ function VoiceCopilotSheets() {
 		setWalkPhase("speaking");
 		await playerRef.current.speakChunksProgressive(chunks, {
 			useCloudTts: Boolean(useCloud),
+			allowNativeFallback: Boolean(opts.allowNativeFallback),
 			speechRate: cfg.prefs.speechRate || 1,
 			duckMusicMode: duckMusic,
 			keepAudioSessionAfter: Boolean(opts.keepAudioSessionAfter),
@@ -5096,6 +5499,9 @@ function VoiceCopilotSheets() {
 				})).json().catch(() => ({ ok: false }));
 			},
 			onFirstLatency: onFirstTtsMs,
+			onCloudTtsError: () => {
+				toast("⚠️ 豆包语音偶发波动，已跳过该段（未混入机器音）");
+			},
 			onStateChange: (playing) => {
 				if (!playing && walkPhaseRef.current === "speaking") setWalkPhase("idle");
 			}
@@ -5591,7 +5997,7 @@ function VoiceCopilotSheets() {
 	const nativeShell = isNativeIosShell();
 	const openLabFromWalk = () => {
 		setSoundCheckMsg(null);
-		setLabInitialView("list");
+		setLabInitialView("walk");
 		setLabOpen(true);
 		refreshConfig(false);
 	};
@@ -6399,12 +6805,15 @@ var SETTINGS_SUBPAGE_TITLES = {
 	security: "审批与安全防护",
 	password: "密码与配对登录",
 	shares: "加密分享记录",
-	capabilities: "各 AI 工具能力说明"
+	capabilities: "各 AI 工具能力说明",
+	copilot: "目标副驾插件 (Beta)"
 };
 var SVG_ICONS = {
 	plus: "<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.1\" stroke-linecap=\"round\"><path d=\"M12 5v14M5 12h14\"/></svg>",
 	laptop: "<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><rect x=\"3\" y=\"4\" width=\"18\" height=\"12\" rx=\"2\"/><path d=\"M2 20h20\"/></svg>",
 	headphones: "<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M3 18v-6a9 9 0 0 1 18 0v6\"/><path d=\"M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z\"/></svg>",
+	models: "<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M12 2L2 7l10 5 10-5-10-5z\"/><path d=\"M2 17l10 5 10-5\"/><path d=\"M2 12l10 5 10-5\"/></svg>",
+	mic: "<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><rect x=\"9\" y=\"2\" width=\"6\" height=\"12\" rx=\"3\"/><path d=\"M5 10a7 7 0 0 0 14 0\"/><path d=\"M12 17v5\"/><path d=\"M9 22h6\"/></svg>",
 	bell: "<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9\"/><path d=\"M13.73 21a2 2 0 0 1-3.46 0\"/></svg>",
 	sun: "<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><circle cx=\"12\" cy=\"12\" r=\"4\"/><path d=\"M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41\"/></svg>",
 	globe: "<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z\"/></svg>",
@@ -6414,7 +6823,8 @@ var SVG_ICONS = {
 	transfer: "<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M7 10l-4 4 4 4\"/><path d=\"M3 14h14\"/><path d=\"M17 14l4-4-4-4\"/><path d=\"M21 10H7\"/></svg>",
 	grid: "<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><rect x=\"3\" y=\"3\" width=\"7\" height=\"7\" rx=\"1.5\"/><rect x=\"14\" y=\"3\" width=\"7\" height=\"7\" rx=\"1.5\"/><rect x=\"3\" y=\"14\" width=\"7\" height=\"7\" rx=\"1.5\"/><rect x=\"14\" y=\"14\" width=\"7\" height=\"7\" rx=\"1.5\"/></svg>",
 	chev: "<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.1\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M9 18l6-6-6-6\"/></svg>",
-	back: "<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M15 18l-6-6 6-6\"/></svg>"
+	back: "<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M15 18l-6-6 6-6\"/></svg>",
+	target: "<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><circle cx=\"12\" cy=\"12\" r=\"9\"/><circle cx=\"12\" cy=\"12\" r=\"5\"/><circle cx=\"12\" cy=\"12\" r=\"1.5\"/></svg>"
 };
 function computePushBadgeMeta(statusText = "") {
 	const s = String(statusText || "");
@@ -6525,7 +6935,7 @@ function createSettingsPanel(deps) {
 			needsAgentUpgradeFirst: Boolean(isLegacyDegraded && (!hostVer || deps.compareSemver(hostVer, "0.9.34") < 0))
 		};
 	}
-	function buildSignature(state, voiceCompact) {
+	function buildSignature(state, voiceSummaries) {
 		const { hubState, themePref, langPref, cachedPushStatusText, upgradingHostMap, installingAgyCliMap = {}, tokenTail } = state;
 		const hosts = hubState.hosts || [];
 		const shares = hubState.shares || [];
@@ -6547,7 +6957,8 @@ function createSettingsPanel(deps) {
 			activeHostId,
 			themePref,
 			langPref,
-			voiceCompact,
+			voiceSummaries,
+			copilotSummary: typeof deps.getCopilotSummaryText === "function" ? deps.getCopilotSummaryText() : "",
 			pushBadge: computePushBadgeMeta(cachedPushStatusText).text,
 			tokenTail,
 			enrollmentCode: hubState.enrollment?.code || "",
@@ -6602,7 +7013,8 @@ function createSettingsPanel(deps) {
       </div>
     `;
 	}
-	function renderHomeHtml(state, voiceCompact) {
+	function renderHomeHtml(state, voiceSummaries) {
+		const { modelsCompact, voiceCompact, chatVoiceCompact } = voiceSummaries;
 		const { hubState, themePref, langPref, cachedPushStatusText, upgradingHostMap, installingAgyCliMap = {} } = state;
 		const hosts = hubState.hosts || [];
 		const shares = hubState.shares || [];
@@ -6724,22 +7136,64 @@ function createSettingsPanel(deps) {
 
         ${hostStripHtml}
 
-        <!-- 分组：模型与偏好 -->
-        <section class="ios-section" data-settings-group="model-prefs">
-          <div class="ios-group-label settings-group-title">模型与偏好</div>
+        <!-- 分组：AI 与功能（底层模型池与上层 AI 功能彻底解耦） -->
+        <section class="ios-section" data-settings-group="ai-features">
+          <div class="ios-group-label settings-group-title">AI 与功能</div>
           <div class="ios-card">
             <button
               type="button"
               class="ios-row"
+              data-settings-row="ai_models"
+              onclick="openVoiceLab('models')"
+            >
+              <span class="ios-ico violet">${SVG_ICONS.models}</span>
+              <span class="ios-row-title">AI 模型与供应商</span>
+              <span class="ios-row-val" id="settingsModelsSummaryText">${deps.esc(modelsCompact)}</span>
+              <span class="ios-chev">${SVG_ICONS.chev}</span>
+            </button>
+
+            <button
+              type="button"
+              class="ios-row"
               data-settings-row="voice"
-              onclick="openVoiceLab('list')"
+              onclick="openVoiceLab('walk')"
             >
               <span class="ios-ico indigo">${SVG_ICONS.headphones}</span>
-              <span class="ios-row-title">边走边听</span>
+              <span class="ios-row-title">边走边听 (Beta)</span>
               <span class="ios-row-val" id="settingsVoiceSummaryText">${deps.esc(voiceCompact)}</span>
               <span class="ios-chev">${SVG_ICONS.chev}</span>
             </button>
 
+            <button
+              type="button"
+              class="ios-row"
+              data-settings-row="chat_voice"
+              onclick="openVoiceLab('chat')"
+            >
+              <span class="ios-ico emerald">${SVG_ICONS.mic}</span>
+              <span class="ios-row-title">聊天语音</span>
+              <span class="ios-row-val" id="settingsChatVoiceSummaryText">${deps.esc(chatVoiceCompact)}</span>
+              <span class="ios-chev">${SVG_ICONS.chev}</span>
+            </button>
+
+            <button
+              type="button"
+              class="ios-row"
+              data-settings-row="copilot"
+              onclick="openSettingsSubpage('copilot')"
+            >
+              <span class="ios-ico blue">${SVG_ICONS.target}</span>
+              <span class="ios-row-title">目标副驾插件 (Beta)</span>
+              <span class="ios-row-val" id="settingsCopilotSummaryText">${deps.esc(typeof deps.getCopilotSummaryText === "function" ? deps.getCopilotSummaryText() : "未启用")}</span>
+              <span class="ios-chev">${SVG_ICONS.chev}</span>
+            </button>
+          </div>
+        </section>
+
+        <!-- 分组：通知与通用 -->
+        <section class="ios-section" data-settings-group="general">
+          <div class="ios-group-label settings-group-title">通知与通用</div>
+          <div class="ios-card">
             <button
               type="button"
               class="ios-row"
@@ -7361,8 +7815,13 @@ function createSettingsPanel(deps) {
 	function render(viewport, opts = {}) {
 		if (!viewport) return;
 		const state = deps.getState();
-		const voiceCompact = formatVoiceCompactValue(getVoiceConfig());
-		const signature = buildSignature(state, voiceCompact);
+		const voiceCfg = getVoiceConfig();
+		const voiceSummaries = {
+			modelsCompact: formatModelsCompactValue(voiceCfg),
+			voiceCompact: formatVoiceCompactValue(voiceCfg),
+			chatVoiceCompact: formatChatVoiceCompactValue(voiceCfg)
+		};
+		const signature = buildSignature(state, voiceSummaries);
 		if (signature === lastRenderedKey && viewport.querySelector(".settings-wrap")) {
 			syncPushSummaryBadge(state.cachedPushStatusText);
 			deps.refreshPushStatus?.();
@@ -7379,7 +7838,13 @@ function createSettingsPanel(deps) {
 		else if (activeSubpage === "password") html = renderPasswordSubpageHtml();
 		else if (activeSubpage === "shares") html = renderSharesSubpageHtml(state);
 		else if (activeSubpage === "capabilities") html = renderCapabilitiesSubpageHtml();
-		else html = renderHomeHtml(state, voiceCompact);
+		else if (activeSubpage === "copilot") html = `
+        <div class="settings-wrap ios-settings-wrap ios-subpage-wrap" data-settings-subpage="copilot">
+          ${renderSubpageHeaderHtml(SETTINGS_SUBPAGE_TITLES.copilot)}
+          ${typeof deps.renderCopilotSettingsSubpageHtml === "function" ? deps.renderCopilotSettingsSubpageHtml() : ""}
+        </div>
+      `;
+		else html = renderHomeHtml(state, voiceSummaries);
 		viewport.innerHTML = html;
 		if (opts.scrollToTop) viewport.scrollTop = 0;
 		else if (opts.restoreHomeScroll) viewport.scrollTop = savedHomeScrollTop;
@@ -7394,6 +7859,596 @@ function createSettingsPanel(deps) {
 		closeSubpage,
 		getActiveSubpage,
 		syncPushSummaryBadge
+	};
+}
+// hub/web/src/copilot/goal-copilot-ui.js
+/**
+* 独立可插拔的通用「对话下方插件展示栏」前端控制器（与 controller.js 主逻辑完全隔离）
+*
+* 设计原则：
+* 1. 关闭时：对话界面 0 额外元素、0 网络请求、0 视觉打扰。
+* 2. 开启后：仅在 AI 回复正下方提供一个通用展示栏，内容与快捷选项按钮（填入输入框 / 复制 / 发送 / 回调）
+*    100% 由外部插件服务返回的数据驱动，主项目不耦合任何具体业务策略。
+*/
+function createGoalCopilotUi(deps) {
+	let pluginConfig = {
+		enabled: false,
+		pluginUrl: "",
+		hasAuthToken: false,
+		authTokenPreview: "",
+		brainTarget: "none",
+		connected: false,
+		detail: null,
+		error: "",
+		loaded: false
+	};
+	let panelByKey = {};
+	let streamingByKey = {};
+	let thinkingCollapsedByKey = {};
+	let inlineInputByKey = {};
+	let activeAbortByKey = {};
+	let lastSessionStatusByKey = {};
+	let pendingSyncTimers = {};
+	function makeKey(hostId, agentId) {
+		return `${String(hostId || "local")}::${String(agentId || "")}`;
+	}
+	function getAuthHeaders(extra = {}) {
+		const token = deps.getToken?.() || "";
+		return {
+			...token ? { Authorization: `Bearer ${token}` } : {},
+			...extra
+		};
+	}
+	function esc(s) {
+		return typeof deps.esc === "function" ? deps.esc(s) : String(s ?? "");
+	}
+	async function refreshConfig({ probeHealth = true } = {}) {
+		try {
+			const cfgRes = await fetch("/api/copilot/config", { headers: getAuthHeaders() });
+			if (!cfgRes.ok) {
+				pluginConfig = {
+					...pluginConfig,
+					loaded: true
+				};
+				renderForActiveSession();
+				return pluginConfig;
+			}
+			const base = (await cfgRes.json().catch(() => ({}))).config || {
+				enabled: false,
+				pluginUrl: "",
+				brainTarget: "none"
+			};
+			let connected = false;
+			let detail = null;
+			let error = "";
+			if (probeHealth && base.pluginUrl) {
+				const hRes = await fetch("/api/copilot/health", { headers: getAuthHeaders() }).catch(() => null);
+				const hData = hRes ? await hRes.json().catch(() => ({})) : {};
+				connected = Boolean(hData.connected);
+				detail = hData.detail || null;
+				error = hData.error || "";
+			}
+			pluginConfig = {
+				enabled: Boolean(base.enabled),
+				pluginUrl: base.pluginUrl || "",
+				hasAuthToken: Boolean(base.hasAuthToken),
+				authTokenPreview: base.authTokenPreview || "",
+				brainTarget: base.brainTarget || "none",
+				connected,
+				detail,
+				error,
+				loaded: true
+			};
+			renderForActiveSession();
+			deps.onPluginConfigChanged?.(pluginConfig);
+			if (pluginConfig.enabled) {
+				const active = deps.getActiveSession?.();
+				if (active) syncSessionPanel(active);
+			}
+			return pluginConfig;
+		} catch {
+			pluginConfig = {
+				...pluginConfig,
+				loaded: true
+			};
+			return pluginConfig;
+		}
+	}
+	function getPluginSummaryText() {
+		if (!pluginConfig.enabled || !pluginConfig.pluginUrl) return "未启用";
+		if (pluginConfig.connected) return pluginConfig.detail?.name ? `已连接 · ${pluginConfig.detail.name}` : "已连接";
+		return "未连接";
+	}
+	function getPluginConfig() {
+		return pluginConfig;
+	}
+	async function savePluginConfig({ enabled, pluginUrl, authToken, brainTarget }) {
+		const body = {
+			enabled,
+			pluginUrl,
+			brainTarget
+		};
+		if (authToken !== void 0) body.authToken = authToken;
+		const res = await fetch("/api/copilot/config", {
+			method: "POST",
+			headers: getAuthHeaders({ "Content-Type": "application/json" }),
+			body: JSON.stringify(body)
+		});
+		const data = await res.json().catch(() => ({}));
+		if (!res.ok || !data.ok) {
+			deps.showToast?.(`⚠️ ${data.error || "保存失败"}`);
+			return {
+				ok: false,
+				error: data.error || "保存失败"
+			};
+		}
+		await refreshConfig({ probeHealth: true });
+		deps.showToast?.(pluginConfig.enabled ? pluginConfig.connected ? `✅ 插件已连接（${pluginConfig.detail?.name || "外部服务"}）` : "⚠️ 已保存，但外部插件服务暂不可达" : "已关闭外部插件");
+		return {
+			ok: true,
+			config: pluginConfig
+		};
+	}
+	async function testPluginUrl(candidateUrl) {
+		const q = new URLSearchParams({ url: String(candidateUrl || "").trim() });
+		const data = await (await fetch(`/api/copilot/health?${q.toString()}`, { headers: getAuthHeaders() })).json().catch(() => ({}));
+		if (data.connected) {
+			const name = data.detail?.name || "外部插件";
+			const ver = data.detail?.version ? ` v${data.detail.version}` : "";
+			const status = data.detail?.statusText ? ` · ${data.detail.statusText}` : "";
+			deps.showToast?.(`✅ 已连通：${name}${ver}${status}`);
+		} else deps.showToast?.(`⚠️ ${data.error || "无法连接外部插件服务"}`);
+		return data;
+	}
+	async function syncSessionPanel(session) {
+		if (!session || !pluginConfig.enabled) return;
+		const key = makeKey(session.hostId, session.id);
+		try {
+			const q = new URLSearchParams({
+				hostId: session.hostId || "local",
+				agentId: session.id
+			});
+			const data = await (await fetch(`/api/copilot/panel?${q.toString()}`, { headers: getAuthHeaders() })).json().catch(() => ({}));
+			if (data.ok && data.panel && !streamingByKey[key]?.active) panelByKey[key] = data.panel;
+		} catch {}
+		renderForActiveSession();
+	}
+	function handleSessionUpdate(session) {
+		if (!session || !pluginConfig.enabled) return;
+		const key = makeKey(session.hostId, session.id);
+		const prevStatus = lastSessionStatusByKey[key] || "";
+		const nextStatus = String(session.status || "");
+		lastSessionStatusByKey[key] = nextStatus;
+		if (prevStatus === "running" && (nextStatus === "completed" || nextStatus === "approval") && !streamingByKey[key]?.active) {
+			if (pendingSyncTimers[key]) clearTimeout(pendingSyncTimers[key]);
+			pendingSyncTimers[key] = setTimeout(() => {
+				syncSessionPanel(session);
+			}, 1500);
+		}
+	}
+	async function requestPanel(session, eventName = "manual_trigger") {
+		if (!session) return;
+		const key = makeKey(session.hostId, session.id);
+		if (activeAbortByKey[key]) try {
+			activeAbortByKey[key].abort();
+		} catch {}
+		const ac = new AbortController();
+		activeAbortByKey[key] = ac;
+		inlineInputByKey[key] = null;
+		streamingByKey[key] = {
+			active: true,
+			statusText: "插件处理中…",
+			thinking: "",
+			error: "",
+			startedAt: Date.now()
+		};
+		thinkingCollapsedByKey[key] = false;
+		renderForActiveSession();
+		try {
+			const resp = await fetch("/api/copilot/panel/stream", {
+				method: "POST",
+				headers: getAuthHeaders({ "Content-Type": "application/json" }),
+				body: JSON.stringify({
+					hostId: session.hostId || "local",
+					agentId: session.id,
+					event: eventName
+				}),
+				signal: ac.signal
+			});
+			const ct = String(resp.headers.get("content-type") || "").toLowerCase();
+			if (!resp.ok) {
+				const errData = await resp.json().catch(() => ({}));
+				streamingByKey[key] = {
+					...streamingByKey[key],
+					active: false,
+					error: errData.error || `插件请求失败 (HTTP ${resp.status})`
+				};
+				renderForActiveSession();
+				return;
+			}
+			if (ct.includes("application/json") || !resp.body) {
+				const data = await resp.json().catch(() => ({}));
+				streamingByKey[key] = {
+					...streamingByKey[key],
+					active: false,
+					error: data.ok === false ? data.error || "插件返回异常" : ""
+				};
+				if (data.panel) {
+					panelByKey[key] = data.panel;
+					thinkingCollapsedByKey[key] = Boolean(data.panel.thinkingCollapsed);
+				}
+				renderForActiveSession();
+				return;
+			}
+			const reader = resp.body.getReader();
+			const decoder = new TextDecoder();
+			let buf = "";
+			let curEvent = "";
+			while (true) {
+				const { value, done } = await reader.read();
+				if (done) break;
+				buf += decoder.decode(value, { stream: true });
+				const lines = buf.split("\n");
+				buf = lines.pop() || "";
+				for (const rawLine of lines) {
+					const line = rawLine.trimEnd();
+					if (line.startsWith("event:")) curEvent = line.slice(6).trim();
+					else if (line.startsWith("data:")) {
+						const payloadStr = line.slice(5).trim();
+						if (!payloadStr) continue;
+						try {
+							const obj = JSON.parse(payloadStr);
+							if (curEvent === "status" && obj.text) streamingByKey[key] = {
+								...streamingByKey[key],
+								statusText: String(obj.text)
+							};
+							else if (curEvent === "thinking" || curEvent === "delta") {
+								const delta = String(obj.delta ?? obj.text ?? "");
+								streamingByKey[key] = {
+									...streamingByKey[key],
+									thinking: (streamingByKey[key]?.thinking || "") + delta
+								};
+							} else if (curEvent === "result") {
+								const nextPanel = obj.panel || obj;
+								panelByKey[key] = nextPanel;
+								if (typeof nextPanel?.thinkingCollapsed === "boolean") thinkingCollapsedByKey[key] = nextPanel.thinkingCollapsed;
+								streamingByKey[key] = {
+									...streamingByKey[key],
+									active: false,
+									error: ""
+								};
+							} else if (curEvent === "error") streamingByKey[key] = {
+								...streamingByKey[key],
+								active: false,
+								error: String(obj.error || "插件执行失败")
+							};
+							renderForActiveSession();
+						} catch {}
+					} else if (line === "") curEvent = "";
+				}
+			}
+			if (streamingByKey[key]?.active) {
+				streamingByKey[key] = {
+					...streamingByKey[key],
+					active: false
+				};
+				renderForActiveSession();
+			}
+		} catch (err) {
+			if (err?.name === "AbortError") return;
+			streamingByKey[key] = {
+				...streamingByKey[key],
+				active: false,
+				error: err?.message || "连接插件失败"
+			};
+			renderForActiveSession();
+		}
+	}
+	function getComposerInputEl() {
+		return document.getElementById("globalPromptInput") || document.getElementById("chatInput");
+	}
+	function fillComposerInput(text) {
+		const clean = String(text || "").trim();
+		if (!clean) return;
+		const input = getComposerInputEl();
+		if (!input) return;
+		input.value = clean;
+		try {
+			input.dispatchEvent(new Event("input", { bubbles: true }));
+		} catch {}
+		deps.autoGrowComposer?.({ target: input });
+		input.focus();
+		deps.showToast?.("已填入输入框，可修改后发送");
+	}
+	async function executeCallbackOption(session, opt, inputText = "") {
+		const key = makeKey(session.hostId, session.id);
+		inlineInputByKey[key] = null;
+		renderForActiveSession();
+		try {
+			const res = await fetch("/api/copilot/action", {
+				method: "POST",
+				headers: getAuthHeaders({ "Content-Type": "application/json" }),
+				body: JSON.stringify({
+					hostId: session.hostId || "local",
+					agentId: session.id,
+					actionId: opt.actionId || opt.id,
+					payload: opt.payload,
+					inputText
+				})
+			});
+			const data = await res.json().catch(() => ({}));
+			if (!res.ok || !data.ok) {
+				deps.showToast?.(`⚠️ ${data.error || "插件动作执行失败"}`);
+				return;
+			}
+			if ("panel" in data) panelByKey[key] = data.panel || null;
+			if (data.fillText) fillComposerInput(data.fillText);
+			if (data.toast) deps.showToast?.(data.toast);
+			renderForActiveSession();
+		} catch (err) {
+			deps.showToast?.(`⚠️ ${err?.message || "请求插件失败"}`);
+		}
+	}
+	async function handleOptionClick(optIndex) {
+		const session = deps.getActiveSession?.();
+		if (!session) return;
+		const key = makeKey(session.hostId, session.id);
+		const panel = panelByKey[key];
+		const opt = Array.isArray(panel?.options) ? panel.options[optIndex] : null;
+		if (!opt) return;
+		if (opt.kind === "fill") {
+			fillComposerInput(opt.text);
+			return;
+		}
+		if (opt.kind === "copy") {
+			if (typeof deps.copyText === "function") deps.copyText(opt.text, null, "已复制选项内容");
+			else if (navigator.clipboard?.writeText) {
+				await navigator.clipboard.writeText(opt.text).catch(() => {});
+				deps.showToast?.("已复制选项内容");
+			}
+			return;
+		}
+		if (opt.kind === "send") {
+			const input = getComposerInputEl();
+			if (!input || !opt.text) return;
+			input.value = opt.text;
+			try {
+				input.dispatchEvent(new Event("input", { bubbles: true }));
+			} catch {}
+			deps.autoGrowComposer?.({ target: input });
+			await deps.sendPromptToActiveSession?.();
+			return;
+		}
+		if (opt.kind === "callback") {
+			if (opt.inputPlaceholder) {
+				inlineInputByKey[key] = {
+					optIndex,
+					placeholder: opt.inputPlaceholder,
+					label: opt.label
+				};
+				renderForActiveSession();
+				setTimeout(() => document.getElementById("copilotInlineActionInput")?.focus(), 40);
+				return;
+			}
+			await executeCallbackOption(session, opt, "");
+		}
+	}
+	function renderForActiveSession() {
+		const toggleBtn = document.getElementById("chatCopilotBtn");
+		const cardEl = document.getElementById("copilotReviewCard");
+		if (!toggleBtn && !cardEl) return;
+		const session = deps.getActiveSession?.();
+		if (!pluginConfig.enabled || !session) {
+			if (toggleBtn) toggleBtn.style.display = "none";
+			if (cardEl) {
+				cardEl.style.display = "none";
+				cardEl.innerHTML = "";
+			}
+			return;
+		}
+		const key = makeKey(session.hostId, session.id);
+		const panel = panelByKey[key] || null;
+		const st = streamingByKey[key] || null;
+		const inlineInput = inlineInputByKey[key] || null;
+		if (toggleBtn) {
+			toggleBtn.style.display = "inline-flex";
+			toggleBtn.textContent = pluginConfig.detail?.shortLabel || "🎯 副驾";
+			toggleBtn.classList.toggle("is-active", Boolean(panel || st?.active));
+		}
+		if (!cardEl) return;
+		if (!Boolean(st?.active || st?.error || panel)) {
+			cardEl.style.display = "none";
+			cardEl.innerHTML = "";
+			return;
+		}
+		const thinkingText = st?.active ? st.thinking || "" : panel?.thinking || st?.thinking || "";
+		const collapsed = Boolean(thinkingCollapsedByKey[key]);
+		const toneClass = panel?.tone || (st?.error ? "danger" : st?.active ? "info" : "neutral");
+		const titleText = panel?.title || pluginConfig.detail?.name || "🎯 外部插件";
+		const badgeText = st?.active ? st.statusText || "处理中…" : panel?.badge || "";
+		const options = Array.isArray(panel?.options) ? panel.options : [];
+		const tags = Array.isArray(panel?.tags) ? panel.tags : [];
+		cardEl.style.display = "block";
+		cardEl.innerHTML = `
+      <div class="copilot-card-inner tone-${esc(toneClass)}">
+        <div class="copilot-card-head">
+          <div class="copilot-card-head-left">
+            <span class="copilot-mode-tag">${esc(titleText)}</span>
+            ${badgeText ? `<span class="copilot-status-badge tone-${esc(toneClass)}">${esc(badgeText)}</span>` : ""}
+            ${panel?.subtitle ? `<span class="copilot-latency">${esc(panel.subtitle)}</span>` : ""}
+          </div>
+          <div class="copilot-card-head-right">
+            ${thinkingText ? `<button type="button" class="copilot-link-btn" onclick="copilotToggleThinking()">${collapsed ? "展开详情 ⌄" : "收起详情 ⌃"}</button>` : ""}
+            <button type="button" class="copilot-btn ghost" title="重新请求插件" onclick="copilotRefreshPanel()">↻</button>
+            <button type="button" class="copilot-btn ghost" title="收起" onclick="copilotDismissCard()">✕</button>
+          </div>
+        </div>
+        ${st?.error ? `<div class="copilot-error-box">${esc(st.error)}</div>` : ""}
+        ${thinkingText && !collapsed ? `
+          <div class="copilot-thinking-box">
+            <pre class="copilot-thinking-pre">${esc(thinkingText)}${st?.active ? " ▌" : ""}</pre>
+          </div>
+        ` : ""}
+        ${panel?.body ? `<div class="copilot-brief-line">${esc(panel.body)}</div>` : ""}
+        ${tags.length > 0 ? `
+          <div class="copilot-rules-row">
+            ${tags.map((t) => `<span class="copilot-rule-pill">${esc(t)}</span>`).join("")}
+          </div>
+        ` : ""}
+        ${!st?.active && options.length > 0 ? `
+          <div class="copilot-card-actions">
+            ${options.map((opt, idx) => `
+              <button
+                type="button"
+                class="copilot-btn ${esc(opt.style || "default")}"
+                onclick="copilotTriggerOption(${idx})"
+                title="${esc(opt.kind === "fill" ? "一键填入输入框" : opt.kind === "copy" ? "复制到剪贴板" : opt.label)}"
+              >${esc(opt.label)}</button>
+            `).join("")}
+          </div>
+        ` : ""}
+        ${inlineInput ? `
+          <div class="copilot-feedback-box">
+            <input
+              id="copilotInlineActionInput"
+              type="text"
+              class="copilot-goal-input"
+              placeholder="${esc(inlineInput.placeholder)}"
+              onkeydown="if(event.key==='Enter'){event.preventDefault();copilotSubmitInlineAction();}"
+            />
+            <div class="copilot-card-actions">
+              <button type="button" class="copilot-btn primary" onclick="copilotSubmitInlineAction()">发送给插件</button>
+              <button type="button" class="copilot-btn ghost" onclick="copilotCancelInlineAction()">取消</button>
+            </div>
+          </div>
+        ` : ""}
+      </div>
+    `;
+	}
+	function renderSettingsSubpageHtml() {
+		const enabled = pluginConfig.enabled;
+		const url = esc(pluginConfig.pluginUrl || "http://127.0.0.1:8789");
+		const connected = pluginConfig.connected;
+		const detail = pluginConfig.detail;
+		const brainCreds = (typeof window !== "undefined" && Array.isArray(window.__dshVoiceConfig?.credentials) ? window.__dshVoiceConfig.credentials : []).filter((c) => c && (c.provider === "gemini" || c.provider === "openai_compat") && c.enabled !== false);
+		const curBrain = pluginConfig.brainTarget || "none";
+		return `
+      <div class="ios-card">
+        <div class="settings-item" style="flex-direction:column;align-items:stretch;gap:12px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <div>
+              <div class="settings-item-title">启用外部辅助插件</div>
+              <div class="settings-item-desc">关闭时对话界面零痕迹；开启后在 AI 回复下方显示插件返回的展示栏与快捷选项</div>
+            </div>
+            <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;font-weight:600;white-space:nowrap;flex-shrink:0;margin-left:10px;">
+              <input type="checkbox" id="copilotEnableCheckbox" ${enabled ? "checked" : ""} style="width:18px;height:18px;flex-shrink:0;" />
+              <span>${enabled ? "已开启" : "已关闭"}</span>
+            </label>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:6px;">
+            <label style="font-size:12px;color:var(--muted);">插件服务地址（需你的 Hub 服务端可直接访问，如本机 127.0.0.1:8789 或 HTTPS 域名）</label>
+            <input id="copilotPluginUrlInput" type="text" class="copilot-goal-input" value="${url}" placeholder="http://127.0.0.1:8789" />
+          </div>
+          <div style="display:flex;flex-direction:column;gap:6px;">
+            <label style="font-size:12px;color:var(--muted);">访问密钥（可选 · ${pluginConfig.hasAuthToken ? `已保存 ${esc(pluginConfig.authTokenPreview)}，留空保持不变` : "远程 HTTPS 服务建议填写 Bearer Token"}）</label>
+            <input id="copilotPluginTokenInput" type="password" class="copilot-goal-input" value="" placeholder="${pluginConfig.hasAuthToken ? "留空保持已保存密钥" : "可选，未设置认证可留空"}" />
+          </div>
+          <div style="display:flex;flex-direction:column;gap:6px;">
+            <label style="font-size:12px;color:var(--muted);">可选：复用全局模型池（仅 127.0.0.1 本机回环时透传，与「边走边听」互不影响）</label>
+            <select id="copilotBrainTargetSelect" class="copilot-goal-input">
+              <option value="none"${curBrain === "none" ? " selected" : ""}>由插件自行管理（不透传密钥）</option>
+              ${brainCreds.map((c) => `<option value="cred:${esc(c.id)}"${curBrain === `cred:${c.id}` ? " selected" : ""}>${esc(c.label)}${c.defaultModel ? ` (${esc(c.defaultModel)})` : ""}</option>`).join("")}
+            </select>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <button type="button" class="pill-action-btn primary" onclick="copilotSaveSettingsFromSubpage()">保存并连接</button>
+            <button type="button" class="pill-action-btn" onclick="copilotTestSettingsFromSubpage()">测试连通性</button>
+          </div>
+        </div>
+        <div class="settings-item">
+          <div>
+            <div class="settings-item-title">当前插件状态</div>
+            <div class="settings-item-desc">
+              ${connected ? `🟢 已连接 · ${esc(detail?.name || "外部插件")}${detail?.version ? ` v${esc(detail.version)}` : ""}${detail?.statusText ? ` · ${esc(detail.statusText)}` : ""}` : `⚪ ${esc(pluginConfig.error || "未连接（按协议启动你的独立插件服务后点「保存并连接」）")}`}
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+	}
+	if (typeof window !== "undefined") {
+		window.copilotOpenOrReview = () => {
+			const s = deps.getActiveSession?.();
+			if (!s) return;
+			requestPanel(s, "manual_trigger");
+		};
+		window.copilotRefreshPanel = () => {
+			const s = deps.getActiveSession?.();
+			if (!s) return;
+			requestPanel(s, "manual_trigger");
+		};
+		window.copilotToggleThinking = () => {
+			const s = deps.getActiveSession?.();
+			if (!s) return;
+			const key = makeKey(s.hostId, s.id);
+			thinkingCollapsedByKey[key] = !thinkingCollapsedByKey[key];
+			renderForActiveSession();
+		};
+		window.copilotDismissCard = () => {
+			const s = deps.getActiveSession?.();
+			if (!s) return;
+			const key = makeKey(s.hostId, s.id);
+			panelByKey[key] = null;
+			streamingByKey[key] = null;
+			inlineInputByKey[key] = null;
+			renderForActiveSession();
+		};
+		window.copilotTriggerOption = (idx) => {
+			handleOptionClick(Number(idx));
+		};
+		window.copilotSubmitInlineAction = () => {
+			const s = deps.getActiveSession?.();
+			if (!s) return;
+			const key = makeKey(s.hostId, s.id);
+			const pending = inlineInputByKey[key];
+			const panel = panelByKey[key];
+			const opt = pending && Array.isArray(panel?.options) ? panel.options[pending.optIndex] : null;
+			if (!opt) return;
+			executeCallbackOption(s, opt, document.getElementById("copilotInlineActionInput")?.value || "");
+		};
+		window.copilotCancelInlineAction = () => {
+			const s = deps.getActiveSession?.();
+			if (!s) return;
+			inlineInputByKey[makeKey(s.hostId, s.id)] = null;
+			renderForActiveSession();
+		};
+		window.copilotSaveSettingsFromSubpage = () => {
+			const enabled = Boolean(document.getElementById("copilotEnableCheckbox")?.checked);
+			const pluginUrl = document.getElementById("copilotPluginUrlInput")?.value || "";
+			const rawToken = document.getElementById("copilotPluginTokenInput")?.value || "";
+			const brainTarget = document.getElementById("copilotBrainTargetSelect")?.value || "none";
+			savePluginConfig({
+				enabled,
+				pluginUrl,
+				...rawToken.trim() ? { authToken: rawToken.trim() } : {},
+				brainTarget
+			}).then(() => {
+				deps.rerenderSettings?.();
+			});
+		};
+		window.copilotTestSettingsFromSubpage = () => {
+			testPluginUrl(document.getElementById("copilotPluginUrlInput")?.value || "");
+		};
+	}
+	return {
+		refreshConfig,
+		getPluginConfig,
+		getPluginSummaryText,
+		syncSessionPanel,
+		syncSessionGoal: syncSessionPanel,
+		handleSessionUpdate,
+		renderForActiveSession,
+		renderSettingsSubpageHtml
 	};
 }
 // hub/web/src/utils/markdown.ts
@@ -16197,8 +17252,192 @@ function initHubController() {
 		const actualBaseOffset = effectiveOffset > 0 && effectiveOffset < fullSpokenText.length ? effectiveOffset : 0;
 		const myRunId = ++activeSpeechState.runId;
 		releaseSpeechRuntimeHandles();
-		const byokCfg = window.__dshVoiceConfig;
-		if (byokCfg?.prefs?.useByokForChatTts && byokCfg?.activeProfile?.tts?.provider && byokCfg.activeProfile.tts.provider !== "native" && typeof window.__dshVoiceByokSpeak === "function") {
+		try {
+			window.__dshVoiceByokStopSpeak?.();
+		} catch {}
+		try {
+			if (window.speechSynthesis && (window.speechSynthesis.speaking || window.speechSynthesis.pending || window.speechSynthesis.paused)) window.speechSynthesis.cancel();
+		} catch {}
+		const startNativeBrowserSpeechNow = () => {
+			if (activeSpeechState.runId !== myRunId) return;
+			const synth = window.speechSynthesis;
+			const wasSynthBusy = Boolean(synth.speaking || synth.pending || synth.paused);
+			if (wasSynthBusy) try {
+				synth.cancel();
+			} catch {}
+			const nowMs = Date.now();
+			activeSpeechState.playing = true;
+			activeSpeechState.sessionId = effectiveSessionId;
+			activeSpeechState.msgIdx = msgIdx;
+			activeSpeechState.rawSourceText = rawText;
+			activeSpeechState.hasDistinctSummary = prepared.hasDistinctSummary;
+			activeSpeechState.fullSpokenText = fullSpokenText;
+			activeSpeechState.docLang = prepared.docLang;
+			activeSpeechState.segmentBaseOffset = actualBaseOffset;
+			activeSpeechState.segmentStartedAt = nowMs;
+			activeSpeechState.segmentRate = activeSpeechState.rate;
+			activeSpeechState.boundaryCharOffset = -1;
+			activeSpeechState.boundaryUpdatedAt = 0;
+			syncSpeechFooterDom();
+			acquireSpeechWakeLock(myRunId);
+			const chosenVoice = pickBestBrowserVoice(synth.getVoices() || [], prepared.docLang);
+			const isAppleWebKit = isIosDevice() || /AppleWebKit/i.test(navigator.userAgent || "") && !/Chrome|Chromium|Edg/i.test(navigator.userAgent || "");
+			const chunks = splitIntoContinuousBrowserChunks(remainingText, isAppleWebKit);
+			let runningChunkOffset = actualBaseOffset;
+			const chunkDescriptors = chunks.map((chunkText) => {
+				const posInFull = fullSpokenText.indexOf(chunkText, runningChunkOffset);
+				const resolvedChunkBase = posInFull >= 0 ? posInFull : runningChunkOffset;
+				runningChunkOffset = resolvedChunkBase + chunkText.length;
+				return {
+					text: chunkText,
+					baseOffset: resolvedChunkBase
+				};
+			});
+			let currentChunkIdx = -1;
+			let currentAdvanceFn = null;
+			let lastChunkStartAt = Date.now();
+			let lastSynthBusyAt = Date.now();
+			let errorSkipCount = 0;
+			const finishSpeechPlayback = () => {
+				if (activeSpeechState.runId !== myRunId) return;
+				activeSpeechState.playing = false;
+				activeSpeechState.sessionId = "";
+				activeSpeechState.msgIdx = -1;
+				activeSpeechState.rawSourceText = "";
+				releaseSpeechRuntimeHandles();
+				syncSpeechFooterDom();
+			};
+			const findNextSentenceOffset = (fromCharOffset) => {
+				const tail = fullSpokenText.slice(Math.max(0, fromCharOffset));
+				const m = /[。！？.!?\n]+\s*/.exec(tail);
+				if (!m) return -1;
+				const candidate = Math.max(0, fromCharOffset) + m.index + m[0].length;
+				return candidate < fullSpokenText.length - 2 ? candidate : -1;
+			};
+			const speakChunkAt = (idx) => {
+				if (activeSpeechState.runId !== myRunId || !activeSpeechState.playing) return;
+				if (idx >= chunkDescriptors.length) {
+					finishSpeechPlayback();
+					return;
+				}
+				currentChunkIdx = idx;
+				const desc = chunkDescriptors[idx];
+				const chunkNow = Date.now();
+				lastChunkStartAt = chunkNow;
+				lastSynthBusyAt = chunkNow;
+				activeSpeechState.segmentBaseOffset = desc.baseOffset;
+				activeSpeechState.segmentStartedAt = chunkNow;
+				activeSpeechState.segmentRate = activeSpeechState.rate;
+				activeSpeechState.boundaryCharOffset = desc.baseOffset;
+				activeSpeechState.boundaryUpdatedAt = chunkNow;
+				const u = new SpeechSynthesisUtterance(desc.text);
+				activeSpeechState.pinnedUtterances.push(u);
+				window.__dshPinnedUtterances = activeSpeechState.pinnedUtterances;
+				u.lang = chosenVoice?.lang || (prepared.docLang === "en" ? "en-US" : "zh-CN");
+				if (chosenVoice) u.voice = chosenVoice;
+				u.rate = activeSpeechState.rate;
+				let settled = false;
+				const unpinUtterance = () => {
+					const pos = activeSpeechState.pinnedUtterances.indexOf(u);
+					if (pos >= 0) activeSpeechState.pinnedUtterances.splice(pos, 1);
+				};
+				const advanceToNext = () => {
+					if (settled || activeSpeechState.runId !== myRunId) return;
+					settled = true;
+					currentAdvanceFn = null;
+					unpinUtterance();
+					if (idx + 1 < chunkDescriptors.length) speakChunkAt(idx + 1);
+					else finishSpeechPlayback();
+				};
+				currentAdvanceFn = advanceToNext;
+				u.onstart = () => {
+					if (activeSpeechState.runId !== myRunId) return;
+					const t = Date.now();
+					lastChunkStartAt = t;
+					lastSynthBusyAt = t;
+					activeSpeechState.segmentStartedAt = t;
+				};
+				u.onboundary = (ev) => {
+					if (activeSpeechState.runId !== myRunId) return;
+					const t = Date.now();
+					lastSynthBusyAt = t;
+					if (ev && typeof ev.charIndex === "number" && ev.charIndex >= 0) {
+						activeSpeechState.boundaryCharOffset = desc.baseOffset + ev.charIndex;
+						activeSpeechState.boundaryUpdatedAt = t;
+					}
+				};
+				u.onend = () => {
+					advanceToNext();
+				};
+				u.onerror = (ev) => {
+					if (settled || activeSpeechState.runId !== myRunId) return;
+					settled = true;
+					currentAdvanceFn = null;
+					unpinUtterance();
+					const errCode = String(ev?.error || "").toLowerCase();
+					if (errCode === "not-allowed" || errCode === "service-not-allowed") {
+						finishSpeechPlayback();
+						return;
+					}
+					if (errorSkipCount < 3 && idx + 1 < chunkDescriptors.length) {
+						errorSkipCount += 1;
+						speakChunkAt(idx + 1);
+						return;
+					}
+					if (_recoveryDepth < 2 && chunkDescriptors.length === 1) {
+						const approxOffset = computeSpeechResumeOffset({
+							fullText: fullSpokenText,
+							docLang: prepared.docLang,
+							segmentBaseOffset: activeSpeechState.segmentBaseOffset,
+							segmentStartedAt: activeSpeechState.segmentStartedAt,
+							segmentRate: activeSpeechState.segmentRate,
+							boundaryCharOffset: activeSpeechState.boundaryCharOffset,
+							boundaryUpdatedAt: activeSpeechState.boundaryUpdatedAt,
+							nowMs: Date.now()
+						});
+						const nextSentenceOffset = findNextSentenceOffset(Math.max(approxOffset, desc.baseOffset + 6));
+						if (nextSentenceOffset > desc.baseOffset) {
+							startAssistantSpeech(msgIdx, {
+								startOffset: nextSentenceOffset,
+								_recoveryDepth: _recoveryDepth + 1,
+								rawTextOverride: rawText,
+								sessionIdOverride: effectiveSessionId
+							});
+							return;
+						}
+					}
+					finishSpeechPlayback();
+				};
+				try {
+					if (synth.paused) synth.resume();
+				} catch {}
+				synth.speak(u);
+			};
+			activeSpeechState.watchdogTimer = setInterval(() => {
+				if (activeSpeechState.runId !== myRunId || !activeSpeechState.playing) {
+					clearInterval(activeSpeechState.watchdogTimer);
+					activeSpeechState.watchdogTimer = null;
+					return;
+				}
+				try {
+					if (synth.paused) synth.resume();
+					if (synth.speaking || synth.pending) {
+						lastSynthBusyAt = Date.now();
+						return;
+					}
+					if (currentChunkIdx >= 0 && Date.now() - Math.max(lastChunkStartAt, lastSynthBusyAt) > 1600) {
+						if (typeof currentAdvanceFn === "function") currentAdvanceFn();
+						else finishSpeechPlayback();
+					}
+				} catch {}
+			}, 900);
+			if (wasSynthBusy && isAppleWebKit) activeSpeechState.handoffTimer = setTimeout(() => {
+				activeSpeechState.handoffTimer = null;
+				speakChunkAt(0);
+			}, 30);
+			else speakChunkAt(0);
+		};
+		const launchCloudChatTts = () => {
 			activeSpeechState.playing = true;
 			activeSpeechState.sessionId = effectiveSessionId;
 			activeSpeechState.msgIdx = msgIdx;
@@ -16216,184 +17455,30 @@ function initHubController() {
 				releaseSpeechRuntimeHandles();
 				syncSpeechFooterDom();
 			});
+		};
+		const hasCloudChatTtsConfigured = () => {
+			if (typeof window.__dshVoiceByokSpeak !== "function") return false;
+			if (typeof window.__dshVoiceByokCanSpeak === "function") return Boolean(window.__dshVoiceByokCanSpeak());
+			const cfg = window.__dshVoiceConfig;
+			return String(cfg?.prefs?.chatTtsTarget || "").startsWith("cred:") || Boolean(cfg?.prefs?.useByokForChatTts);
+		};
+		if (hasCloudChatTtsConfigured()) {
+			launchCloudChatTts();
 			return;
 		}
-		const synth = window.speechSynthesis;
-		const wasSynthBusy = Boolean(synth.speaking || synth.pending || synth.paused);
-		if (wasSynthBusy) try {
-			synth.cancel();
-		} catch {}
-		const nowMs = Date.now();
-		activeSpeechState.playing = true;
-		activeSpeechState.sessionId = effectiveSessionId;
-		activeSpeechState.msgIdx = msgIdx;
-		activeSpeechState.rawSourceText = rawText;
-		activeSpeechState.hasDistinctSummary = prepared.hasDistinctSummary;
-		activeSpeechState.fullSpokenText = fullSpokenText;
-		activeSpeechState.docLang = prepared.docLang;
-		activeSpeechState.segmentBaseOffset = actualBaseOffset;
-		activeSpeechState.segmentStartedAt = nowMs;
-		activeSpeechState.segmentRate = activeSpeechState.rate;
-		activeSpeechState.boundaryCharOffset = -1;
-		activeSpeechState.boundaryUpdatedAt = 0;
-		syncSpeechFooterDom();
-		acquireSpeechWakeLock(myRunId);
-		const chosenVoice = pickBestBrowserVoice(synth.getVoices() || [], prepared.docLang);
-		const isAppleWebKit = isIosDevice() || /AppleWebKit/i.test(navigator.userAgent || "") && !/Chrome|Chromium|Edg/i.test(navigator.userAgent || "");
-		const chunks = splitIntoContinuousBrowserChunks(remainingText, isAppleWebKit);
-		let runningChunkOffset = actualBaseOffset;
-		const chunkDescriptors = chunks.map((chunkText) => {
-			const posInFull = fullSpokenText.indexOf(chunkText, runningChunkOffset);
-			const resolvedChunkBase = posInFull >= 0 ? posInFull : runningChunkOffset;
-			runningChunkOffset = resolvedChunkBase + chunkText.length;
-			return {
-				text: chunkText,
-				baseOffset: resolvedChunkBase
-			};
-		});
-		let currentChunkIdx = -1;
-		let currentAdvanceFn = null;
-		let lastChunkStartAt = Date.now();
-		let lastSynthBusyAt = Date.now();
-		let errorSkipCount = 0;
-		const finishSpeechPlayback = () => {
-			if (activeSpeechState.runId !== myRunId) return;
-			activeSpeechState.playing = false;
-			activeSpeechState.sessionId = "";
-			activeSpeechState.msgIdx = -1;
-			activeSpeechState.rawSourceText = "";
-			releaseSpeechRuntimeHandles();
+		if (!window.__dshVoiceConfig && typeof window.__dshRefreshVoiceConfig === "function") {
+			activeSpeechState.playing = true;
+			activeSpeechState.sessionId = effectiveSessionId;
+			activeSpeechState.msgIdx = msgIdx;
 			syncSpeechFooterDom();
-		};
-		const findNextSentenceOffset = (fromCharOffset) => {
-			const tail = fullSpokenText.slice(Math.max(0, fromCharOffset));
-			const m = /[。！？.!?\n]+\s*/.exec(tail);
-			if (!m) return -1;
-			const candidate = Math.max(0, fromCharOffset) + m.index + m[0].length;
-			return candidate < fullSpokenText.length - 2 ? candidate : -1;
-		};
-		const speakChunkAt = (idx) => {
-			if (activeSpeechState.runId !== myRunId || !activeSpeechState.playing) return;
-			if (idx >= chunkDescriptors.length) {
-				finishSpeechPlayback();
-				return;
-			}
-			currentChunkIdx = idx;
-			const desc = chunkDescriptors[idx];
-			const chunkNow = Date.now();
-			lastChunkStartAt = chunkNow;
-			lastSynthBusyAt = chunkNow;
-			activeSpeechState.segmentBaseOffset = desc.baseOffset;
-			activeSpeechState.segmentStartedAt = chunkNow;
-			activeSpeechState.segmentRate = activeSpeechState.rate;
-			activeSpeechState.boundaryCharOffset = desc.baseOffset;
-			activeSpeechState.boundaryUpdatedAt = chunkNow;
-			const u = new SpeechSynthesisUtterance(desc.text);
-			activeSpeechState.pinnedUtterances.push(u);
-			window.__dshPinnedUtterances = activeSpeechState.pinnedUtterances;
-			u.lang = chosenVoice?.lang || (prepared.docLang === "en" ? "en-US" : "zh-CN");
-			if (chosenVoice) u.voice = chosenVoice;
-			u.rate = activeSpeechState.rate;
-			let settled = false;
-			const unpinUtterance = () => {
-				const pos = activeSpeechState.pinnedUtterances.indexOf(u);
-				if (pos >= 0) activeSpeechState.pinnedUtterances.splice(pos, 1);
-			};
-			const advanceToNext = () => {
-				if (settled || activeSpeechState.runId !== myRunId) return;
-				settled = true;
-				currentAdvanceFn = null;
-				unpinUtterance();
-				if (idx + 1 < chunkDescriptors.length) speakChunkAt(idx + 1);
-				else finishSpeechPlayback();
-			};
-			currentAdvanceFn = advanceToNext;
-			u.onstart = () => {
+			Promise.race([Promise.resolve(window.__dshRefreshVoiceConfig()).catch(() => null), new Promise((resolve) => setTimeout(resolve, 2500))]).then(() => {
 				if (activeSpeechState.runId !== myRunId) return;
-				const t = Date.now();
-				lastChunkStartAt = t;
-				lastSynthBusyAt = t;
-				activeSpeechState.segmentStartedAt = t;
-			};
-			u.onboundary = (ev) => {
-				if (activeSpeechState.runId !== myRunId) return;
-				const t = Date.now();
-				lastSynthBusyAt = t;
-				if (ev && typeof ev.charIndex === "number" && ev.charIndex >= 0) {
-					activeSpeechState.boundaryCharOffset = desc.baseOffset + ev.charIndex;
-					activeSpeechState.boundaryUpdatedAt = t;
-				}
-			};
-			u.onend = () => {
-				advanceToNext();
-			};
-			u.onerror = (ev) => {
-				if (settled || activeSpeechState.runId !== myRunId) return;
-				settled = true;
-				currentAdvanceFn = null;
-				unpinUtterance();
-				const errCode = String(ev?.error || "").toLowerCase();
-				if (errCode === "not-allowed" || errCode === "service-not-allowed") {
-					finishSpeechPlayback();
-					return;
-				}
-				if (errorSkipCount < 3 && idx + 1 < chunkDescriptors.length) {
-					errorSkipCount += 1;
-					speakChunkAt(idx + 1);
-					return;
-				}
-				if (_recoveryDepth < 2 && chunkDescriptors.length === 1) {
-					const approxOffset = computeSpeechResumeOffset({
-						fullText: fullSpokenText,
-						docLang: prepared.docLang,
-						segmentBaseOffset: activeSpeechState.segmentBaseOffset,
-						segmentStartedAt: activeSpeechState.segmentStartedAt,
-						segmentRate: activeSpeechState.segmentRate,
-						boundaryCharOffset: activeSpeechState.boundaryCharOffset,
-						boundaryUpdatedAt: activeSpeechState.boundaryUpdatedAt,
-						nowMs: Date.now()
-					});
-					const nextSentenceOffset = findNextSentenceOffset(Math.max(approxOffset, desc.baseOffset + 6));
-					if (nextSentenceOffset > desc.baseOffset) {
-						startAssistantSpeech(msgIdx, {
-							startOffset: nextSentenceOffset,
-							_recoveryDepth: _recoveryDepth + 1,
-							rawTextOverride: rawText,
-							sessionIdOverride: effectiveSessionId
-						});
-						return;
-					}
-				}
-				finishSpeechPlayback();
-			};
-			try {
-				if (synth.paused) synth.resume();
-			} catch {}
-			synth.speak(u);
-		};
-		activeSpeechState.watchdogTimer = setInterval(() => {
-			if (activeSpeechState.runId !== myRunId || !activeSpeechState.playing) {
-				clearInterval(activeSpeechState.watchdogTimer);
-				activeSpeechState.watchdogTimer = null;
-				return;
-			}
-			try {
-				if (synth.paused) synth.resume();
-				if (synth.speaking || synth.pending) {
-					lastSynthBusyAt = Date.now();
-					return;
-				}
-				if (currentChunkIdx >= 0 && Date.now() - Math.max(lastChunkStartAt, lastSynthBusyAt) > 1600) {
-					if (typeof currentAdvanceFn === "function") currentAdvanceFn();
-					else finishSpeechPlayback();
-				}
-			} catch {}
-		}, 900);
-		if (wasSynthBusy && isAppleWebKit) activeSpeechState.handoffTimer = setTimeout(() => {
-			activeSpeechState.handoffTimer = null;
-			speakChunkAt(0);
-		}, 30);
-		else speakChunkAt(0);
+				if (hasCloudChatTtsConfigured()) launchCloudChatTts();
+				else startNativeBrowserSpeechNow();
+			});
+			return;
+		}
+		startNativeBrowserSpeechNow();
 	}
 	function toggleSpeakAssistantReply(msgIdx) {
 		if (activeSpeechState.playing && activeSpeechState.sessionId === (activeSessionId || "") && activeSpeechState.msgIdx === msgIdx) {
@@ -16448,6 +17533,14 @@ function initHubController() {
 		const { session: s } = found;
 		if (s._wireTruncated && !expandedTranscriptBySession.has(s.id) && !(hasLoadedFullState && (s.status === "running" || s.status === "approval"))) hydrateColdSessionTranscript(s.hostId, s.id, s.sessionRev || "");
 		const chatHeaderTitle = stripRedundantProjectPrefix(s.title, s.project);
+		const copilotSessKey = `${s.hostId || "local"}::${s.id || ""}`;
+		if (copilotSessKey !== lastCopilotSyncedSessionKey) {
+			lastCopilotSyncedSessionKey = copilotSessKey;
+			goalCopilotUi.syncSessionGoal(s);
+		} else {
+			goalCopilotUi.handleSessionUpdate(s);
+			goalCopilotUi.renderForActiveSession();
+		}
 		const chatTitleEl = document.getElementById("chatTitle");
 		if (chatTitleEl && chatTitleEl.dataset.titleKey !== `${langPref}:${chatHeaderTitle}`) {
 			chatTitleEl.dataset.titleKey = `${langPref}:${chatHeaderTitle}`;
@@ -21154,6 +22247,29 @@ function initHubController() {
 			showToast("❌ 操作失败：" + (err && err.message || err));
 		}
 	}
+	const goalCopilotUi = createGoalCopilotUi({
+		getToken,
+		getActiveSession: () => {
+			const f = findSessionGlobal(activeSessionId);
+			return f ? f.session : null;
+		},
+		esc: esc$1,
+		showToast,
+		copyText,
+		autoGrowComposer,
+		sendPromptToActiveSession,
+		onPluginConfigChanged: () => {
+			lastRenderedSettingsKey = "";
+			settingsPanel.invalidate();
+			if (currentTab === "settings") renderSettingsTab();
+		},
+		rerenderSettings: () => {
+			lastRenderedSettingsKey = "";
+			settingsPanel.invalidate();
+			if (currentTab === "settings") renderSettingsTab();
+		}
+	});
+	let lastCopilotSyncedSessionKey = "";
 	const settingsPanel = createSettingsPanel({
 		getState: () => ({
 			hubState,
@@ -21168,6 +22284,8 @@ function initHubController() {
 			tokenTail: getToken().slice(-4)
 		}),
 		getViewport: () => document.getElementById("mainViewport"),
+		getCopilotSummaryText: () => goalCopilotUi.getPluginSummaryText(),
+		renderCopilotSettingsSubpageHtml: () => goalCopilotUi.renderSettingsSubpageHtml(),
 		isHostLiveOnline,
 		formatHostTelemetry,
 		compareSemver,
@@ -23415,6 +24533,7 @@ function initHubController() {
 		if (isDemoMode) return;
 		if (urlParams.get("nosse") === "1") return;
 		if (!getToken() && authLockConfirmed) return;
+		if (typeof goalCopilotUi !== "undefined" && !goalCopilotUi.getPluginConfig().loaded) goalCopilotUi.refreshConfig({ probeHealth: true });
 		const prevSseEventAt = lastSseEventAt;
 		closeSSE();
 		const tk = getToken();
@@ -24390,6 +25509,7 @@ function initHubController() {
 	})();
 	else if (getToken()) (async () => {
 		await fetchState();
+		goalCopilotUi.refreshConfig({ probeHealth: true });
 		if (getToken() && !authLockConfirmed) connectSSE();
 	})();
 	else {

@@ -339,7 +339,12 @@ test('v0.9.20 settings-panel: renders 4 grouped sections ("模型与偏好") and
   assert.equal(panel.getActiveSubpage(), 'home');
   assert.match(mockViewport.innerHTML, /设置/);
   assert.match(mockViewport.innerHTML, /添加电脑/);
-  assert.match(mockViewport.innerHTML, /模型与偏好/);
+  assert.match(mockViewport.innerHTML, /AI 与功能/);
+  assert.match(mockViewport.innerHTML, /AI 模型与供应商/);
+  assert.match(mockViewport.innerHTML, /边走边听 \(Beta\)/);
+  assert.match(mockViewport.innerHTML, /聊天语音/);
+  assert.match(mockViewport.innerHTML, /目标副驾插件 \(Beta\)/);
+  assert.match(mockViewport.innerHTML, /通知与通用/);
   assert.match(mockViewport.innerHTML, /安全与隐私/);
   assert.match(mockViewport.innerHTML, /更多/);
   // Compact host strip & crisp single-line values on Home
@@ -368,6 +373,7 @@ test('v0.9.20 settings-panel: renders 4 grouped sections ("模型与偏好") and
   }
 
   // Verify capabilities subpage DOES render the full matrix table
+  panel.openSubpage('capabilities');
   assert.match(mockViewport.innerHTML, /<table/);
 
   // Verify add_host subpage forces expanded view
@@ -958,4 +964,153 @@ test('v0.9.40 Walk Mode Mini Bar, TopBar shortcut, Doubao TTS wake priority, and
     assert.notEqual(en, zh, `expected English translation for: ${zh}`);
     assert.doesNotMatch(en, /[\u4e00-\u9fa5]/, `leftover Chinese in "${zh}" -> "${en}"`);
   }
+});
+
+test('v0.9.41 decouples global AI Models pool from Walk Mode & Chat Voice with independent per-feature routing', async () => {
+  const { VoiceVault } = await import('../../hub/voice-vault.js');
+  const {
+    formatModelsCompactValue,
+    formatChatVoiceCompactValue,
+    getCredentialFeatureUsages,
+    resolveFeatureStageConfig,
+  } = await import('../../hub/web/src/voice/provider-routing.js');
+  const { translateZhStringToEn } = await import('../../hub/web/src/utils/i18n.js');
+
+  const vault = new VoiceVault();
+  await vault.init();
+  const c1 = await vault.upsertCredential({
+    provider: 'volcengine_tts',
+    label: '豆包播报',
+    apiKey: 'volc-k1',
+    defaultVoice: 'zh_female_vv_uranus_bigtts',
+  });
+  const c2 = await vault.upsertCredential({
+    provider: 'openai_compat',
+    label: 'OpenAI 语音',
+    baseUrl: 'https://api.openai.com/v1',
+    apiKey: 'sk-openai-k2',
+    defaultModel: 'gpt-4o-mini',
+  });
+  assert.equal(c1.ok, true);
+  assert.equal(c2.ok, true);
+
+  // Chat Voice picks explicit providers independently from Walk Mode (never coupled via follow_walk)
+  const cAsr = await vault.upsertCredential({
+    provider: 'volcengine_asr',
+    label: '火山豆包',
+    apiKey: 'volc-asr-k',
+  });
+  assert.equal(cAsr.ok, true);
+  await vault.updatePrefs({ chatTtsTarget: `cred:${c2.credential.id}`, chatSttTarget: `cred:${cAsr.credential.id}` });
+  const pub = vault.toPublicState();
+  assert.equal(pub.prefs.chatTtsTarget, `cred:${c2.credential.id}`);
+  assert.equal(pub.prefs.useByokForChatTts, true);
+  assert.equal(pub.prefs.chatSttTarget, `cred:${cAsr.credential.id}`);
+  assert.equal(pub.prefs.useByokForChatStt, true);
+  assert.equal(formatModelsCompactValue(pub), '3 个供应商');
+  assert.match(formatChatVoiceCompactValue(pub), /豆包.*OpenAI 语音|OpenAI 语音/);
+  assert.doesNotMatch(formatChatVoiceCompactValue(pub), /跟随随行/);
+
+  // Legacy follow_walk targets never display "跟随随行" and resolve to concrete provider/native
+  assert.equal(
+    formatChatVoiceCompactValue({
+      ...pub,
+      prefs: { ...pub.prefs, chatSttTarget: 'follow_walk', chatTtsTarget: 'follow_walk' },
+    }),
+    '免费本机',
+  );
+
+  const stageOverride = resolveFeatureStageConfig(pub.prefs.chatTtsTarget, 'tts', pub.activeProfile, pub.credentials);
+  assert.equal(stageOverride?.credId, c2.credential.id);
+  assert.equal(stageOverride?.provider, 'openai_compat');
+
+  const usages = getCredentialFeatureUsages(c2.credential.id, pub.activeProfile, pub.prefs, pub.credentials);
+  assert.equal(usages.some(u => u.key === 'chat_tts'), true);
+
+  // Deleting c2 safely falls Chat TTS back to 'native'
+  await vault.deleteCredential(c2.credential.id);
+  const pubAfter = vault.toPublicState();
+  assert.equal(pubAfter.prefs.chatTtsTarget, 'native');
+  assert.equal(pubAfter.prefs.useByokForChatTts, false);
+
+  for (const zh of [
+    'AI 与功能',
+    '通知与通用',
+    'AI 模型与供应商',
+    '边走边听 (Beta)',
+    '目标副驾插件 (Beta)',
+    '聊天语音',
+    '2 个供应商',
+    '跟随随行',
+    '本功能调用的模型',
+    '管理模型池 ›',
+    '播报与交互行为',
+    '语音输入（听写）',
+    '消息朗读（播报）',
+    '试听聊天朗读',
+  ]) {
+    const en = translateZhStringToEn(zh);
+    assert.notEqual(en, zh, `expected English translation for: ${zh}`);
+    assert.doesNotMatch(en, /[\u4e00-\u9fa5]/, `leftover Chinese in "${zh}" -> "${en}"`);
+  }
+});
+
+test('v0.9.41 cloud TTS skips punctuation-only chunks, retries transient Seed-TTS 3.0 502, and never mixes machine voice', async () => {
+  const { VoiceVault } = await import('../../hub/voice-vault.js');
+  const { VoiceCopilotEngine } = await import('../../hub/voice-copilot.js');
+
+  const vault = new VoiceVault();
+  await vault.init();
+  const cTts = await vault.upsertCredential({
+    provider: 'volcengine_tts',
+    label: '火山tts',
+    apiKey: 'volc-test-key',
+    defaultModel: 'doubao-seed-tts-3.0',
+    defaultVoice: 'multi_female_tuanzi_v3_uranus_bigtts',
+  });
+  assert.equal(cTts.ok, true);
+
+  let callCount = 0;
+  const mockFetch = async () => {
+    callCount += 1;
+    if (callCount === 1) {
+      return { ok: false, status: 502, headers: new Headers(), text: async () => '{"message":"upstream busy"}' };
+    }
+    return {
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'audio/mpeg' }),
+      arrayBuffer: async () => new Uint8Array([0xff, 0xfb, 0x90, 0x00]).buffer,
+    };
+  };
+
+  const engine = new VoiceCopilotEngine({ vault, hub: { getFullState: () => ({ hosts: [] }) }, fetchImpl: mockFetch });
+  const stageOverride = { provider: 'volcengine_tts', credId: cTts.credential.id, model: 'doubao-seed-tts-3.0' };
+
+  // 1. Punctuation-only chunk skips cleanly with zero upstream API calls
+  const punct = await engine.runTts({ text: '--- ... 。！？', stageOverride });
+  assert.equal(punct.ok, true);
+  assert.equal(punct.skippedEmpty, true);
+  assert.equal(callCount, 0);
+
+  // 2. Transient 502 automatically retries and returns real MP3 audio
+  const retryRes = await engine.runTts({ text: '你好，这是豆包播报测试。', stageOverride });
+  assert.equal(retryRes.ok, true);
+  assert.equal(callCount, 2);
+  assert.ok(retryRes.audioBase64 && retryRes.audioBase64.length > 0);
+
+  // 3. Static verification: Chat TTS uses independent __dshVoiceByokCanSpeak & walkAudio never mixes Siri mid-stream
+  const { readFile } = await import('node:fs/promises');
+  const { resolve } = await import('node:path');
+  const [ctrlSrc, walkAudioSrc, sheetsSrc] = await Promise.all([
+    readFile(resolve(process.cwd(), 'hub/web/src/controller.js'), 'utf8'),
+    readFile(resolve(process.cwd(), 'hub/web/src/voice/walkAudio.ts'), 'utf8'),
+    readFile(resolve(process.cwd(), 'hub/web/src/components/VoiceCopilotSheets.tsx'), 'utf8'),
+  ]);
+  assert.match(ctrlSrc, /__dshVoiceByokCanSpeak/);
+  assert.match(ctrlSrc, /__dshVoiceByokStopSpeak/);
+  assert.match(walkAudioSrc, /fetchChunkWithRetry/);
+  assert.match(walkAudioSrc, /!anyCloudPlayed && allowNativeFallback/);
+  assert.match(sheetsSrc, /__dshVoiceByokCanSpeak/);
+  assert.match(sheetsSrc, /allowNativeFallback:\s*false/);
 });

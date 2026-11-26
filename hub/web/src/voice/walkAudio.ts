@@ -61,6 +61,7 @@ export async function setWalkBackgroundKeepAlive(
   duckMusic = true,
   keepMicWarm = false,
   proactiveBriefing = 'approvals',
+  useCloudTts = false,
 ): Promise<boolean> {
   try {
     if (typeof window !== 'undefined') {
@@ -74,6 +75,7 @@ export async function setWalkBackgroundKeepAlive(
         Boolean(duckMusic),
         Boolean(keepMicWarm),
         String(proactiveBriefing || 'approvals'),
+        Boolean(useCloudTts),
       ),
     );
   } catch {
@@ -647,6 +649,13 @@ export class WalkSpeechPlayer {
     opts: { duckMusic?: boolean; keepSessionAfter?: boolean } = {},
   ): Promise<boolean> {
     const myRun = this.runId;
+    // Always cancel any browser WebKit speechSynthesis before playing cloud MP3/WAV
+    // so Apple machine voice can NEVER overlap with Doubao / cloud TTS!
+    try {
+      if (typeof window !== 'undefined' && window.speechSynthesis && (window.speechSynthesis.speaking || window.speechSynthesis.pending)) {
+        window.speechSynthesis.cancel();
+      }
+    } catch {}
     const nativeBridge = getNativeAudioBridge();
     if (nativeBridge?.playBase64Audio) {
       try {
@@ -771,20 +780,26 @@ export class WalkSpeechPlayer {
       speechRate = 1.0,
       duckMusicMode = false,
       keepAudioSessionAfter = false,
+      allowNativeFallback = false,
       onFirstLatency,
       onStateChange,
+      onCloudTtsError,
     }: {
       useCloudTts: boolean;
-      fetchTts: (text: string, signal: AbortSignal) => Promise<{ ok: boolean; audioBase64?: string; mimeType?: string; useBrowserSpeech?: boolean; latencyMs?: number }>;
+      fetchTts: (text: string, signal: AbortSignal) => Promise<{ ok: boolean; audioBase64?: string; mimeType?: string; useBrowserSpeech?: boolean; skippedEmpty?: boolean; error?: string; latencyMs?: number }>;
       speechRate?: number;
       duckMusicMode?: boolean;
       keepAudioSessionAfter?: boolean;
+      allowNativeFallback?: boolean;
       onFirstLatency?: (ms: number) => void;
       onStateChange?: (playing: boolean) => void;
+      onCloudTtsError?: (msg: string) => void;
     },
   ): Promise<void> {
     this.stop();
-    const list = (chunks || []).map(c => String(c || '').trim()).filter(Boolean);
+    const list = (chunks || [])
+      .map(c => String(c || '').trim())
+      .filter(c => Boolean(c) && /[\p{L}\p{N}]/u.test(c));
     if (list.length === 0) return;
 
     const myRun = this.runId;
@@ -796,6 +811,35 @@ export class WalkSpeechPlayer {
     }
     onStateChange?.(true);
 
+    const fetchChunkWithRetry = async (text: string) => {
+      const delays = [0, 450, 1000];
+      let lastRes: any = { ok: false, error: 'TTS failed' };
+      for (let attempt = 0; attempt < delays.length; attempt += 1) {
+        if (this.runId !== myRun || ctrl.signal.aborted) {
+          return { ok: false, aborted: true };
+        }
+        if (delays[attempt] > 0) {
+          await new Promise(resolve => setTimeout(resolve, delays[attempt]));
+          if (this.runId !== myRun || ctrl.signal.aborted) {
+            return { ok: false, aborted: true };
+          }
+        }
+        try {
+          const r = await fetchTts(text, ctrl.signal);
+          if (r?.skippedEmpty || (r?.ok && r.audioBase64) || r?.useBrowserSpeech) {
+            return r;
+          }
+          lastRes = r || { ok: false };
+        } catch (err: any) {
+          if (ctrl.signal.aborted || err?.name === 'AbortError') {
+            return { ok: false, aborted: true };
+          }
+          lastRes = { ok: false, error: String(err?.message || 'network error') };
+        }
+      }
+      return lastRes;
+    };
+
     try {
       if (!useCloudTts) {
         await this.speakNativeBrowser(list.join(' '), speechRate, {
@@ -805,21 +849,28 @@ export class WalkSpeechPlayer {
         return;
       }
 
+      let anyCloudPlayed = false;
+      let reportedCloudErr = false;
+
       // Pipeline prefetch: while chunk i plays, start synthesizing chunk i+1!
-      let nextPromise: Promise<any> | null = fetchTts(list[0], ctrl.signal).catch(() => ({ ok: false }));
+      let nextPromise: Promise<any> | null = fetchChunkWithRetry(list[0]);
       for (let i = 0; i < list.length; i += 1) {
         if (this.runId !== myRun) break;
         const res = await nextPromise;
-        if (this.runId !== myRun) break;
+        if (this.runId !== myRun || res?.aborted) break;
 
         if (i + 1 < list.length) {
-          nextPromise = fetchTts(list[i + 1], ctrl.signal).catch(() => ({ ok: false }));
+          nextPromise = fetchChunkWithRetry(list[i + 1]);
         } else {
           nextPromise = null;
         }
 
         if (i === 0 && typeof res?.latencyMs === 'number') {
           onFirstLatency?.(res.latencyMs);
+        }
+
+        if (res?.skippedEmpty) {
+          continue;
         }
 
         const chunkOpts = {
@@ -829,12 +880,20 @@ export class WalkSpeechPlayer {
 
         if (res?.ok && res.audioBase64) {
           const played = await this.playAudioBase64(res.audioBase64, res.mimeType || 'audio/mpeg', chunkOpts);
-          if (!played && this.runId === myRun) {
+          if (played) {
+            anyCloudPlayed = true;
+          } else if (this.runId === myRun && !anyCloudPlayed && allowNativeFallback) {
             await this.speakNativeBrowser(list[i], speechRate, chunkOpts);
           }
         } else if (this.runId === myRun) {
-          // Graceful fallback to native browser TTS if cloud TTS fails/unconfigured
-          await this.speakNativeBrowser(list[i], speechRate, chunkOpts);
+          // NEVER mix Apple machine voice mid-sentence into a Doubao / cloud TTS stream!
+          // Only fall back to native voice if chunk 0 failed completely AND caller explicitly enabled fallback.
+          if (!anyCloudPlayed && allowNativeFallback) {
+            await this.speakNativeBrowser(list[i], speechRate, chunkOpts);
+          } else if (!reportedCloudErr) {
+            reportedCloudErr = true;
+            onCloudTtsError?.(String(res?.error || '云端语音合成暂时失败，已跳过该段'));
+          }
         }
       }
     } finally {

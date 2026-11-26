@@ -2296,6 +2296,9 @@ export class HubCore {
             url: `/?host=${encodeURIComponent(hostId)}&task=${encodeURIComponent(task.id)}`,
           },
         })
+        try {
+          this.onTaskCompleted?.({ hostId, hostName, task, approvals })
+        } catch { }
       } else if ((curStatus === 'error' || curStatus === 'failed') && prevStatus !== curStatus) {
         const formatted = formatWebPushNotification({
           kind: 'failed',
