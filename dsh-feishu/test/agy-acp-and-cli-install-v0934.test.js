@@ -316,6 +316,9 @@ test('v0.9.34 mobile UI wiring and English i18n cover degraded-mode banners and 
   assert.match(settingsSrc, /loginHostAgyCli\(/)
   assert.match(controllerSrc, /async function installHostAgyCli\(/)
   assert.match(controllerSrc, /type: 'install_agy_cli'/)
+  // Regression guard (v0.9.36): never call non-existent renderChatStage() inside installHostAgyCli
+  assert.doesNotMatch(controllerSrc, /\brenderChatStage\s*\(/)
+  assert.match(controllerSrc, /function renderActiveChatStage\(/)
 
   const zhSamples = [
     '缺 agy CLI',

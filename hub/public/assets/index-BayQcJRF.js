@@ -21230,10 +21230,13 @@ function initHubController() {
 	}
 	async function installHostAgyCli(hostId, hostName = "") {
 		const label = hostName || hostId;
+		const prevHost = (hubState.hosts || []).find((h) => h.hostId === hostId);
+		const prevInstallError = String(prevHost?.bridgeState?.antigravityStatus?.installError || "").trim();
+		const prevStatusUpdatedAt = Number(prevHost?.bridgeState?.antigravityStatus?.updatedAt || 0);
 		installingAgyCliMap[hostId] = Date.now();
 		lastRenderedSettingsKey = "";
 		if (currentTab === "settings") renderSettingsTab();
-		if (activeSessionId) renderChatStage();
+		if (activeSessionId) renderActiveChatStage();
 		showToast(`⚡ 正在向「${label}」下发官方 agy CLI 安装指令...`);
 		let dispatchOk = false;
 		try {
@@ -21242,7 +21245,7 @@ function initHubController() {
 				delete installingAgyCliMap[hostId];
 				lastRenderedSettingsKey = "";
 				if (currentTab === "settings") renderSettingsTab();
-				if (activeSessionId) renderChatStage();
+				if (activeSessionId) renderActiveChatStage();
 				showToast(`⚠️ 下发安装指令失败：${cmdRes.error || "请刷新重试"}`);
 				return;
 			}
@@ -21251,12 +21254,13 @@ function initHubController() {
 			delete installingAgyCliMap[hostId];
 			lastRenderedSettingsKey = "";
 			if (currentTab === "settings") renderSettingsTab();
-			if (activeSessionId) renderChatStage();
+			if (activeSessionId) renderActiveChatStage();
 			showToast(`⚠️ 下发安装指令异常：${err && err.message || "网络异常，请重试"}`);
 			return;
 		}
 		if (!dispatchOk) return;
 		const startWait = Date.now();
+		let seenInstalling = false;
 		const pollInstall = async () => {
 			await fetchState({
 				silent: true,
@@ -21264,22 +21268,24 @@ function initHubController() {
 			});
 			const updatedHost = (hubState.hosts || []).find((h) => h.hostId === hostId);
 			const st = updatedHost?.bridgeState?.antigravityStatus;
+			if (st?.installing) seenInstalling = true;
 			const doneResult = (updatedHost?.recentResults || []).find((r) => (r.type === "install_agy_cli" || r.type === "install_agy_cli_done") && Number(r.at || 0) >= startWait - 5e3);
 			if (st && !st.installing) {
 				if (st.hasCli) {
 					delete installingAgyCliMap[hostId];
 					lastRenderedSettingsKey = "";
 					if (currentTab === "settings") renderSettingsTab();
-					if (activeSessionId) renderChatStage();
+					if (activeSessionId) renderActiveChatStage();
 					showToast(st.needsCliLogin ? `✅ 「${label}」已装好 agy CLI！请在电脑浏览器点一次 Google 登录确认` : `✅ 「${label}」已安装官方 agy CLI，ACP 直连通道已启用！`);
 					return;
 				}
-				if (st.installError || doneResult && doneResult.ok === false) {
+				const curErr = String(st.installError || "").trim();
+				if (Boolean(doneResult && doneResult.ok === false || curErr && (seenInstalling || Number(st.updatedAt || 0) > prevStatusUpdatedAt || curErr !== prevInstallError))) {
 					delete installingAgyCliMap[hostId];
 					lastRenderedSettingsKey = "";
 					if (currentTab === "settings") renderSettingsTab();
-					if (activeSessionId) renderChatStage();
-					showToast(`⚠️ 「${label}」安装失败：${st.installError || doneResult?.error || "请检查网络或代理"}`);
+					if (activeSessionId) renderActiveChatStage();
+					showToast(`⚠️ 「${label}」安装失败：${curErr || doneResult?.error || "请检查网络或代理"}`);
 					return;
 				}
 			}
@@ -21288,7 +21294,7 @@ function initHubController() {
 				delete installingAgyCliMap[hostId];
 				lastRenderedSettingsKey = "";
 				if (currentTab === "settings") renderSettingsTab();
-				if (activeSessionId) renderChatStage();
+				if (activeSessionId) renderActiveChatStage();
 				showToast(`⏳ 「${label}」后台安装耗时较长，请稍后刷新查看结果`);
 			}
 		};
@@ -21313,6 +21319,7 @@ function initHubController() {
 		upgradingHostMap[hostId] = Date.now();
 		lastRenderedSettingsKey = "";
 		if (currentTab === "settings") renderSettingsTab();
+		if (activeSessionId) renderActiveChatStage();
 		showToast(`🚀 正在为「${label}」拉取最新代码并自动热重启守护进程...`);
 		try {
 			await dispatchHostCommand(hostId, { type: "upgrade_turbo" });
@@ -21330,6 +21337,7 @@ function initHubController() {
 				delete upgradingHostMap[hostId];
 				lastRenderedSettingsKey = "";
 				if (currentTab === "settings") renderSettingsTab();
+				if (activeSessionId) renderActiveChatStage();
 				if (document.getElementById("turboGuideSheet")?.classList.contains("open")) openTurboGuideSheet();
 				showToast(`✅ 电脑「${label}」已升级至最新版本 v${targetVer}！`);
 				return;
@@ -21339,6 +21347,7 @@ function initHubController() {
 				delete upgradingHostMap[hostId];
 				lastRenderedSettingsKey = "";
 				if (currentTab === "settings") renderSettingsTab();
+				if (activeSessionId) renderActiveChatStage();
 				if (document.getElementById("turboGuideSheet")?.classList.contains("open")) openTurboGuideSheet();
 			}
 		};
