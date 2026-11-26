@@ -42,6 +42,7 @@
     "dsh-turbo/Cargo.toml",
     "dsh-turbo/src/**/*",
     "hub/*.js",
+    "hub/*.html",
     "hub/public/**/*",
     "scripts/*.mjs",
     "connect-host.sh",

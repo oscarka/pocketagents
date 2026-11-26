@@ -1,0 +1,32 @@
+menu "PocketAgents Passport Configuration"
+
+config PA_DEFAULT_WIFI_SSID
+    string "Default Wi-Fi SSID (fallback when NVS is empty)"
+    default "Emulator Host Bridge"
+    help
+        Wi-Fi SSID used when no credentials are stored in NVS (pa_cfg).
+        Defaults to "Emulator Host Bridge" for instant testing in the FoloToy Web Simulator.
+
+config PA_DEFAULT_WIFI_PASS
+    string "Default Wi-Fi Password (fallback when NVS is empty)"
+    default ""
+
+config PA_DEFAULT_HUB_URL
+    string "Default PocketAgents Hub Base URL"
+    default "http://192.168.4.1:8787"
+    help
+        Base URL of your PocketAgents Hub (e.g. http://192.168.1.50:8080 or https://your-hub.up.railway.app).
+
+config PA_DEFAULT_HUB_TOKEN
+    string "Default Hub or Paired Device Token"
+    default ""
+    help
+        Paired dev_ token or HUB_TOKEN sent via x-hub-token header.
+        Prefer setting per-device tokens in NVS or local build override; never commit real secrets.
+
+config PA_POLL_INTERVAL_MS
+    int "Digest Poll Interval (ms)"
+    range 500 30000
+    default 1500
+
+endmenu

@@ -305,6 +305,10 @@ export async function runCli(argv = process.argv.slice(2)) {
 
   console.log(`  📱 Phone (LAN):    ${localHub.pairUrl}`)
   console.log(`  💻 This computer:  ${localHub.localPairUrl}`)
+  const passportSetupUrl = localHub.pairCode
+    ? `${localHub.localUrl}/device-setup?pair=${encodeURIComponent(localHub.pairCode)}`
+    : `${localHub.localUrl}/device-setup`
+  console.log(`  🪪 AI Passport:    ${passportSetupUrl}`)
   if (localHub.pairCode) {
     console.log(`  🔑 Pair code:      ${localHub.pairCode}  (valid 24h)`)
   }

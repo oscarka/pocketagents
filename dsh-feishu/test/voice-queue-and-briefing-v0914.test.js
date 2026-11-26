@@ -288,6 +288,7 @@ test('v0.9.14 POST /api/voice/briefing reads numbered question options, summariz
       kind: 'completed',
       hostId: 'macbook-air',
       agentId: 'agy-ide:done-3',
+      detailLevel: 'concise',
       voiceSessionId: 'walk-brief-1',
     },
   })

@@ -21,6 +21,14 @@ import { captureStateDigest, buildStateDelta } from './delta-state.js'
 import { VoiceVault } from './voice-vault.js'
 import { VoiceCopilotEngine } from './voice-copilot.js'
 import { GoalCopilotBridge } from './goal-copilot-bridge.js'
+import {
+  buildDeviceDigest,
+  buildDeviceSetupInfo,
+  executeDeviceAction,
+  handleDeviceTtsPcm,
+  handleDeviceVoiceTurn,
+  recordDeviceSeen,
+} from './device-api.js'
 
 const gzipAsync = promisify(gzip)
 const HUB_MEDIA_CACHE_MAX_ITEM_BYTES = 1.5 * 1024 * 1024
@@ -153,11 +161,15 @@ async function readStaticTextPrecompressed(filePath) {
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const INDEX_HTML_PATH = join(__dirname, 'public', 'index.html')
+const DEVICE_SETUP_HTML_PATH = join(__dirname, 'device-setup.html')
 const PACKAGE_JSON_PATH = join(__dirname, '..', 'package.json')
 const CONNECT_SCRIPT_PATH = join(__dirname, '..', 'connect-host.sh')
 const MAX_BODY_BYTES = 50 * 1024 * 1024 // 50 MiB for snapshot uploads
 
 function getRouteMaxBodyBytes(pathname = '') {
+  if (pathname === '/api/device/voice-turn') {
+    return 4 * 1024 * 1024 // 4 MiB cap for raw 16kHz PCM / WAV push-to-talk clips
+  }
   const isLargeBodyRoute =
     pathname === '/api/heartbeat'
     || pathname === '/api/snapshots'
@@ -804,6 +816,25 @@ export function createHubServer({
     }
     if (method === 'POST' && pathname === '/api/usage/v1') {
       return { status: 200, json: { ok: true, selfHosted: true } }
+    }
+
+    // Beginner-friendly FoloToy AI Passport / Edge Device 1-click USB setup wizard (zero secrets in HTML)
+    if (method === 'GET' && (pathname === '/device-setup' || pathname === '/device-setup/')) {
+      try {
+        const html = await readFile(DEVICE_SETUP_HTML_PATH, 'utf8')
+        return {
+          status: 200,
+          headers: {
+            'content-type': 'text/html; charset=utf-8',
+            'cache-control': 'no-store',
+            'content-security-policy':
+              "default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; base-uri 'self'",
+          },
+          body: html,
+        }
+      } catch {
+        return { status: 404, body: 'device-setup.html not found' }
+      }
     }
 
     // One-line Host Install Script served directly from the Hub (pre-fills this Hub's origin URL)
@@ -1992,6 +2023,109 @@ export function createHubServer({
         }
       }
 
+      // Generic Edge / Lite Device API (FoloToy AI Passport, ESP32 badges, Watch/Shortcuts, Stream Deck)
+      if (pathname.startsWith('/api/device/')) {
+        const curDevice = getAuthenticatedDevice(headers, urlObj)
+        const deviceSessionId = `device:${String(body?.sessionId || urlObj.searchParams.get('sessionId') || curDevice?.id || 'default').slice(0, 48)}`
+
+        if (method === 'GET' && pathname === '/api/device/setup-info') {
+          const safeHost = /^[a-zA-Z0-9._:-]+$/.test(urlObj.host) ? urlObj.host : ''
+          const reqOrigin = safeHost ? `${urlObj.protocol}//${safeHost}` : ''
+          const addrInfo = typeof server?.address === 'function' ? server.address() : null
+          const listenPort = addrInfo && typeof addrInfo === 'object' ? Number(addrInfo.port) || 0 : 0
+          return {
+            status: 200,
+            json: buildDeviceSetupInfo(hub, {
+              reqOrigin,
+              listenPort,
+              nowMs: hub.now ? hub.now() : Date.now(),
+            }),
+          }
+        }
+
+        if (method === 'POST' && pathname === '/api/device/mint-token') {
+          if (!expectedToken) {
+            return {
+              status: 200,
+              json: {
+                ok: true,
+                token: '',
+                noAuthRequired: true,
+                deviceName: String(body?.deviceName || 'FoloToy AI Passport').slice(0, 40),
+              },
+            }
+          }
+          const reg = hub.registerTrustedDevice({
+            deviceId: String(body?.deviceId || '').trim(),
+            name: String(body?.deviceName || 'FoloToy AI Passport').trim().slice(0, 40) || 'FoloToy AI Passport',
+            userAgent: 'FoloToy-AI-Passport/1.0',
+            ip: reqClientIp,
+          })
+          return {
+            status: 200,
+            json: {
+              ok: true,
+              token: reg.deviceToken,
+              deviceId: reg.device.id,
+              deviceName: reg.device.name,
+            },
+          }
+        }
+
+        if (method === 'GET' && pathname === '/api/device/digest') {
+          const nowMs = hub.now ? hub.now() : Date.now()
+          recordDeviceSeen({
+            ip: reqClientIp,
+            deviceId: curDevice?.id || '',
+            deviceName: curDevice?.name || 'FoloToy AI Passport',
+            nowMs,
+          })
+          await voiceVault.init()
+          const digest = buildDeviceDigest(hub, {
+            maxApprovals: urlObj.searchParams.get('maxApprovals'),
+            maxTasks: urlObj.searchParams.get('maxTasks'),
+            since: urlObj.searchParams.get('since') || '',
+            activeHostId: urlObj.searchParams.get('hostId') || '',
+            activeSessionId: urlObj.searchParams.get('agentId') || '',
+            lang: urlObj.searchParams.get('lang') || 'zh',
+            voiceCopilot,
+            nowMs,
+          })
+          return { status: 200, json: digest }
+        }
+
+        if (method === 'POST' && pathname === '/api/device/action') {
+          await voiceVault.init()
+          return executeDeviceAction(hub, voiceCopilot, body || {}, { deviceSessionId })
+        }
+
+        if (method === 'POST' && pathname === '/api/device/voice-turn') {
+          await voiceVault.init()
+          const ct = String(headers?.['content-type'] ?? headers?.['Content-Type'] ?? '')
+          return await handleDeviceVoiceTurn(hub, voiceCopilot, {
+            rawBuffer,
+            contentType: ct,
+            body: body || {},
+            query: urlObj.searchParams,
+            deviceSessionId,
+          })
+        }
+
+        if ((method === 'GET' || method === 'POST') && pathname === '/api/device/tts-pcm') {
+          await voiceVault.init()
+          const text = method === 'POST' ? body?.text : urlObj.searchParams.get('text')
+          const briefingSlot = method === 'POST' ? body?.briefingSlot : urlObj.searchParams.get('slot')
+          const sampleRate = method === 'POST' ? body?.sampleRate : urlObj.searchParams.get('rate')
+          const profileId = method === 'POST' ? body?.profileId : urlObj.searchParams.get('profileId')
+          return await handleDeviceTtsPcm(hub, voiceCopilot, {
+            text: text || '',
+            briefingSlot: Number(briefingSlot) || 0,
+            sampleRate: Number(sampleRate) || 16000,
+            profileId: profileId || '',
+          })
+        }
+      }
+
       // Real-time Security & Intrusion Monitor endpoints (strictly behind admin HUB_TOKEN)
       if (method === 'GET' && pathname === '/api/security/events') {
         return {
@@ -2523,9 +2657,18 @@ export function createHubServer({
       res.once('close', abortOnClientClose)
       const routeMaxBodyBytes = getRouteMaxBodyBytes(urlObj.pathname)
       let body = {}
+      let rawBuffer = null
       if (req.method === 'POST') {
+        const reqContentType = String(req.headers?.['content-type'] ?? req.headers?.['Content-Type'] ?? '').toLowerCase()
+        const isBinaryVoiceTurn =
+          urlObj.pathname === '/api/device/voice-turn' &&
+          (reqContentType.startsWith('audio/') || reqContentType.startsWith('application/octet-stream'))
         try {
-          body = await readJsonBody(req, routeMaxBodyBytes)
+          if (isBinaryVoiceTurn) {
+            rawBuffer = await readRawBodyBuffer(req, routeMaxBodyBytes)
+          } else {
+            body = await readJsonBody(req, routeMaxBodyBytes)
+          }
         } catch (bodyErr) {
           res.removeListener('close', abortOnClientClose)
           const isTooLarge = /exceeds limit|too large/i.test(String(bodyErr?.message || ''))
@@ -2543,7 +2686,7 @@ export function createHubServer({
         url: req.url,
         headers: req.headers,
         body,
-        rawBuffer: null,
+        rawBuffer,
         remoteAddress: req.socket?.remoteAddress || '',
         signal: clientAbortController.signal,
       }).finally(() => {

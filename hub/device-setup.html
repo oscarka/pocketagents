@@ -1,0 +1,596 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PocketAgents · 连接 FoloToy AI Passport 新手向导</title>
+  <style>
+    :root {
+      --bg: #070d18;
+      --card: #10192b;
+      --card-alt: #162238;
+      --border: #243654;
+      --text: #f1f5f9;
+      --muted: #94a3b8;
+      --emerald: #10b981;
+      --sky: #38bdf8;
+      --amber: #f59e0b;
+      --crimson: #ef4444;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: "PingFang SC", "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: radial-gradient(circle at 20% 0%, #102442 0%, #070d18 55%);
+      color: var(--text);
+      min-height: 100vh;
+      line-height: 1.6;
+      padding: 28px 16px 64px;
+    }
+    .wrap { max-width: 780px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
+    .topbar {
+      display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px;
+      padding: 18px 22px; background: var(--card); border: 1px solid var(--border); border-radius: 16px;
+    }
+    .brand { display: flex; align-items: center; gap: 12px; }
+    .brand-icon {
+      width: 42px; height: 42px; border-radius: 12px; background: linear-gradient(135deg, #10b981, #38bdf8);
+      display: flex; align-items: center; justify-content: center; font-size: 22px; color: #061018; font-weight: 800;
+    }
+    .brand h1 { font-size: 20px; font-weight: 700; }
+    .brand p { font-size: 13px; color: var(--muted); }
+    .status-pill {
+      display: inline-flex; align-items: center; gap: 8px; padding: 6px 14px; border-radius: 999px;
+      font-size: 13px; font-weight: 600; background: var(--card-alt); border: 1px solid var(--border);
+    }
+    .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--amber); }
+    .dot.ok { background: var(--emerald); box-shadow: 0 0 10px var(--emerald); }
+    .dot.err { background: var(--crimson); }
+
+    .card {
+      background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 22px;
+      display: flex; flex-direction: column; gap: 14px;
+    }
+    .step-head { display: flex; align-items: center; gap: 10px; }
+    .step-num {
+      width: 28px; height: 28px; border-radius: 999px; background: rgba(56, 189, 248, 0.16);
+      color: var(--sky); font-weight: 700; font-size: 14px; display: inline-flex; align-items: center; justify-content: center;
+      border: 1px solid rgba(56, 189, 248, 0.35); flex-shrink: 0;
+    }
+    .card h2 { font-size: 17px; font-weight: 700; }
+    .muted { color: var(--muted); font-size: 13.5px; }
+    .hint {
+      padding: 10px 14px; border-radius: 10px; font-size: 13px;
+      background: rgba(245, 158, 11, 0.11); border: 1px solid rgba(245, 158, 11, 0.32); color: #fcd34d;
+    }
+    .hint.ok {
+      background: rgba(16, 185, 129, 0.12); border-color: rgba(16, 185, 129, 0.38); color: #6ee7b7;
+    }
+    .hint.err {
+      background: rgba(239, 68, 68, 0.12); border-color: rgba(239, 68, 68, 0.38); color: #fca5a5;
+    }
+
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+    label { display: flex; flex-direction: column; gap: 6px; font-size: 13.5px; font-weight: 600; }
+    .field-row { display: flex; gap: 8px; }
+    input, select {
+      width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border);
+      background: #0a1220; color: var(--text); font-size: 14px; outline: none;
+    }
+    input:focus, select:focus { border-color: var(--sky); }
+    .ex { font-size: 12px; color: var(--muted); font-weight: 400; }
+
+    .btn-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+    button, a.btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+      padding: 10px 18px; border-radius: 10px; font-size: 14px; font-weight: 600;
+      border: 1px solid var(--border); background: var(--card-alt); color: var(--text);
+      cursor: pointer; text-decoration: none; transition: opacity 0.15s, transform 0.08s;
+    }
+    button:hover, a.btn:hover { opacity: 0.92; }
+    button:active { transform: scale(0.99); }
+    button.primary {
+      background: linear-gradient(135deg, #10b981, #059669); color: #04130d; border-color: transparent;
+      padding: 12px 22px; font-size: 15px;
+    }
+    button.sky { background: rgba(56, 189, 248, 0.18); border-color: rgba(56, 189, 248, 0.45); color: #7dd3fc; }
+    button:disabled { opacity: 0.45; cursor: not-allowed; }
+
+    .code-box {
+      position: relative; background: #060b14; border: 1px solid var(--border); border-radius: 12px;
+      padding: 14px 16px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px;
+      color: #e2e8f0; white-space: pre-wrap; word-break: break-all;
+    }
+    .serial-log {
+      background: #050912; border: 1px solid var(--border); border-radius: 10px; padding: 12px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: #94a3b8;
+      max-height: 150px; overflow-y: auto; white-space: pre-wrap; display: none;
+    }
+    .serial-log.show { display: block; }
+
+    .keys-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    @media (max-width: 560px) { .keys-grid { grid-template-columns: 1fr; } }
+    .key-tile {
+      background: var(--card-alt); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px;
+    }
+    .key-tile b { display: block; font-size: 14px; margin-bottom: 4px; color: var(--sky); }
+    .key-tile span { font-size: 12.5px; color: var(--muted); }
+
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="topbar">
+      <div class="brand">
+        <div class="brand-icon">🪪</div>
+        <div>
+          <h1>连接 FoloToy AI Passport</h1>
+          <p>新手 3 步配对向导 · 自动识别电脑地址与设备令牌</p>
+        </div>
+      </div>
+      <div class="status-pill" id="hubStatusPill">
+        <span class="dot" id="hubDot"></span>
+        <span id="hubStatusText">正在检查控制台连接...</span>
+      </div>
+    </div>
+
+    <!-- Login Card (shown only when not authenticated yet) -->
+    <div class="card hidden" id="authCard">
+      <div class="step-head">
+        <span class="step-num">🔑</span>
+        <h2>先解锁本机控制台</h2>
+      </div>
+      <p class="muted">把电脑终端里显示的 <b>6 位配对码</b>（例如 <code>482910</code>）或控制台密码粘到这里即可，登录状态会自动记住。</p>
+      <div class="field-row">
+        <input id="authInput" type="password" placeholder="输入 6 位配对码或 HUB_TOKEN（例如：482910）" />
+        <button class="primary" id="authBtn">解锁并继续</button>
+      </div>
+      <div class="hint err hidden" id="authErr"></div>
+    </div>
+
+    <!-- Main Wizard -->
+    <div id="wizardWrap" class="hidden" style="display:flex;flex-direction:column;gap:18px;">
+      <!-- Step 1 -->
+      <div class="card">
+        <div class="step-head">
+          <span class="step-num">1</span>
+          <h2>把固件刷进 AI Passport（已刷好可跳过）</h2>
+        </div>
+        <p class="muted">用支持数据传输的 USB-C 数据线把开机的 AI Passport 插到这台电脑上。还没刷固件的话，点击下方链接一键刷入「口袋代理」固件：</p>
+        <div class="btn-row">
+          <a class="btn" href="https://ai-passport.folotoy.cn/plays/ai-59/" target="_blank" rel="noopener">🌐 打开社区作品页一键刷机</a>
+          <a class="btn" href="https://ai-passport.folotoy.cn/tools/web-flasher/" target="_blank" rel="noopener">⚡ 打开官方网页刷机工具</a>
+          <a class="btn" href="/" target="_blank" rel="noopener">📱 打开 PocketAgents 控制台</a>
+        </div>
+      </div>
+
+      <!-- Step 2 -->
+      <div class="card">
+        <div class="step-head">
+          <span class="step-num">2</span>
+          <h2>填写 Wi-Fi，一键写入设备（免敲串口命令）</h2>
+        </div>
+
+        <div class="hint">
+          ⚠️ <b>新手最容易踩坑的两件事：</b>① AI Passport 仅支持 <b>2.4GHz Wi-Fi</b>（不支持 5GHz）；② 控制台地址不能填 <code>localhost</code> 或 <code>127.0.0.1</code>，下方已自动帮你选好了局域网地址。
+        </div>
+
+        <div class="grid">
+          <label>
+            2.4GHz Wi-Fi 名称（SSID）
+            <input id="wifiSsid" type="text" placeholder="例如：MyHome_2.4G" autocomplete="off" />
+            <span class="ex">区分大小写，不能选带 _5G 的 Wi-Fi</span>
+          </label>
+          <label>
+            Wi-Fi 密码
+            <div class="field-row">
+              <input id="wifiPass" type="password" placeholder="例如：12345678（无密码留空）" autocomplete="off" />
+              <button type="button" id="toggleWifiPass" style="padding:0 12px;">👁</button>
+            </div>
+            <span class="ex">仅通过本地 USB 写进设备，绝不上传云端</span>
+          </label>
+        </div>
+
+        <div class="grid">
+          <label>
+            电脑控制台地址（已自动识别）
+            <div class="field-row">
+              <input id="hubUrlInput" type="text" placeholder="例如：http://192.168.1.25:8788" />
+            </div>
+            <select id="hubUrlSelect" class="hidden" style="margin-top:4px;"></select>
+            <span class="ex" id="hubUrlHint">和设备连同一个 Wi-Fi 时的电脑局域网地址</span>
+          </label>
+          <label>
+            专属设备令牌（可随时在手机端吊销）
+            <div class="field-row">
+              <input id="deviceTokenInput" type="password" placeholder="点右侧按钮自动生成 dev_..." />
+              <button type="button" id="toggleDevToken" style="padding:0 12px;">👁</button>
+            </div>
+            <div class="btn-row" style="margin-top:4px;">
+              <button type="button" class="sky" id="mintTokenBtn">✨ 一键生成专属令牌</button>
+            </div>
+          </label>
+        </div>
+
+        <div class="hint err hidden" id="formWarn"></div>
+
+        <div class="btn-row" style="margin-top:4px;">
+          <button type="button" class="primary" id="usbWriteBtn">🔌 连接 USB 一键写入设备</button>
+          <button type="button" id="copyCmdBtn">📋 复制两行完整命令</button>
+          <a class="btn" href="https://tool.folotoy.cn/" target="_blank" rel="noopener">🛠 去 tool.folotoy.cn 手动发送</a>
+        </div>
+
+        <div class="hint ok hidden" id="usbStatus"></div>
+        <div class="serial-log" id="serialLog"></div>
+
+        <div>
+          <p class="muted" style="margin-bottom:6px;"><b>兜底方式 / 命令示例</b>（Safari 用户或想手动配网时，把下面两行直接粘进 <code>tool.folotoy.cn</code> 串口发送）：</p>
+          <div class="code-box" id="cmdPreview">pa wifi MyHome_2.4G 12345678
+pa set http://192.168.1.25:8788 dev_请先点上方一键生成令牌</div>
+        </div>
+      </div>
+
+      <!-- Step 3 -->
+      <div class="card">
+        <div class="step-head">
+          <span class="step-num">3</span>
+          <h2>确认设备上线 &amp; 3 个按键怎么用</h2>
+        </div>
+
+        <div class="hint" id="liveDetectBox">
+          ⏳ 正在监听设备连入... 写入配置后约 3～5 秒，AI Passport 顶部圆点会变绿，这里也会自动变绿提示上线。
+        </div>
+
+        <div class="keys-grid">
+          <div class="key-tile">
+            <b>↑ / ↓ 短按</b>
+            <span>切换待批卡片、在多选题里移动选项，或在总览页翻看任务</span>
+          </div>
+          <div class="key-tile">
+            <b>OK 短按</b>
+            <span>放行普通审批 / 提交选中的多选方案 / 高危操作时弹出 3 位确认码</span>
+          </div>
+          <div class="key-tile">
+            <b>↓ 长按（或双击 OK）</b>
+            <span>干脆拒绝当前审批（高危操作也能直接长按 ↓ 拦下来）</span>
+          </div>
+          <div class="key-tile">
+            <b>OK 长按说话</b>
+            <span>任意页面按住对讲（查进度、语音放行或报出 3 位高危码），松开发送</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const TOKEN_KEY = 'dsh_hub_token';
+    const $ = id => document.getElementById(id);
+
+    let hubToken = '';
+    let pollTimer = null;
+    let mintedToken = '';
+
+    function getHeaders(extra = {}) {
+      const h = { ...extra };
+      if (hubToken) h['x-hub-token'] = hubToken;
+      return h;
+    }
+
+    function updateCmdPreview() {
+      const ssid = $('wifiSsid').value.trim() || 'MyHome_2.4G';
+      const pass = $('wifiPass').value;
+      const url = $('hubUrlInput').value.trim() || 'http://192.168.1.25:8788';
+      const tok = $('deviceTokenInput').value.trim() || 'dev_请先点上方一键生成令牌';
+      const wifiLine = pass ? `pa wifi ${ssid} ${pass}` : `pa wifi ${ssid}`;
+      const setLine = `pa set ${url} ${tok}`;
+      $('cmdPreview').textContent = `${wifiLine}\n${setLine}`;
+
+      const warn = $('formWarn');
+      if (/\/\/(localhost|127\.0\.0\.1)(:|\/|$)/i.test(url)) {
+        warn.textContent = '⚠️ 控制台地址不能是 localhost / 127.0.0.1（设备在 Wi-Fi 里找不到它），请改用上方下拉里的 192.168.x.x 局域网地址。';
+        warn.classList.remove('hidden');
+      } else {
+        warn.classList.add('hidden');
+      }
+    }
+
+    async function refreshSetupInfo() {
+      try {
+        const res = await fetch('/api/device/setup-info', { headers: getHeaders() });
+        if (res.status === 401 || res.status === 403) {
+          showAuthCard();
+          return false;
+        }
+        const data = await res.json();
+        if (!data.ok) return false;
+
+        $('hubDot').className = 'dot ok';
+        $('hubStatusText').textContent = `控制台已连接 · ${data.onlineHostsCount} 台电脑在线 · ${data.pendingCount} 条待批`;
+
+        if (!$('hubUrlInput').value.trim() && data.recommendedUrl) {
+          $('hubUrlInput').value = data.recommendedUrl;
+        }
+        const sel = $('hubUrlSelect');
+        if (Array.isArray(data.candidateUrls) && data.candidateUrls.length > 1) {
+          if (sel.options.length !== data.candidateUrls.length) {
+            sel.innerHTML = '';
+            for (const c of data.candidateUrls) {
+              const opt = document.createElement('option');
+              opt.value = c.url;
+              opt.textContent = `${c.url}  —  ${c.label}`;
+              sel.appendChild(opt);
+            }
+          }
+          sel.classList.remove('hidden');
+        }
+
+        const box = $('liveDetectBox');
+        if (Array.isArray(data.recentDevices) && data.recentDevices.length > 0) {
+          const d = data.recentDevices[0];
+          const ago = d.agoSec <= 3 ? '刚刚同步' : `${d.agoSec} 秒前同步`;
+          box.className = 'hint ok';
+          box.textContent = '';
+          const bEl = document.createElement('b');
+          bEl.textContent = '🎉 已检测到你的 AI Passport 上线！';
+          const codeEl = document.createElement('code');
+          codeEl.textContent = String(d.ip || '');
+          box.append(
+            bEl,
+            `（设备：${String(d.deviceName || 'AI Passport')} · IP: `,
+            codeEl,
+            ` · ${ago}）现在就可以拔掉数据线随身使用啦！`
+          );
+        } else {
+          box.className = 'hint';
+          box.textContent = '⏳ 正在监听设备连入... 写入配置后约 3～5 秒，AI Passport 顶部圆点会变绿，这里也会自动变绿提示上线。';
+        }
+        updateCmdPreview();
+        return true;
+      } catch {
+        $('hubDot').className = 'dot err';
+        $('hubStatusText').textContent = '无法连接本地控制台';
+        return false;
+      }
+    }
+
+    function showAuthCard(msg = '') {
+      $('authCard').classList.remove('hidden');
+      $('wizardWrap').classList.add('hidden');
+      $('hubDot').className = 'dot';
+      $('hubStatusText').textContent = '需要配对码解锁';
+      if (msg) {
+        $('authErr').textContent = msg;
+        $('authErr').classList.remove('hidden');
+      }
+    }
+
+    async function enterWizard() {
+      $('authCard').classList.add('hidden');
+      $('wizardWrap').classList.remove('hidden');
+      const ok = await refreshSetupInfo();
+      if (ok && !mintedToken && !$('deviceTokenInput').value.trim()) {
+        await mintDedicatedToken(true);
+      }
+      if (!pollTimer) {
+        pollTimer = setInterval(refreshSetupInfo, 2500);
+      }
+    }
+
+    async function mintDedicatedToken(silent = false) {
+      const btn = $('mintTokenBtn');
+      btn.disabled = true;
+      try {
+        const res = await fetch('/api/device/mint-token', {
+          method: 'POST',
+          headers: getHeaders({ 'content-type': 'application/json' }),
+          body: JSON.stringify({ deviceName: 'FoloToy AI Passport' }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) {
+          if (!silent) alert(data.error || '生成设备令牌失败');
+          return;
+        }
+        if (data.noAuthRequired) {
+          $('deviceTokenInput').value = '';
+          $('deviceTokenInput').placeholder = '当前控制台未设密码，无需令牌';
+        } else {
+          mintedToken = data.token;
+          $('deviceTokenInput').value = data.token;
+        }
+        updateCmdPreview();
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    async function unlockWithInput() {
+      const raw = $('authInput').value.trim();
+      if (!raw) return;
+      $('authErr').classList.add('hidden');
+      // Try 6-digit pairing code first if looks like short code
+      if (/^[A-Za-z0-9]{4,10}$/.test(raw) && !raw.startsWith('dev_')) {
+        const ex = await fetch('/api/pairing/exchange', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ code: raw, deviceName: 'AI Passport 配对向导' }),
+        });
+        const exData = await ex.json().catch(() => ({}));
+        if (ex.ok && exData.ok && exData.token) {
+          hubToken = exData.token;
+          localStorage.setItem(TOKEN_KEY, hubToken);
+          await enterWizard();
+          return;
+        }
+      }
+      // Otherwise verify as HUB_TOKEN or dev_ token via x-hub-token header
+      const vr = await fetch('/api/auth/verify', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-hub-token': raw },
+        body: JSON.stringify({ deviceName: 'AI Passport 配对向导' }),
+      });
+      const vData = await vr.json().catch(() => ({}));
+      if (vr.ok && vData.ok) {
+        hubToken = vData.deviceToken || raw;
+        localStorage.setItem(TOKEN_KEY, hubToken);
+        await enterWizard();
+      } else {
+        showAuthCard(vData.error || '配对码或密码不正确，请核对电脑终端里的输出。');
+      }
+    }
+
+    function appendLog(line) {
+      const el = $('serialLog');
+      el.classList.add('show');
+      el.textContent += line;
+      el.scrollTop = el.scrollHeight;
+    }
+
+    async function writeViaWebSerial() {
+      const ssid = $('wifiSsid').value.trim();
+      const pass = $('wifiPass').value;
+      const url = $('hubUrlInput').value.trim();
+      const tok = $('deviceTokenInput').value.trim();
+
+      if (!ssid) {
+        alert('请先填写 2.4GHz Wi-Fi 名称！');
+        $('wifiSsid').focus();
+        return;
+      }
+      if (!url) {
+        alert('请先填写电脑控制台地址！');
+        $('hubUrlInput').focus();
+        return;
+      }
+      if (!('serial' in navigator)) {
+        const st = $('usbStatus');
+        st.className = 'hint err';
+        st.textContent = '当前浏览器不支持网页 USB 串口（推荐使用 Chrome 或 Edge）。你可以直接点右侧「复制两行完整命令」去 tool.folotoy.cn 粘贴发送。';
+        st.classList.remove('hidden');
+        return;
+      }
+
+      const btn = $('usbWriteBtn');
+      const st = $('usbStatus');
+      btn.disabled = true;
+      st.className = 'hint';
+      st.textContent = '🔌 请在浏览器弹出的窗口里选择 AI Passport（通常名为 USB JTAG/serial debug unit）...';
+      st.classList.remove('hidden');
+      $('serialLog').textContent = '';
+
+      let port = null;
+      let reader = null;
+      let writer = null;
+      try {
+        port = await navigator.serial.requestPort();
+        await port.open({ baudRate: 115200 });
+        st.textContent = '⚡ 串口已连接，正在写入 Wi-Fi 与 PocketAgents 控制台配置...';
+
+        const decoder = new TextDecoderStream();
+        const readableClosed = port.readable.pipeTo(decoder.writable).catch(() => {});
+        reader = decoder.readable.getReader();
+
+        const readLoop = (async () => {
+          try {
+            while (true) {
+              const { value, done } = await reader.read();
+              if (done) break;
+              if (value) appendLog(value);
+            }
+          } catch { }
+        })();
+
+        const encoder = new TextEncoder();
+        writer = port.writable.getWriter();
+        const wifiCmd = pass ? `pa wifi ${ssid} ${pass}\r\n` : `pa wifi ${ssid}\r\n`;
+        const setCmd = tok ? `pa set ${url} ${tok}\r\n` : `pa set ${url}\r\n`;
+
+        appendLog(`> pa wifi ${ssid} ${pass ? '********' : '(open)'}\n`);
+        await writer.write(encoder.encode(wifiCmd));
+        await new Promise(r => setTimeout(r, 350));
+
+        appendLog(`> pa set ${url} ${tok ? tok.slice(0, 10) + '...' : '(no-token)'}\n`);
+        await writer.write(encoder.encode(setCmd));
+        await new Promise(r => setTimeout(r, 2200));
+
+        st.className = 'hint ok';
+        st.textContent = '✅ 已写入设备！请看 AI Passport 屏幕（约 3～5 秒顶部圆点变绿），下方第 3 步也会自动检测上线状态。';
+
+        try { await reader.cancel(); } catch { }
+        await readableClosed;
+        await readLoop;
+      } catch (err) {
+        st.className = 'hint err';
+        st.textContent = `❌ USB 写入未完成：${err?.message || err}（确认数据线支持数据传输，且没有其他窗口占用串口）`;
+      } finally {
+        try { writer?.releaseLock(); } catch { }
+        try { reader?.releaseLock(); } catch { }
+        try { await port?.close(); } catch { }
+        btn.disabled = false;
+      }
+    }
+
+    // Wire events
+    $('authBtn').addEventListener('click', unlockWithInput);
+    $('authInput').addEventListener('keydown', e => { if (e.key === 'Enter') unlockWithInput(); });
+    $('mintTokenBtn').addEventListener('click', () => mintDedicatedToken(false));
+    $('usbWriteBtn').addEventListener('click', writeViaWebSerial);
+    $('hubUrlSelect').addEventListener('change', e => {
+      $('hubUrlInput').value = e.target.value;
+      updateCmdPreview();
+    });
+    for (const id of ['wifiSsid', 'wifiPass', 'hubUrlInput', 'deviceTokenInput']) {
+      $(id).addEventListener('input', updateCmdPreview);
+    }
+    $('toggleWifiPass').addEventListener('click', () => {
+      const el = $('wifiPass');
+      el.type = el.type === 'password' ? 'text' : 'password';
+    });
+    $('toggleDevToken').addEventListener('click', () => {
+      const el = $('deviceTokenInput');
+      el.type = el.type === 'password' ? 'text' : 'password';
+    });
+    $('copyCmdBtn').addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText($('cmdPreview').textContent);
+        const btn = $('copyCmdBtn');
+        const old = btn.textContent;
+        btn.textContent = '✅ 已复制两行命令';
+        setTimeout(() => { btn.textContent = old; }, 1800);
+      } catch {
+        alert('复制失败，请手动选中下方命令框复制。');
+      }
+    });
+
+    // Boot: auto-exchange ?pair= code or reuse localStorage token
+    (async () => {
+      const params = new URLSearchParams(location.search);
+      const pairCode = (params.get('pair') || '').trim();
+      if (pairCode) {
+        history.replaceState({}, '', location.pathname);
+        try {
+          const ex = await fetch('/api/pairing/exchange', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ code: pairCode, deviceName: 'AI Passport 配对向导' }),
+          });
+          const exData = await ex.json().catch(() => ({}));
+          if (ex.ok && exData.ok && exData.token) {
+            hubToken = exData.token;
+            localStorage.setItem(TOKEN_KEY, hubToken);
+          }
+        } catch { }
+      }
+      if (!hubToken) {
+        hubToken = localStorage.getItem(TOKEN_KEY) || '';
+      }
+      const ok = await refreshSetupInfo();
+      if (ok) {
+        await enterWizard();
+      } else {
+        showAuthCard();
+      }
+    })();
+  </script>
+</body>
+</html>
