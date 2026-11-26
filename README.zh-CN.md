@@ -2,7 +2,7 @@
   <img src="docs/assets/hero-banner-zh.svg" alt="PocketAgents — 手机遥控 Claude Code、OpenAI Codex、Antigravity IDE 与 DeepSeek Harness" width="100%" />
 
   <p align="center">
-    <strong>PocketAgents</strong> —— <strong>把电脑上正在跑的 <a href="#支持的-ai-编程工具">Claude Code、OpenAI Codex、Antigravity IDE、DeepSeek Harness (DSH) 与 WorkBuddy</a> 装进手机口袋 —— 100% 开源自托管、零第三方中继。<br/>手机滑卡批阅、戴耳机全屏 <code>🎧 随行语音总管</code> 边走边指挥、文件/Markdown 增强导出，并支持零信任「手机审批门禁」。</strong>
+    <strong>PocketAgents</strong> —— <strong>把电脑上正在跑的 <a href="#支持的-ai-编程工具">Claude Code、OpenAI Codex、Antigravity IDE、DeepSeek Harness (DSH) 与 WorkBuddy</a> 装进手机口袋 —— 100% 开源自托管、零第三方中继。<br/>手机滑卡批阅、<code>🎧 边走边听 (Beta)</code> 随行语音总管与悬浮迷你条、统一 BYOK 模型池独立调度、文件/Markdown 增强导出，并支持零信任「手机审批门禁」。</strong>
   </p>
 
   <p align="center">
@@ -32,7 +32,7 @@ npx pocketagents
   </p>
 
   <p align="center">
-    <a href="./README.md">🇺🇸 English</a> · <strong>🇨🇳 简体中文</strong> · <a href="https://pocketagents.agentrun.vip/?demo=1&amp;lang=zh">✨ 在线 Demo</a> · <a href="#三步快速上手">4G/5G 跨网部署</a> · <a href="#支持的-ai-编程工具">支持工具</a> · <a href="#最近版本更新记录">版本更新</a> · <a href="#常见问题">常见问题</a>
+    <a href="./README.md">🇺🇸 English</a> · <strong>🇨🇳 简体中文</strong> · <a href="https://pocketagents.agentrun.vip/?demo=1&amp;lang=zh">✨ 在线 Demo</a> · <a href="#三步快速上手">4G/5G 跨网部署</a> · <a href="#支持的-ai-编程工具">支持工具</a> · <a href="#ai-能力架构与-beta-功能说明">AI 与 Beta 说明</a> · <a href="#最近版本更新记录">版本更新</a> · <a href="#常见问题">常见问题</a>
   </p>
 </div>
 
@@ -72,7 +72,7 @@ npx pocketagents
 - **出门在外两眼一抹黑**：下楼买咖啡、在地铁上或躺在沙发上时，想看一眼任务跑完没有、按住语音像发微信一样说一句补充指令、传一张手机截图，或者发现跑偏了立即叫停。
 - **多台电脑来回切**：公司一台 Mac、家里两台 Mac mini 都在跑任务，想在一个手机页面里统一看管。
 
-**PocketAgents** 把你电脑上正在跑的 AI 编程会话装进手机浏览器里 —— 内置**微信同款「按住说话」语音转文字**、**`🔊 播报` 纯算法一键听回复**、可选 **BYOK `🎧 全屏 OLED 随行耳机模式`**（自由混搭豆包 / Gemini / DeepSeek / OpenAI 兼容耳朵、大脑与嘴巴，高危命令自带 1ms 3 位语音确认码护栏）、**零信任手机审批门禁与入侵推送告警**，支持 iOS 16.4+ 添加到主屏幕开启原生锁屏推送与中英文自动切换。
+**PocketAgents** 把你电脑上正在跑的 AI 编程会话装进手机浏览器里 —— 内置**微信同款「按住说话」语音转文字与 `🔊 播报` 听回复**（支持**聊天语音**独立选配模型）、统一的 BYOK **「AI 模型与供应商」** 全局池（自由接入火山豆包 ASR 2.0 / TTS 3.0、Gemini、DeepSeek、OpenAI 兼容接口）、可选 **`🎧 边走边听 (Beta)`**（带可收起悬浮迷你条与高危命令 1ms 3 位语音确认码护栏）与 **`🎯 目标副驾插件 (Beta)`**、**零信任手机审批门禁与入侵推送告警**，支持 iOS 16.4+ 添加到主屏幕开启原生锁屏推送与中英文自动切换。
 
 ---
 
@@ -221,11 +221,38 @@ HUB_TOKEN="自定义一个安全密码" \
 | AI 编程工具 | 手机看实时进度 | 新建 / 续聊发指令 | 紧急停止 | 手机批准命令与多选题弹窗 | 运行中实时插话 |
 | :--- | :---: | :---: | :---: | :---: | :---: |
 | **DeepSeek Harness (DSH)** | ✅ | ✅ | ✅ | ✅ *(支持命令审批 + `ask_user_question` 多选卡 + 方案确认卡)* | ✅ |
-| **Antigravity IDE** | ✅ | ✅ | ✅ | ✅ *(Connect-RPC + 原生按键注入)* | ✅ |
+| **Antigravity IDE** | ✅ | ✅ *(Connect-RPC + 官方 `agy` ACP 桥接)* | ✅ | ✅ *(Connect-RPC + `agy` ACP + 原生按键兜底)* | ✅ |
 | **OpenAI Codex** | ✅ | ✅ *(`codex app-server` + `codex exec` 兜底)* | ✅ | ✅ *(通过 `app-server` JSON-RPC 支持命令审批与提问卡)* | ✅ |
 | **Tencent WorkBuddy** | ✅ | ✅ *(ACP HTTP+SSE)* | ✅ | ✅ *(支持 ACP 权限确认弹窗)* | ✅ |
 | **Claude Code** | ✅ | ✅ *(通过 `claude --resume`)* | ✅ | ✅ *(官方 `PermissionRequest` Hook：支持 Bash、Edit、Write、MCP 与 `AskUserQuestion`)* | — |
 | **豆包电脑版 (`Doubao Desktop`)** | ✅ *(只读观测)* | — | — | — | — |
+
+---
+
+<a id="ai-能力架构与-beta-功能说明"></a>
+## AI 能力架构与 Beta 功能说明
+
+随着 AI 辅助能力持续增加，PocketAgents 在 **设置 → AI 与功能** 中将「模型凭证管理」与「具体业务功能」彻底解耦：
+
+- **全局统一「AI 模型与供应商」池**：所有 BYOK 密钥只需维护一份（支持 Google Gemini、火山豆包 Seed-ASR 2.0 / Seed-TTS 3.0、DeepSeek、方舟 Ark、OpenAI、OpenRouter、Ollama 等，AES-256-GCM 本地加密存储），支持页内一键连通性探测，并在每张供应商卡片上清晰标注当前已被哪些功能调用。
+- **独立「聊天语音」配置**：聊天输入框的语音听写（STT）与消息朗读（`🔊 播报` TTS）与随行模式完全解耦，可各自独立指定模型 —— 例如听写选 **火山豆包 ASR**、朗读选 **火山 TTS 3.0**，或任一项保持手机免费原生语音。
+- **`🎧 边走边听 (Beta)`**：自适应浅色 / 深色 / 跟随系统的极简语音总管，支持 Apple Music 风格可折叠**悬浮迷你条**（开启后可随时收起去浏览会话、看代码，后台播报不中断）、3 档播报详略度（`详细播报` / `原文直读` / `极简播报`），以及高危命令 1ms 确定性 3 位语音确认码（`L2`）护栏。
+- **`🎯 目标副驾插件 (Beta)`**：可选插拔式外部监督与目标复核插件桥接（关闭时零性能与界面占用），用于长任务自动跟进与结果把关。
+
+> [!IMPORTANT]
+> **关于「边走边听 (Beta)」—— Web 端权限限制与完整 iOS 客户端说明**
+>
+> 受限于手机浏览器沙盒与 iOS 系统后台挂起策略，**纯 Web / Safari 添加到主屏幕端**在锁屏状态、或切去其他 App 刷视频/听歌时，系统可能会暂停后台音频会话、限制压低其他 App 音量混音，或拦截后台麦克风唤醒权限。
+>
+> **「边走边听 (Beta)」的完整免手操体验**（锁屏/后台静默唤醒播报、看视频时自动压低混音并恢复、点推送直达语音回复）目前运行在我们私有的**原生 iOS 伴侣 App** 上（本开源仓库仅包含 Web / 控制台 / 电脑端代码，未上传 iOS 客户端工程）。
+>
+> 👉 **如果你需要体验完整版原生 iOS 客户端（TestFlight / 内测）**，欢迎直接在 [GitHub Issues](https://github.com/oscarka/pocketagents/issues) 或 [Discussions](https://github.com/oscarka/pocketagents/discussions) 留言告诉我们！
+
+### 使用与部署注意事项
+
+- **语音与推送需 HTTPS**：手机浏览器在局域网明文 `http://192.168.x.x` 下会拦截麦克风授权（`getUserMedia`）与 iOS 主屏幕 Web Push 推送。同一 Wi-Fi 下 `npx pocketagents` 可直接体验审批与对话；如需完整语音输入和锁屏推送，请通过 HTTPS 部署（如 Railway 一键部署、Cloudflare Tunnel 或自有反向代理）。
+- **Antigravity IDE 2.0（`agy` ACP 协议）**：已适配 Antigravity 2.0 官方 `agy` CLI 的 ACP 桥接，并在手机设置中支持一键安装 `agy CLI`。若电脑端 IDE 已提前打开了某个旧标签页，在手机远程回复后回到电脑只需切换一下标签或刷新窗口即可同步最新内容。
+- **安全与电量/费用建议**：公网部署请务必设置高强度 `HUB_TOKEN` 并在手机设置中开启 **「新设备 / 新电脑接入需我手机审批」**；语音审批建议保持 **L2 高危 3 位语音确认码**开启；长时间开启「边走边听 (Beta)」持续收音与云端播报会产生额外耗电与模型 API 调用费用，不用时点结束即可彻底释放。
 
 ---
 
@@ -235,6 +262,26 @@ HUB_TOKEN="自定义一个安全密码" \
 > 💡 按**自然日**折叠汇总，每条内保留完整子版本号；逐版本详细变更请见 [`CHANGELOG.md`](CHANGELOG.md)。
 
 <details open>
+<summary><strong><code>2026-11-25 – 2026-11-26 · v0.9.15–v0.9.41</code> — 模型池与功能彻底解耦、边走边听 (Beta) 悬浮迷你条、Antigravity 2.0 <code>agy</code> ACP 桥接与火山 3.0</strong></summary>
+
+- **全局模型池与功能解耦、聊天语音独立配置 &amp; `(Beta)` 标识（`v0.9.41`）**：
+  - 设置页重构为 **「AI 与功能」**（`AI 模型与供应商`、`边走边听 (Beta)`、`聊天语音`、`目标副驾插件 (Beta)`）与 **「通知与通用」**（`锁屏通知`、`外观`、`语言`）两大分组；
+  - 将所有 API 密钥收归单一全局 **「AI 模型与供应商」** 池（卡片直观展示 `随行·听/想/说` 与 `聊天·听/说` 使用角标），彻底移除聊天语音对随行模式的隐式绑定，新增独立 **「试听聊天朗读」**。
+- **边走边听 (Beta) 悬浮迷你条、豆包 TTS 后台优先播报与 3 档播报详略度（`v0.9.39–v0.9.40`）**：
+  - 将随行模式拆分为「模式运行态」与「全屏展开态」：点击左上角可收起为 Apple Music 风格**悬浮迷你条**（`#walkMiniBar`）并配合顶栏耳机快捷图标，开启后照常浏览聊天列表、代码与文件，后台播报不断流；
+  - 新增 3 档 **「播报详略度」**（`详细播报` 默认 140–280 字 / `原文直读` 不做二次浓缩 / `极简播报` 1–2 句）并将上下文窗口提升至 3200 字，同时支持云端 TTS 后台唤醒优先抢占与点推送直达语音回复。
+- **Antigravity IDE 2.0 官方 `agy` ACP 桥接、一键装 CLI 与极简自适应语音台（`v0.9.34–v0.9.38`）**：
+  - 接入 Antigravity IDE 2.0 官方 **`agy` ACP** 协议，支持手机端一键安装 `agy CLI`、能力协商、代理兼容、会话关闭防卡死及缺失降级提示横幅；
+  - 「边走边听」全新改版为自适应 **浅色 / 深色 / 跟随系统** 极简留白语音台（`v0.9.37`），并在不改动 Safari W3C Web Push 的前提下新增隔离推送通道（`v0.9.35`）。
+- **Apple 原生极简设置页、火山豆包 ASR 2.0 / TTS 3.0 与全英文覆盖（`v0.9.20–v0.9.33`）**：
+  - 设置页全面切换为 Apple 原生极简风（内联矢量 SVG 图标、协议优先统一供应商表单与页内连通性探测）；
+  - 接入 **火山豆包 Seed-ASR 2.0** 异步 `/submit + /query` 与 **Seed-TTS 3.0** HTTP 流式接口（`X-Api-Key`），修复 Node 20 Happy Eyeballs 导致方舟接口偶发超时、iOS Safari `AudioSession` 顺序、macOS LaunchAgent UTF-8 中文乱码、`run_workflow` 子会话隐藏及设置/语音全量英文翻译。
+- **`/api/state` 瘦身 ~60% 与断线秒连（`v0.9.15–v0.9.19`）**：
+  - 精简状态载荷约 60%，新增紧凑对话增量接口（`/transcript?compact=1`），强化 Service Worker 点击通知聚焦重试与 5 秒 SSE 极速重连。
+
+</details>
+
+<details>
 <summary><strong><code>2026-11-24 · v0.9.9–v0.9.14</code> — 随行模式听歌压低混音、多条审批防串台队列、主动摘要与选项播报</strong></summary>
 
 - **随行模式 `audioSession` 听歌混音、多条审批防串台队列与主动念摘要/选项（`v0.9.14`）**：
@@ -421,6 +468,18 @@ HUB_TOKEN="自定义一个安全密码" \
 <br/>
 • <strong>首次一次浏览器授权</strong>：WorkBuddy 桌面端通过系统钥匙串加密保存 GUI 登录态，因此守护进程为独立 CLI 隔离了专用 OAuth 凭证（<code>workbuddy-cli.info</code>），与桌面端互不顶号。首次从手机发消息时电脑会自动弹出浏览器授权页（也可在电脑运行 <code>node dsh-feishu/daemon.mjs --workbuddy-login</code> 提前完成），点一次「确认授权」即永久生效。<br/>
 • <strong>桌面端缓存刷新</strong>：手机收发的消息均实时写入 <code>~/.workbuddy/projects/</code> 与 <code>workbuddy.db</code>；若某个会话此前已在电脑 WorkBuddy 窗口点开过（受桌面端内存缓存机制影响），回到电脑前按 <code>Cmd + Q</code> 重开一次 WorkBuddy 桌面端即可完整加载手机期间的全部记录。
+</details>
+
+<details>
+<summary><strong>5. 为什么「边走边听 (Beta)」在 iPhone Web / Safari 锁屏或切去其他 App 看视频时会中断？怎么获取完整 iOS 端？</strong></summary>
+<br/>
+受限于 iOS 对移动浏览器及主屏幕 PWA 的后台沙盒与电源策略，纯 Web 端在锁屏或切换至其他视频/音频 App 时会被系统挂起后台音频与麦克风权限，无法稳定实现后台静默唤醒播报和跨 App 压低混音。完整的锁屏/后台随行体验目前由我们的私有原生 iOS 伴侣 App 提供（未开源上传至本仓库）。如果你需要完整版原生 iOS 客户端（TestFlight / 内测），欢迎在 <a href="https://github.com/oscarka/pocketagents/issues">GitHub Issues</a> 或 <a href="https://github.com/oscarka/pocketagents/discussions">Discussions</a> 留言反馈！
+</details>
+
+<details>
+<summary><strong>6. 为什么局域网 <code>http://192.168.x.x</code> 下用不了麦克风语音或锁屏推送？</strong></summary>
+<br/>
+现代手机浏览器对非 <code>localhost</code> 的明文 <code>http://</code> 网址强制禁用了麦克风权限（<code>getUserMedia</code>）和 Web Push 推送注册。同一 Wi-Fi 下用 <code>npx pocketagents</code> 可零配置秒开文字对话与审批；如需语音听写、边走边听 (Beta) 与锁屏推送，请通过 HTTPS 域名部署（如 Railway 一键部署、Cloudflare Tunnel 或自有 Nginx + TLS 证书）。
 </details>
 
 ---

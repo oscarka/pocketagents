@@ -2,7 +2,7 @@
   <img src="docs/assets/hero-banner-en.svg" alt="PocketAgents — Control Claude Code, OpenAI Codex, Antigravity IDE &amp; DeepSeek Harness from your phone" width="100%" />
 
   <p align="center">
-    <strong>PocketAgents</strong> — <strong>Control <a href="#supported-ai-coding-tools">Claude Code, OpenAI Codex, Antigravity IDE, DeepSeek Harness (DSH) &amp; WorkBuddy</a> from your phone — 100% self-hosted, zero vendor relay.<br/>Swipe-approve shell commands, talk hands-free with <code>🎧 OLED Walking Voice Copilot</code>, export files/Markdown, and lock access behind Zero-Trust Phone Approval.</strong>
+    <strong>PocketAgents</strong> — <strong>Control <a href="#supported-ai-coding-tools">Claude Code, OpenAI Codex, Antigravity IDE, DeepSeek Harness (DSH) &amp; WorkBuddy</a> from your phone — 100% self-hosted, zero vendor relay.<br/>Swipe-approve shell commands, talk hands-free with <code>🎧 Walk Mode (Beta)</code>, manage a unified BYOK AI Model Pool, export files/Markdown, and lock access behind Zero-Trust Phone Approval.</strong>
   </p>
 
   <p align="center">
@@ -32,7 +32,7 @@ npx pocketagents
   </p>
 
   <p align="center">
-    <strong>🇺🇸 English</strong> · <a href="./README.zh-CN.md">🇨🇳 简体中文</a> · <a href="https://pocketagents.agentrun.vip/?demo=1&amp;lang=en">✨ Live Demo</a> · <a href="#get-started-in-3-steps">24/7 Cloud Setup</a> · <a href="#supported-ai-coding-tools">Supported Tools</a> · <a href="#whats-new">What's New</a> · <a href="#faq">FAQ</a>
+    <strong>🇺🇸 English</strong> · <a href="./README.zh-CN.md">🇨🇳 简体中文</a> · <a href="https://pocketagents.agentrun.vip/?demo=1&amp;lang=en">✨ Live Demo</a> · <a href="#get-started-in-3-steps">24/7 Cloud Setup</a> · <a href="#supported-ai-coding-tools">Supported Tools</a> · <a href="#ai-capabilities-and-beta-features">AI &amp; Beta</a> · <a href="#whats-new">What's New</a> · <a href="#faq">FAQ</a>
   </p>
 </div>
 
@@ -72,7 +72,7 @@ When you kick off a long refactoring, test suite, or deployment in **Claude Code
 - **No visibility on the go**: You want to check whether the task finished, hold-to-talk a quick voice instruction, attach a phone screenshot, or hit emergency stop while away from your desk.
 - **Multiple computers**: You have both an office Mac and home workstations running tasks and want one unified mobile view.
 
-**PocketAgents** puts all of your computers' AI coding sessions into a clean mobile web app — complete with **WeChat-style Hold-to-Talk voice**, **1-tap `🔊 Listen` reply playback**, an optional **BYOK `🎧 OLED Walking Headphones Mode`** (mix-and-match Gemini / Volcengine / DeepSeek / OpenAI-compatible STT, Brain &amp; TTS with a 1ms 3-digit PIN guard on destructive commands), **Zero-Trust Phone-Approved device/computer access**, iOS 16.4+ lock-screen push notifications, and automatic English/Chinese UI detection.
+**PocketAgents** puts all of your computers' AI coding sessions into a clean mobile web app — complete with **WeChat-style Hold-to-Talk voice &amp; 1-tap `🔊 Listen` reply playback** (with independent **Chat Voice** model selection), a shared BYOK **AI Models &amp; Providers** pool (Gemini / Volcengine Seed-ASR 2.0 &amp; Seed-TTS 3.0 / DeepSeek / OpenAI-compatible), an optional **`🎧 Walk Mode (Beta)`** with a collapsible Floating Mini Bar &amp; 1ms 3-digit PIN guard on destructive commands, optional **`🎯 Goal Copilot (Beta)`**, **Zero-Trust Phone-Approved device/computer access**, iOS 16.4+ lock-screen push notifications, and automatic English/Chinese UI detection.
 
 ---
 
@@ -221,11 +221,38 @@ The background daemon automatically discovers local sessions across all 6 suppor
 | AI Coding Tool | View Live Sessions | New / Resume Prompt | Emergency Stop | Mobile Approval & Question Popups | Live Mid-Run Steer |
 | :--- | :---: | :---: | :---: | :---: | :---: |
 | **DeepSeek Harness (DSH)** | ✅ | ✅ | ✅ | ✅ *(Shell approvals + `ask_user_question` / `exit_plan_mode` cards)* | ✅ |
-| **Antigravity IDE** | ✅ | ✅ | ✅ | ✅ *(Connect-RPC + native keystroke injection)* | ✅ |
+| **Antigravity IDE** | ✅ | ✅ *(Connect-RPC + official `agy` ACP bridge)* | ✅ | ✅ *(Connect-RPC + `agy` ACP + native keystroke fallback)* | ✅ |
 | **OpenAI Codex** | ✅ | ✅ *(`codex app-server` + `codex exec` fallback)* | ✅ | ✅ *(JSON-RPC approvals & question cards via `app-server`)* | ✅ |
 | **Tencent WorkBuddy** | ✅ | ✅ *(ACP HTTP+SSE)* | ✅ | ✅ *(ACP permission popups)* | ✅ |
 | **Claude Code** | ✅ | ✅ *(via `claude --resume`)* | ✅ | ✅ *(Native `PermissionRequest` Hook: Bash, Edit, Write, MCP &amp; `AskUserQuestion`)* | — |
 | **Doubao Desktop (`豆包电脑版`)** | ✅ *(Observe-only)* | — | — | — | — |
+
+---
+
+<a id="ai-capabilities-and-beta-features"></a>
+## AI Capabilities &amp; Beta Features
+
+As PocketAgents adds more AI-assisted workflows, model credentials and feature settings are cleanly decoupled under **Settings → AI &amp; Features**:
+
+- **Global AI Model Pool (`AI Models & Providers`)**: Add your BYOK API keys once (Google Gemini, Volcengine Doubao Seed-ASR 2.0 / Seed-TTS 3.0, DeepSeek, Ark, OpenAI, OpenRouter, Ollama, or any OpenAI-compatible endpoint — encrypted at rest with AES-256-GCM) with 1-tap inline connectivity probes and clear usage badges showing which features use each provider.
+- **Independent Chat Voice (`Chat Voice`)**: Configure chat hold-to-talk dictation (STT) and reply read-aloud (`🔊 Listen` TTS) independently from Walk Mode — for example, pairing **Volcengine Seed-ASR** for dictation and **Volcengine Seed-TTS 3.0** for playback, or keeping either on free device-native speech.
+- **`🎧 Walk Mode (Beta)`**: Hands-free listening, proactive spoken task briefings (`Detailed` / `Full Readout` / `Concise`), and voice command approvals with an adaptive Light/Dark/System UI, an Apple Music-style collapsible **Floating Mini Bar** (so you can keep browsing chats &amp; code while Walk Mode runs), and a 1ms 3-digit voice PIN guard (`L2`) on destructive shell commands.
+- **`🎯 Goal Copilot (Beta)`**: Optional plug-and-play external reviewer &amp; goal supervisor bridge for unattended long-running coding sessions (zero footprint when disabled).
+
+> [!IMPORTANT]
+> **Walk Mode `(Beta)` — Web vs. Full Native iOS Companion App**
+>
+> Due to mobile browser sandbox and OS power restrictions, **pure Web / Safari PWA** cannot reliably hold background audio sessions, duck foreground video/music apps, or silently wake the microphone while your screen is locked or while you switch to another app.
+>
+> The **complete hands-free Walk Mode experience** (background APNs silent wake, cross-app audio ducking while watching videos/listening to music, and lock-screen tap-to-reply voice focus) runs on our **private native iOS companion app** (not uploaded to this public web repository).
+>
+> 👉 **Want early access / TestFlight to the full native iOS companion app?** Leave a comment in [GitHub Issues](https://github.com/oscarka/pocketagents/issues) or [Discussions](https://github.com/oscarka/pocketagents/discussions) so we know there is demand!
+
+### Important Setup &amp; Usage Notes
+
+- **HTTPS Required for Mic &amp; Push**: Browsers block `getUserMedia` (hold-to-talk / Walk Mode mic) and iOS Home-Screen Web Push on plain `http://` LAN IPs. Same-Wi-Fi `npx pocketagents` works right away for approvals &amp; chat; for full voice and push notifications, deploy over HTTPS (Railway 1-click, Cloudflare Tunnel, or your own reverse proxy).
+- **Antigravity IDE 2.0 (`agy` ACP Bridge)**: PocketAgents integrates Antigravity IDE 2.0's official `agy` CLI ACP protocol (with 1-tap CLI installation from mobile Settings) alongside Connect-RPC. If a conversation tab was already open on your Mac while you sent replies from your phone, switch tabs or refresh the desktop window to reflect the latest remote messages.
+- **Security &amp; Cost Hygiene**: Always use a strong `HUB_TOKEN`, enable **Settings → Require Phone Approval** on public Hubs, keep the **L2 3-digit PIN** guard active for voice approvals, and remember that leaving Walk Mode running continuously with cloud ASR/TTS consumes extra battery and API quota.
 
 ---
 
@@ -235,6 +262,26 @@ The background daemon automatically discovers local sessions across all 6 suppor
 > 💡 Grouped **one drawer per day** with every exact version tag preserved inside; see [`CHANGELOG.md`](CHANGELOG.md) for granular per-release notes.
 
 <details open>
+<summary><strong><code>2026-11-25 – 2026-11-26 · v0.9.15–v0.9.41</code> — Decoupled AI Model Pool &amp; Chat Voice, Walk Mode (Beta) Floating Mini Bar, Antigravity 2.0 <code>agy</code> ACP Bridge &amp; Volcengine 3.0</strong></summary>
+
+- **Decoupled AI Model Pool, Independent Chat Voice &amp; `(Beta)` Feature Labels (`v0.9.41`)**:
+  - Split **Settings** into **AI &amp; Features** (`AI Models & Providers`, `Walk Mode (Beta)`, `Chat Voice`, `Goal Copilot (Beta)`) and **Notifications &amp; General** (`Lock-Screen Push`, `Appearance`, `Language`).
+  - Promoted API keys into a single shared **AI Models &amp; Providers** pool with per-feature usage pills (`Walk·STT/Brain/TTS`, `Chat·STT/TTS`), and made **Chat Voice** 100% independent from Walk Mode (removing implicit `Follow Walk Mode` coupling and adding an inline `Test Chat TTS` button).
+- **Walk Mode `(Beta)` Floating Mini Bar, Doubao TTS Priority &amp; 3-Tier Briefing Detail (`v0.9.39–v0.9.40`)**:
+  - Split Walk Mode into active mode vs. expanded canvas: tapping collapse minimizes Walk Mode into an Apple Music-style **Floating Mini Bar** (`#walkMiniBar`) with a TopBar headphone shortcut so you can browse sessions, code, and files while background briefings keep playing.
+  - Added 3 configurable **`Briefing Detail`** levels (`Detailed` default 140–280 chars / `Full Readout` direct verbatim read / `Concise` 1–2 sentences) with 3200-char transcript context, plus cloud TTS wake priority and lock-screen tap-to-reply voice focus hooks.
+- **Antigravity IDE 2.0 Official `agy` ACP Bridge, 1-Tap CLI Installer &amp; Adaptive Walk Mode UI (`v0.9.34–v0.9.38`)**:
+  - Added native support for Antigravity IDE 2.0's official **`agy` ACP** protocol with 1-tap mobile `agy CLI` installation, capability negotiation, proxy resilience, clean session-close handling, and a degraded-mode diagnostic banner when `agy` is missing.
+  - Redesigned Walk Mode into a clean adaptive **Light / Dark / System** minimalist voice canvas (`v0.9.37`) and added an isolated APNs push channel (`v0.9.35`) alongside Safari W3C Web Push (zero impact on existing Web Push).
+- **Apple-Native Settings Redesign, Volcengine Seed-ASR 2.0 / Seed-TTS 3.0 &amp; Full EN Localization (`v0.9.20–v0.9.33`)**:
+  - Rebuilt Settings in Apple-native minimalist style with inline vector SVG icons, protocol-first unified Provider forms, and inline connectivity probes.
+  - Added **Volcengine Seed-ASR 2.0** async `/submit + /query` transcription, **Volcengine Seed-TTS 3.0** HTTP streaming (`X-Api-Key`), Node 20 Happy Eyeballs IPv4/IPv6 fix for Ark APIs, iOS Safari `AudioSession` ordering fix before `getUserMedia`, LaunchAgent UTF-8 locale pinning (fixing CJK mojibake), `run_workflow` worker session hiding, and complete English UI coverage across Settings, Voice, and Walk Mode.
+- **60% Slimmer State Sync &amp; Faster Resume (`v0.9.15–v0.9.19`)**:
+  - Trimmed `/api/state` payloads by ~60%, added compact transcript polling (`/transcript?compact=1`), tightened Service Worker `notificationclick` focus retry, and sped up SSE reconnect to 5 seconds.
+
+</details>
+
+<details>
 <summary><strong><code>2026-11-24 · v0.9.9–v0.9.14</code> — Safari AudioSession Music-Ducking, Numbered Multi-Approval Voice Queue, Spoken Summaries &amp; Guided BYOK Setup</strong></summary>
 
 - **Walk Mode Music-Ducking, Anti-Mixup Numbered Voice Queue &amp; Proactive Spoken Summaries (`v0.9.14`)**:
@@ -421,6 +468,18 @@ Run <code>./connect-host.sh --uninstall</code> in the repo directory, or unload 
 <br/>
 • <strong>One-time CLI OAuth</strong>: WorkBuddy Desktop encrypts its GUI token via OS Keychain, so the daemon isolates a dedicated <code>workbuddy-cli</code> OAuth credential (<code>workbuddy-cli.info</code>) so neither side logs the other out. On your first mobile prompt (or via <code>node dsh-feishu/daemon.mjs --workbuddy-login</code>), click <strong>Authorize</strong> once in the browser window opened on your computer.<br/>
 • <strong>Desktop session cache</strong>: Mobile turns sync directly to <code>~/.workbuddy/projects/*.jsonl</code> and <code>workbuddy.db</code>. Because WorkBuddy Desktop caches already-opened conversations in memory without watching external file appends, quit and reopen WorkBuddy Desktop (<code>Cmd + Q</code>) when back at your Mac to view mobile turns inside previously opened tabs.
+</details>
+
+<details>
+<summary><strong>5. Why does Walk Mode (Beta) pause on lock screen or while switching to other apps on iOS Web/Safari? How can I get the full native iOS experience?</strong></summary>
+<br/>
+Mobile Safari and Home-Screen PWAs are restricted by iOS sandbox &amp; background power policies, which suspend background audio sessions, block cross-app audio ducking while watching videos in other apps, and restrict background microphone activation. The full hands-free lock-screen &amp; background audio-ducking experience runs on our private native iOS companion app (not uploaded to this public repository). If you would like early access / TestFlight to the full native iOS app, please leave a comment in <a href="https://github.com/oscarka/pocketagents/issues">GitHub Issues</a> or <a href="https://github.com/oscarka/pocketagents/discussions">Discussions</a>!
+</details>
+
+<details>
+<summary><strong>6. Why doesn't voice input or Web Push work on <code>http://192.168.x.x</code>?</strong></summary>
+<br/>
+Modern mobile browsers treat non-localhost <code>http://</code> origins as insecure contexts and block microphone permissions (<code>getUserMedia</code>) and Web Push subscriptions. Use <code>npx pocketagents</code> on same Wi-Fi for instant approvals &amp; chat, and deploy behind HTTPS (Railway 1-click, Cloudflare Tunnel, or Nginx + TLS) when you want mobile voice input, Walk Mode (Beta), and lock-screen push notifications.
 </details>
 
 ---
