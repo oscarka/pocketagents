@@ -6,7 +6,14 @@ export type WalkAudioSessionMode = 'ambient' | 'transient' | 'play-and-record' |
 export interface NativeAudioBridgeApi {
   platform?: string;
   version?: string;
-  setBackgroundKeepAlive?: (active: boolean, duckMusic?: boolean, keepMicWarm?: boolean) => Promise<boolean>;
+  setBackgroundKeepAlive?: (
+    active: boolean,
+    duckMusic?: boolean,
+    keepMicWarm?: boolean,
+    proactiveBriefing?: string,
+  ) => Promise<boolean>;
+  canAutoListenNow?: () => Promise<boolean>;
+  notifyBackgroundWakeDone?: () => Promise<boolean>;
   playBase64Audio?: (
     base64: string,
     mimeType?: string,
@@ -52,6 +59,7 @@ export async function setWalkBackgroundKeepAlive(
   active: boolean,
   duckMusic = true,
   keepMicWarm = false,
+  proactiveBriefing = 'approvals',
 ): Promise<boolean> {
   try {
     if (typeof window !== 'undefined') {
@@ -59,9 +67,39 @@ export async function setWalkBackgroundKeepAlive(
     }
     const bridge = getNativeAudioBridge();
     if (!bridge?.setBackgroundKeepAlive) return false;
-    return Boolean(await bridge.setBackgroundKeepAlive(Boolean(active), Boolean(duckMusic), Boolean(keepMicWarm)));
+    return Boolean(
+      await bridge.setBackgroundKeepAlive(
+        Boolean(active),
+        Boolean(duckMusic),
+        Boolean(keepMicWarm),
+        String(proactiveBriefing || 'approvals'),
+      ),
+    );
   } catch {
     return false;
+  }
+}
+
+export async function canNativeAutoListenNow(): Promise<boolean> {
+  try {
+    const bridge = getNativeAudioBridge();
+    if (!bridge?.canAutoListenNow) {
+      return typeof document === 'undefined' ? true : document.visibilityState !== 'hidden' || isNativeIosShell();
+    }
+    return Boolean(await bridge.canAutoListenNow());
+  } catch {
+    return false;
+  }
+}
+
+export function notifyNativeBackgroundWakeDone(): void {
+  try {
+    const bridge = getNativeAudioBridge();
+    if (bridge?.notifyBackgroundWakeDone) {
+      void bridge.notifyBackgroundWakeDone().catch(() => {});
+    }
+  } catch {
+    // ignore
   }
 }
 

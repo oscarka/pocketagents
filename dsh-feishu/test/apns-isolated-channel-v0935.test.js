@@ -55,8 +55,24 @@ test('v0.9.35 APNs provider JWT (ES256), sandbox/prod routing, payload, and HTTP
     data: { type: 'approval', hostId: 'mini', agentId: 'agy-ide:abc', code: 'AGY-1' },
   })
   assert.equal(payload.aps['interruption-level'], 'time-sensitive')
+  assert.equal(payload.aps['content-available'], 1)
   assert.equal(payload.aps.badge, 2)
   assert.equal(payload.dsh.agentId, 'agy-ide:abc')
+
+  const completedPayload = buildApnsPayload({
+    title: '✅ 任务已完成',
+    body: 'minihealth 测试完成',
+    data: { type: 'completed', hostId: 'air', agentId: 'agy-ide:xyz' },
+  })
+  assert.equal(completedPayload.aps['interruption-level'], 'active')
+  assert.equal(completedPayload.aps['content-available'], 1)
+
+  const infoPayload = buildApnsPayload({
+    title: '测试推送',
+    body: 'hello',
+    data: { type: 'test' },
+  })
+  assert.equal('content-available' in infoPayload.aps, false)
 
   // Mock HTTP/2 200 OK
   let capturedAuthority = ''
@@ -172,15 +188,23 @@ test('v0.9.35 HubCore keeps Safari Web Push 100% isolated from Native iOS APNs a
 })
 
 test('v0.9.35 Web UI isolates native APNs route from Safari Web Push and translates all new strings to EN', async () => {
-  const [controllerSrc, serverSrc] = await Promise.all([
+  const [controllerSrc, serverSrc, walkSheetsSrc, walkAudioSrc] = await Promise.all([
     readFile(resolve(process.cwd(), 'hub/web/src/controller.js'), 'utf8'),
     readFile(resolve(process.cwd(), 'hub/server.js'), 'utf8'),
+    readFile(resolve(process.cwd(), 'hub/web/src/components/VoiceCopilotSheets.tsx'), 'utf8'),
+    readFile(resolve(process.cwd(), 'hub/web/src/voice/walkAudio.ts'), 'utf8'),
   ])
   assert.match(serverSrc, /\/api\/push\/apns\/subscribe/)
   assert.match(serverSrc, /\/api\/push\/apns\/unsubscribe/)
   assert.match(serverSrc, /\/api\/push\/apns\/test/)
   assert.match(controllerSrc, /isNativeIosApnsBridge/)
   assert.match(controllerSrc, /__dshHandleNativePushTap/)
+  assert.match(controllerSrc, /__dshWalkStartReplyForPush/)
+  assert.match(walkSheetsSrc, /__dshOnBackgroundPushWake/)
+  assert.match(walkSheetsSrc, /__dshWalkStartReplyForPush/)
+  assert.match(walkSheetsSrc, /canNativeAutoListenNow/)
+  assert.match(walkAudioSrc, /canNativeAutoListenNow/)
+  assert.match(walkAudioSrc, /notifyNativeBackgroundWakeDone/)
 
   const zhStrings = [
     '当前运行在 PocketAgents iOS 原生 App 中，使用独立 Apple APNs 通道，与 Safari 网页推送完全隔离互不影响。',

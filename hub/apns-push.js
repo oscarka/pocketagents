@@ -128,21 +128,31 @@ export function buildApnsPayload(payloadObj = {}) {
   const title = String(payloadObj.title || 'PocketAgents 通知').slice(0, 120)
   const body = String(payloadObj.body || '').slice(0, 320)
   const badgeNum = Number(payloadObj.badgeCount)
+  const eventType = String(payloadObj.data?.type || 'info')
   const isUrgent = Boolean(
     payloadObj.requireInteraction
-    || payloadObj.data?.type === 'approval'
-    || payloadObj.data?.type === 'security',
+    || eventType === 'approval'
+    || eventType === 'security',
+  )
+  // Include content-available: 1 on actionable completion/approval/failure events so iOS
+  // wakes the native PocketAgents shell in background (~30s window) to duck foreground video
+  // and speak the Walk Mode briefing without draining battery via constant polling.
+  const wakeForWalkBriefing = (
+    eventType === 'approval'
+    || eventType === 'completed'
+    || eventType === 'failed'
   )
   const aps = {
     alert: { title, body },
     sound: 'default',
     ...(Number.isFinite(badgeNum) && badgeNum >= 0 ? { badge: Math.min(99, Math.floor(badgeNum)) } : {}),
+    ...(wakeForWalkBriefing ? { 'content-available': 1 } : {}),
     'interruption-level': isUrgent ? 'time-sensitive' : 'active',
   }
   return {
     aps,
     dsh: {
-      type: String(payloadObj.data?.type || 'info'),
+      type: eventType,
       hostId: String(payloadObj.data?.hostId || ''),
       agentId: String(payloadObj.data?.agentId || ''),
       code: String(payloadObj.data?.code || ''),

@@ -6,7 +6,9 @@ import {
   WalkSpeechPlayer,
   WalkWakeLockManager,
   bindWalkMediaSession,
+  canNativeAutoListenNow,
   isNativeIosShell,
+  notifyNativeBackgroundWakeDone,
   playEarcon,
   setWalkAudioSessionMode,
   setWalkBackgroundKeepAlive,
@@ -198,6 +200,7 @@ export function VoiceCopilotSheets() {
   const seenApprovalsRef = useRef<Set<string>>(new Set());
   const seenCompletedRef = useRef<Set<string>>(new Set());
   const focusedApprovalRef = useRef<{ hostId: string; code: string; slot?: number; announcedAt?: number } | null>(null);
+  const focusedSessionRef = useRef<{ hostId: string; agentId: string; title?: string; announcedAt: number } | null>(null);
   const briefingQueueRef = useRef<Array<{ kind: 'approval' | 'completed'; key: string; hostId: string; hostName: string; code?: string; agentId?: string; title?: string }>>([]);
   const drainingBriefingRef = useRef(false);
   const walkOpenRef = useRef(false);
@@ -258,6 +261,53 @@ export function VoiceCopilotSheets() {
       setLabOpen(false);
     };
     (window as any).__dshRefreshVoiceConfig = () => refreshConfig(true);
+    (window as any).__dshOnBackgroundPushWake = (_payload?: any) => {
+      if (!walkOpenRef.current) {
+        notifyNativeBackgroundWakeDone();
+        return false;
+      }
+      const fetchFn = (window as any).fetchState;
+      if (typeof fetchFn === 'function') {
+        void Promise.resolve(fetchFn({ silent: true, forceFresh: true }))
+          .catch(() => null)
+          .finally(() => {
+            setTimeout(() => {
+              if (
+                !drainingBriefingRef.current
+                && briefingQueueRef.current.length === 0
+                && walkPhaseRef.current === 'idle'
+              ) {
+                notifyNativeBackgroundWakeDone();
+              }
+            }, 900);
+          });
+        return true;
+      }
+      notifyNativeBackgroundWakeDone();
+      return false;
+    };
+    (window as any).__dshWalkStartReplyForPush = (payload?: any) => {
+      if (!walkOpenRef.current) return false;
+      const hostId = String(payload?.hostId || '').trim();
+      const agentId = String(payload?.agentId || '').trim();
+      const code = String(payload?.code || '').trim().toUpperCase();
+      if (hostId && agentId) {
+        focusedSessionRef.current = { hostId, agentId, announcedAt: Date.now() };
+      }
+      if (hostId && code) {
+        focusedApprovalRef.current = { hostId, code, announcedAt: Date.now() };
+      }
+      if (walkPhaseRef.current === 'speaking') {
+        playerRef.current?.stop();
+        setWalkPhase('idle');
+      }
+      setTimeout(() => {
+        if (walkOpenRef.current && walkPhaseRef.current === 'idle') {
+          void startWalkListening({ isAutoFollowUp: false });
+        }
+      }, 260);
+      return true;
+    };
 
     // Optional BYOK chat TTS helper invoked by controller.js ONLY when user enables `useByokForChatTts`
     (window as any).__dshVoiceByokSpeak = async (text: string, onDone?: () => void) => {
@@ -397,13 +447,15 @@ export function VoiceCopilotSheets() {
 
   // WakeLock + AirPods MediaSession + Safari AudioSession + Native iOS Background Keepalive lifecycle
   useEffect(() => {
+    (window as any).__dshWalkModeOpen = walkOpen;
     if (!walkOpen) {
       playerRef.current?.stop();
       stopAllListening();
       briefingQueueRef.current = [];
       drainingBriefingRef.current = false;
       focusedApprovalRef.current = null;
-      void setWalkBackgroundKeepAlive(false, false, false);
+      focusedSessionRef.current = null;
+      void setWalkBackgroundKeepAlive(false, false, false, 'manual');
       setWalkAudioSessionMode('auto');
       void wakeRef.current?.disable();
       setWakeLocked(false);
@@ -419,10 +471,11 @@ export function VoiceCopilotSheets() {
     // Keep background music playing at full stereo quality while Walk Mode is idle
     const duckMusic = configRef.current?.prefs?.duckMusicMode !== false;
     const keepMicWarm = Boolean(configRef.current?.prefs?.autoListenAfterBriefing);
+    const proactiveBriefing = configRef.current?.prefs?.proactiveBriefing || 'approvals';
     if (duckMusic) {
       setWalkAudioSessionMode('ambient');
     }
-    void setWalkBackgroundKeepAlive(true, duckMusic, keepMicWarm);
+    void setWalkBackgroundKeepAlive(true, duckMusic, keepMicWarm, proactiveBriefing);
 
     void wakeRef.current?.enable().then(ok => setWakeLocked(ok));
     const unbindMedia = bindWalkMediaSession({
@@ -448,8 +501,9 @@ export function VoiceCopilotSheets() {
       true,
       config.prefs.duckMusicMode !== false,
       Boolean(config.prefs.autoListenAfterBriefing),
+      config.prefs.proactiveBriefing || 'approvals',
     );
-  }, [walkOpen, config.prefs.duckMusicMode, config.prefs.autoListenAfterBriefing]);
+  }, [walkOpen, config.prefs.duckMusicMode, config.prefs.autoListenAfterBriefing, config.prefs.proactiveBriefing]);
 
   const drainBriefingQueue = async () => {
     if (drainingBriefingRef.current || !walkOpenRef.current) return;
@@ -457,6 +511,7 @@ export function VoiceCopilotSheets() {
     const nextItem = briefingQueueRef.current.shift();
     if (!nextItem) return;
     drainingBriefingRef.current = true;
+    let startedAutoListen = false;
     try {
       const cfg = configRef.current;
       const duckMusic = cfg.prefs.duckMusicMode !== false;
@@ -482,6 +537,21 @@ export function VoiceCopilotSheets() {
       if (data?.focusedApproval) {
         focusedApprovalRef.current = data.focusedApproval;
       }
+      if (data?.focusedSession?.hostId && data?.focusedSession?.agentId) {
+        focusedSessionRef.current = {
+          hostId: String(data.focusedSession.hostId),
+          agentId: String(data.focusedSession.agentId),
+          title: String(data.focusedSession.title || nextItem.title || ''),
+          announcedAt: Date.now(),
+        };
+      } else if (nextItem.kind === 'completed' && nextItem.hostId && nextItem.agentId) {
+        focusedSessionRef.current = {
+          hostId: nextItem.hostId,
+          agentId: nextItem.agentId,
+          title: nextItem.title || '',
+          announcedAt: Date.now(),
+        };
+      }
 
       if (duckMusic) {
         setWalkAudioSessionMode('transient');
@@ -494,15 +564,21 @@ export function VoiceCopilotSheets() {
           : `✅ 任务完成${data?.summarizedByBrain ? ' · AI 摘要' : ''}`,
       );
 
-      const shouldAutoListen = Boolean(
-        (data?.expectReply ?? nextItem.kind === 'approval')
-        && cfg.prefs.autoListenAfterBriefing
-        && walkOpenRef.current,
+      // When user turned on `autoListenAfterBriefing`, allow hands-free follow-up after BOTH
+      // approvals and task completions (silent 5.5s auto-exit if user doesn't speak).
+      // Query native iOS shell first: if a foreground video app interrupted the warm mic,
+      // skip background mic activation cleanly so foreground video restores to 100% immediately!
+      const wantsAutoListen = Boolean(
+        cfg.prefs.autoListenAfterBriefing
+        && walkOpenRef.current
+        && (nextItem.kind === 'approval' || nextItem.kind === 'completed' || Boolean(data?.expectReply)),
       );
+      const micReadyForAutoListen = wantsAutoListen ? await canNativeAutoListenNow() : false;
 
-      await speakWalkReply(chunks, undefined, { keepAudioSessionAfter: shouldAutoListen });
+      await speakWalkReply(chunks, undefined, { keepAudioSessionAfter: micReadyForAutoListen });
 
-      if (shouldAutoListen && walkOpenRef.current && walkPhaseRef.current === 'idle') {
+      if (micReadyForAutoListen && walkOpenRef.current && walkPhaseRef.current === 'idle') {
+        startedAutoListen = true;
         void startWalkListening({ isAutoFollowUp: true });
       }
     } catch {
@@ -513,6 +589,8 @@ export function VoiceCopilotSheets() {
       drainingBriefingRef.current = false;
       if (walkOpenRef.current && walkPhaseRef.current === 'idle' && briefingQueueRef.current.length > 0) {
         setTimeout(() => { void drainBriefingQueue(); }, 250);
+      } else if (!startedAutoListen && briefingQueueRef.current.length === 0) {
+        notifyNativeBackgroundWakeDone();
       }
     }
   };
@@ -635,13 +713,17 @@ export function VoiceCopilotSheets() {
 
     try {
       const snap = summarizeHubState((window as any).__dshLastHubState);
+      const recentFocused =
+        focusedSessionRef.current && Date.now() - focusedSessionRef.current.announcedAt < 180_000
+          ? focusedSessionRef.current
+          : null;
       const res = await apiCall('/api/voice/turn', {
         method: 'POST',
         body: JSON.stringify({
           text: clean,
           voiceSessionId: voiceSessionIdRef.current,
-          activeHostId: snap.activeHostId,
-          activeSessionId: snap.activeSessionId,
+          activeHostId: recentFocused?.hostId || snap.activeHostId,
+          activeSessionId: recentFocused?.agentId || snap.activeSessionId,
           focusedApproval: focusedApprovalRef.current,
           profileId: configRef.current.activeProfile.id,
           dryRun: false,
@@ -698,11 +780,12 @@ export function VoiceCopilotSheets() {
       baseMetrics.push(`大脑 ${data.latencyMs ?? 0}ms${data.fastPath ? ' ⚡' : ''}`);
       setLastLatencyBadge(baseMetrics.join(' · '));
 
-      const shouldAutoListen = Boolean(
+      const wantsAutoListen = Boolean(
         data.expectReply
         && configRef.current.prefs.autoListenAfterBriefing
         && walkOpenRef.current,
       );
+      const shouldAutoListen = wantsAutoListen ? await canNativeAutoListenNow() : false;
 
       await speakWalkReply(
         chunks,
@@ -858,6 +941,15 @@ export function VoiceCopilotSheets() {
     if (!walkOpenRef.current) return;
     if (walkPhaseRef.current === 'transcribing' || walkPhaseRef.current === 'thinking' || walkPhaseRef.current === 'listening') {
       return;
+    }
+    if (isAutoFollowUp) {
+      const canListen = await canNativeAutoListenNow();
+      if (!canListen) {
+        if (configRef.current?.prefs?.duckMusicMode !== false) {
+          setWalkAudioSessionMode('ambient');
+        }
+        return;
+      }
     }
     const sttProvider = configRef.current.activeProfile?.stt?.provider || 'native';
     if (sttProvider === 'native') {

@@ -11614,6 +11614,9 @@ export function initHubController() {
         } else {
           fetchState({ silent: true, forceFresh: true });
         }
+        if (window.__dshWalkModeOpen && typeof window.__dshWalkStartReplyForPush === 'function') {
+          window.__dshWalkStartReplyForPush(payload);
+        }
       } catch { }
     },
     getDshQuestionDraft,
