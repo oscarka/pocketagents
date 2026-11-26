@@ -1438,6 +1438,34 @@ var EXACT_ZH_TO_EN = {
 	"🔇 已跳过当前播报": "🔇 Skipped playback",
 	"⌨️ 静音打字": "⌨️ Type Silently",
 	"⌨️ 收起打字": "⌨️ Hide Keyboard",
+	"静音打字": "Type",
+	"收起打字": "Keyboard",
+	"汇报进度": "Briefing",
+	"高危操作语音确认码": "High-Risk Voice PIN",
+	"立即拒绝": "Deny Now",
+	"取消弹窗": "Dismiss",
+	"轻点开始说话 · 戴耳机随时插话": "Tap to talk · Interrupt anytime",
+	"说完自动发送 · 或轻点红色方块停止": "Auto-sends on pause · Tap red to stop",
+	"轻点圆麦随时插话 · 点字幕静音": "Tap mic to interrupt · Tap text to mute",
+	"正在处理你的语音指令…": "Processing your voice command…",
+	"主动播报": "Auto Briefing",
+	"仅审批提醒": "Approvals Only",
+	"审批与完成": "Approvals & Done",
+	"仅手动播报": "Manual Only",
+	"连续对话": "Continuous Mic",
+	"播完自动开麦": "Auto-Listen",
+	"手动点开麦": "Tap to Talk",
+	"听歌混音": "Duck Music",
+	"压低背景音乐": "Lower Music",
+	"独占音频": "Exclusive Audio",
+	"停顿发送": "Auto-VAD",
+	"自动停顿发送": "Send on Pause",
+	"手动点停止": "Tap to Stop",
+	"就绪": "Ready",
+	"正在聆听…": "Listening…",
+	"正在转写…": "Transcribing…",
+	"思考中…": "Thinking…",
+	"正在播报 · 点字幕静音": "Speaking · Tap text to mute",
 	"地铁/会议中不便说话时可直接发口令...": "Type a command when you can't speak...",
 	"处理中…": "Working…",
 	"🔔 播报：仅审批": "🔔 Alerts: Approvals",
@@ -2191,6 +2219,20 @@ var REGEX_ZH_TO_EN = [
 	[/^(.+) · 请念出上方 3 位数字放行，或说「拒绝」$/, "$1 · Say the 3 digits above to approve, or say \"Deny\""],
 	[/^你：(.+)$/, "You: $1"],
 	[/^⏭ 汇报最新进度 \((\d+) 审批 · (\d+) 运行中\)$/, "⏭ Briefing ($1 approvals · $2 running)"],
+	[/^(\d+) 项待审批$/, "$1 pending approvals"],
+	[/^(\d+) 个任务运行中$/, "$1 running"],
+	[/^就绪 · 后台常驻 · 常亮$/, "Ready · Background · Awake"],
+	[/^就绪 · 后台常驻$/, "Ready · Background"],
+	[/^就绪 · 常亮$/, "Ready · Awake"],
+	[/^(仅审批播报|审批与完成播报|手动播报)( · .+)?$/, (_, first, rest = "") => {
+		const firstMap = {
+			"仅审批播报": "Approvals",
+			"审批与完成播报": "All Alerts",
+			"手动播报": "Manual"
+		};
+		const restTranslated = String(rest || "").replace(/自动开麦/g, "Auto-Listen").replace(/听歌混音/g, "Duck Music").replace(/自动停顿/g, "Auto-VAD");
+		return `${firstMap[first] || first}${restTranslated}`;
+	}],
 	[/^🔓 确认码通过 · 已放行 ?(.*)$/, "🔓 PIN matched · Approved $1"],
 	[/^⚠️ L2 高危拦截 · 需念出 ?(.*)$/, "⚠️ L2 Guard · Say PIN $1"],
 	[/^🔔 (\d+)号待审批 ?(.*)$/, "🔔 #$1 Approval $2"],
@@ -4447,6 +4489,7 @@ function VoiceCopilotSheets() {
 	const [pinSecLeft, setPinSecLeft] = d(0);
 	const [walkTextInputOpen, setWalkTextInputOpen] = d(false);
 	const [walkTextDraft, setWalkTextDraft] = d("");
+	const [walkPrefsOpen, setWalkPrefsOpen] = d(false);
 	const [hubSummary, setHubSummary] = d(() => summarizeHubState(window.__dshLastHubState));
 	const [benchDryRun, setBenchDryRun] = d(true);
 	const [benchText, setBenchText] = d(() => getLangPref() === "en" ? "What pending approvals and running tasks do I have?" : "现在有哪些待审批和运行中的任务？");
@@ -5308,59 +5351,113 @@ function VoiceCopilotSheets() {
 		setLabOpen(true);
 		refreshConfig(false);
 	};
-	const orbScale = walkPhase === "listening" ? 1 + Math.min(.18, micLevel * .22) : 1;
+	const orbScale = walkPhase === "listening" ? 1 + Math.min(.16, micLevel * .22) : 1;
+	const prefsSummaryParts = [config.prefs.proactiveBriefing === "approvals" ? "仅审批播报" : config.prefs.proactiveBriefing === "all" ? "审批与完成播报" : "手动播报"];
+	if (config.prefs.autoListenAfterBriefing) prefsSummaryParts.push("自动开麦");
+	if (config.prefs.duckMusicMode) prefsSummaryParts.push("听歌混音");
+	if (config.prefs.autoVad) prefsSummaryParts.push("自动停顿");
+	const prefsSummaryText = prefsSummaryParts.slice(0, 3).join(" · ");
+	const statusMetaParts = [];
+	if (walkPhase === "idle") {
+		statusMetaParts.push("就绪");
+		if (nativeShell) statusMetaParts.push("后台常驻");
+		if (wakeLocked) statusMetaParts.push("常亮");
+	} else if (walkPhase === "listening") statusMetaParts.push("正在聆听…");
+	else if (walkPhase === "transcribing") statusMetaParts.push("正在转写…");
+	else if (walkPhase === "thinking") statusMetaParts.push("思考中…");
+	else if (walkPhase === "speaking") statusMetaParts.push("正在播报 · 点字幕静音");
+	const statusSubline = statusMetaParts.join(" · ");
+	const isLongReply = (lastReplyText || "").length > 96;
 	return /* @__PURE__ */ k$1(M, null, walkOpen && /* @__PURE__ */ k$1("div", {
 		id: "walkModeOverlay",
-		class: "walk-mode-overlay",
+		class: `walk-mode-overlay walk-phase-${walkPhase}`,
 		role: "dialog",
-		"aria-label": "随行耳机模式"
-	}, /* @__PURE__ */ k$1("div", { class: "walk-top-bar" }, /* @__PURE__ */ k$1("div", { class: "walk-top-left" }, /* @__PURE__ */ k$1("button", {
+		"aria-label": "随行耳机模式",
+		onClick: () => {
+			if (walkPrefsOpen) setWalkPrefsOpen(false);
+		}
+	}, /* @__PURE__ */ k$1("div", {
+		class: "walk-top-bar",
+		onClick: (e) => e.stopPropagation()
+	}, /* @__PURE__ */ k$1("button", {
 		type: "button",
-		class: "walk-profile-pill",
-		onClick: openLabFromWalk,
-		title: "点击快速切换语音配置"
-	}, /* @__PURE__ */ k$1("span", null, "🎧"), /* @__PURE__ */ k$1("span", { class: "walk-profile-name" }, activeProf.name), /* @__PURE__ */ k$1("span", null, "▾")), hubSummary.approvals.length > 0 && /* @__PURE__ */ k$1("span", { class: "walk-badge-warn" }, `⚠️ ${hubSummary.approvals.length} 待审批`), nativeShell && /* @__PURE__ */ k$1("span", { class: "walk-badge-subtle" }, "🔒 后台常驻"), wakeLocked && /* @__PURE__ */ k$1("span", { class: "walk-badge-subtle" }, "🔆 常亮")), /* @__PURE__ */ k$1("div", { class: "walk-top-right" }, /* @__PURE__ */ k$1("button", {
-		type: "button",
-		class: "walk-top-btn",
-		id: "walkOpenLabBtn",
-		onClick: openLabFromWalk
-	}, "⚙️ 配置"), /* @__PURE__ */ k$1("button", {
-		type: "button",
-		class: "walk-top-btn walk-exit-btn",
+		class: "walk-circle-nav-btn",
 		id: "walkExitBtn",
-		onClick: () => setWalkOpen(false)
-	}, "退出 ✕"))), /* @__PURE__ */ k$1("div", {
+		"aria-label": "退出",
+		title: "退出边走边听",
+		onClick: () => {
+			setWalkPrefsOpen(false);
+			setWalkOpen(false);
+		}
+	}, /* @__PURE__ */ k$1("svg", {
+		width: "18",
+		height: "18",
+		viewBox: "0 0 24 24",
+		fill: "none",
+		stroke: "currentColor",
+		"stroke-width": "2.2",
+		"stroke-linecap": "round"
+	}, /* @__PURE__ */ k$1("path", { d: "M18 6L6 18M6 6l12 12" }))), /* @__PURE__ */ k$1("button", {
+		type: "button",
+		class: "walk-profile-trigger",
+		onClick: openLabFromWalk,
+		title: "点击切换语音配置"
+	}, /* @__PURE__ */ k$1("span", { class: "walk-profile-title-row" }, /* @__PURE__ */ k$1("span", { class: "walk-profile-name" }, activeProf.name), /* @__PURE__ */ k$1("svg", {
+		width: "13",
+		height: "13",
+		viewBox: "0 0 24 24",
+		fill: "none",
+		stroke: "currentColor",
+		"stroke-width": "2.4",
+		"stroke-linecap": "round"
+	}, /* @__PURE__ */ k$1("path", { d: "M6 9l6 6 6-6" }))), /* @__PURE__ */ k$1("span", { class: `walk-profile-subline phase-${walkPhase}` }, /* @__PURE__ */ k$1("span", { class: `walk-status-dot phase-${walkPhase}` }), /* @__PURE__ */ k$1("span", null, statusSubline))), /* @__PURE__ */ k$1("button", {
+		type: "button",
+		class: "walk-circle-nav-btn",
+		id: "walkOpenLabBtn",
+		"aria-label": "语音配置",
+		title: "语音配置",
+		onClick: openLabFromWalk
+	}, /* @__PURE__ */ k$1("svg", {
+		width: "18",
+		height: "18",
+		viewBox: "0 0 24 24",
+		fill: "none",
+		stroke: "currentColor",
+		"stroke-width": "1.9",
+		"stroke-linecap": "round"
+	}, /* @__PURE__ */ k$1("path", { d: "M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6" })))), /* @__PURE__ */ k$1("div", {
 		class: "walk-stage",
 		onClick: () => {
+			if (walkPrefsOpen) {
+				setWalkPrefsOpen(false);
+				return;
+			}
 			if (walkPhase === "speaking") {
 				playerRef.current?.stop();
 				setWalkPhase("idle");
 				toast("🔇 已跳过当前播报");
 			}
 		}
-	}, /* @__PURE__ */ k$1("div", { class: `walk-phase-pill phase-${walkPhase}` }, walkPhase === "idle" && "🟢 就绪 · 戴耳机随时说", walkPhase === "listening" && "🎙️ 正在聆听（说完自动停顿或再点圆球）", walkPhase === "transcribing" && "👂 正在高速转写…", walkPhase === "thinking" && "🧠 随行总管思考中…", walkPhase === "speaking" && "🔊 正在播报（轻点字幕静音 / 点圆球直接插话）"), activePin && /* @__PURE__ */ k$1("div", {
-		class: "walk-pin-card",
-		onClick: (e) => e.stopPropagation()
-	}, /* @__PURE__ */ k$1("div", { class: "walk-pin-head" }, /* @__PURE__ */ k$1("span", null, "🔐 高危操作确认码"), /* @__PURE__ */ k$1("span", { class: "walk-pin-timer" }, `${pinSecLeft}s 后过期`)), /* @__PURE__ */ k$1("div", { class: "walk-pin-digits" }, activePin.pin.split("").join("  ")), /* @__PURE__ */ k$1("div", { class: "walk-pin-desc" }, `${activePin.summary || activePin.code} · 请念出上方 3 位数字放行，或说「拒绝」`), /* @__PURE__ */ k$1("div", { class: "walk-pin-actions" }, /* @__PURE__ */ k$1("button", {
-		type: "button",
-		class: "walk-chip-danger",
-		onClick: () => void handleClearPin(true)
-	}, "🚫 立即拒绝"), /* @__PURE__ */ k$1("button", {
-		type: "button",
-		class: "walk-chip-btn",
-		onClick: () => void handleClearPin(false)
-	}, "✕ 取消本次弹窗"))), /* @__PURE__ */ k$1("div", { class: "walk-subtitle-box" }, lastUserText && /* @__PURE__ */ k$1("div", { class: "walk-user-line" }, `你：${lastUserText}`), /* @__PURE__ */ k$1("div", { class: "walk-reply-line" }, lastReplyText), (lastActionBadge || lastLatencyBadge) && /* @__PURE__ */ k$1("div", { class: "walk-meta-row" }, lastActionBadge && /* @__PURE__ */ k$1("span", { class: "walk-action-tag" }, lastActionBadge), lastLatencyBadge && /* @__PURE__ */ k$1("span", { class: "walk-latency-tag" }, lastLatencyBadge))), /* @__PURE__ */ k$1("div", {
-		class: "walk-quick-strip",
-		onClick: (e) => e.stopPropagation()
 	}, /* @__PURE__ */ k$1("button", {
 		type: "button",
-		class: "walk-chip-btn",
-		onClick: () => void runBriefingTurn()
-	}, `⏭ 汇报最新进度 (${hubSummary.approvals.length} 审批 · ${hubSummary.runningCount} 运行中)`), /* @__PURE__ */ k$1("button", {
+		class: `walk-status-strip ${hubSummary.approvals.length > 0 ? "has-approvals" : ""}`,
+		onClick: (e) => {
+			e.stopPropagation();
+			setWalkPrefsOpen(false);
+			runBriefingTurn();
+		}
+	}, /* @__PURE__ */ k$1("span", { class: hubSummary.approvals.length > 0 ? "walk-strip-amber" : "" }, `${hubSummary.approvals.length} 项待审批`), /* @__PURE__ */ k$1("span", { class: "walk-strip-sep" }, "·"), /* @__PURE__ */ k$1("span", null, `${hubSummary.runningCount} 个任务运行中`)), activePin && /* @__PURE__ */ k$1("div", {
+		class: "walk-pin-card",
+		onClick: (e) => e.stopPropagation()
+	}, /* @__PURE__ */ k$1("div", { class: "walk-pin-head" }, /* @__PURE__ */ k$1("span", null, "高危操作语音确认码"), /* @__PURE__ */ k$1("span", { class: "walk-pin-timer" }, `${pinSecLeft}s 后过期`)), /* @__PURE__ */ k$1("div", { class: "walk-pin-digits" }, activePin.pin.split("").join(" ")), /* @__PURE__ */ k$1("div", { class: "walk-pin-desc" }, `${activePin.summary || activePin.code} · 请念出上方 3 位数字放行，或说「拒绝」`), /* @__PURE__ */ k$1("div", { class: "walk-pin-actions" }, /* @__PURE__ */ k$1("button", {
 		type: "button",
-		class: "walk-chip-btn",
-		onClick: () => setWalkTextInputOpen((v) => !v)
-	}, walkTextInputOpen ? "⌨️ 收起打字" : "⌨️ 静音打字")), walkTextInputOpen && /* @__PURE__ */ k$1("div", {
+		class: "walk-pin-btn-deny",
+		onClick: () => void handleClearPin(true)
+	}, "立即拒绝"), /* @__PURE__ */ k$1("button", {
+		type: "button",
+		class: "walk-pin-btn-cancel",
+		onClick: () => void handleClearPin(false)
+	}, "取消弹窗"))), /* @__PURE__ */ k$1("div", { class: "walk-subtitle-box" }, lastUserText && /* @__PURE__ */ k$1("div", { class: "walk-user-line" }, `你：${lastUserText}`), /* @__PURE__ */ k$1("div", { class: `walk-reply-line ${isLongReply ? "compact" : ""}` }, lastReplyText), (lastActionBadge || lastLatencyBadge) && /* @__PURE__ */ k$1("div", { class: "walk-meta-row" }, lastActionBadge && /* @__PURE__ */ k$1("span", { class: "walk-action-tag" }, lastActionBadge), lastLatencyBadge && /* @__PURE__ */ k$1("span", { class: "walk-latency-tag" }, lastLatencyBadge))), walkTextInputOpen && /* @__PURE__ */ k$1("div", {
 		class: "walk-text-composer",
 		onClick: (e) => e.stopPropagation()
 	}, /* @__PURE__ */ k$1("input", {
@@ -5385,15 +5482,108 @@ function VoiceCopilotSheets() {
 			setWalkTextDraft("");
 			handleWalkUserText(t);
 		}
-	}, "发送"))), /* @__PURE__ */ k$1("div", { class: "walk-orb-dock" }, /* @__PURE__ */ k$1("button", {
+	}, "发送"))), /* @__PURE__ */ k$1("div", {
+		class: "walk-orb-dock",
+		onClick: (e) => e.stopPropagation()
+	}, /* @__PURE__ */ k$1("div", { class: "walk-controls-row" }, /* @__PURE__ */ k$1("div", { class: "walk-side-btn-wrap" }, /* @__PURE__ */ k$1("button", {
+		type: "button",
+		id: "walkKeyboardBtn",
+		class: `walk-side-btn ${walkTextInputOpen ? "active" : ""}`,
+		"aria-label": "静音打字",
+		onClick: () => {
+			setWalkPrefsOpen(false);
+			setWalkTextInputOpen((v) => !v);
+		}
+	}, /* @__PURE__ */ k$1("svg", {
+		width: "22",
+		height: "22",
+		viewBox: "0 0 24 24",
+		fill: "none",
+		stroke: "currentColor",
+		"stroke-width": "1.9",
+		"stroke-linecap": "round",
+		"stroke-linejoin": "round"
+	}, /* @__PURE__ */ k$1("rect", {
+		x: "2",
+		y: "5",
+		width: "20",
+		height: "14",
+		rx: "3"
+	}), /* @__PURE__ */ k$1("path", { d: "M6 9h.01M10 9h.01M14 9h.01M18 9h.01M6 13h.01M18 13h.01M10 13h4" }))), /* @__PURE__ */ k$1("span", { class: "walk-side-lbl" }, walkTextInputOpen ? "收起打字" : "静音打字")), /* @__PURE__ */ k$1("div", { class: `walk-mic-ring phase-${walkPhase}` }, /* @__PURE__ */ k$1("button", {
 		type: "button",
 		id: "walkMicOrbBtn",
 		class: `walk-mic-orb phase-${walkPhase}`,
 		style: `transform: scale(${orbScale.toFixed(3)});`,
-		onClick: () => void toggleWalkMic()
-	}, /* @__PURE__ */ k$1("span", { class: "walk-orb-icon" }, walkPhase === "listening" ? "⏹" : walkPhase === "speaking" ? "🎙️" : walkPhase === "thinking" || walkPhase === "transcribing" ? "⏳" : "🎙️"), /* @__PURE__ */ k$1("span", { class: "walk-orb-label" }, walkPhase === "listening" ? "说完再点发送" : walkPhase === "speaking" ? "点此随时插话" : walkPhase === "transcribing" || walkPhase === "thinking" ? "处理中…" : "盲点开始说话")), /* @__PURE__ */ k$1("div", { class: "walk-footer-toggles" }, /* @__PURE__ */ k$1("button", {
+		"aria-label": walkPhase === "listening" ? "停止说话并发送" : "开始说话",
+		onClick: () => {
+			if (walkPrefsOpen) setWalkPrefsOpen(false);
+			toggleWalkMic();
+		}
+	}, walkPhase === "listening" ? /* @__PURE__ */ k$1("svg", {
+		width: "28",
+		height: "28",
+		viewBox: "0 0 24 24",
+		fill: "currentColor"
+	}, /* @__PURE__ */ k$1("rect", {
+		x: "6",
+		y: "6",
+		width: "12",
+		height: "12",
+		rx: "3"
+	})) : walkPhase === "thinking" || walkPhase === "transcribing" ? /* @__PURE__ */ k$1("svg", {
+		class: "walk-orb-spinner",
+		width: "28",
+		height: "28",
+		viewBox: "0 0 24 24",
+		fill: "none",
+		stroke: "currentColor",
+		"stroke-width": "2.4",
+		"stroke-linecap": "round"
+	}, /* @__PURE__ */ k$1("path", { d: "M21 12a9 9 0 1 1-6.219-8.56" })) : /* @__PURE__ */ k$1("svg", {
+		width: "31",
+		height: "31",
+		viewBox: "0 0 24 24",
+		fill: "none",
+		stroke: "currentColor",
+		"stroke-width": "2",
+		"stroke-linecap": "round",
+		"stroke-linejoin": "round"
+	}, /* @__PURE__ */ k$1("rect", {
+		x: "9",
+		y: "2",
+		width: "6",
+		height: "12",
+		rx: "3"
+	}), /* @__PURE__ */ k$1("path", { d: "M5 10a7 7 0 0 0 14 0" }), /* @__PURE__ */ k$1("path", { d: "M12 17v5" }), /* @__PURE__ */ k$1("path", { d: "M9 22h6" })))), /* @__PURE__ */ k$1("div", { class: "walk-side-btn-wrap" }, /* @__PURE__ */ k$1("button", {
 		type: "button",
-		class: `walk-mini-toggle ${config.prefs.proactiveBriefing !== "manual" ? "on" : ""}`,
+		id: "walkBriefingBtn",
+		class: "walk-side-btn",
+		"aria-label": "汇报进度",
+		onClick: () => {
+			setWalkPrefsOpen(false);
+			runBriefingTurn();
+		}
+	}, hubSummary.approvals.length > 0 && /* @__PURE__ */ k$1("span", { class: "walk-side-badge" }, hubSummary.approvals.length > 9 ? "9+" : hubSummary.approvals.length), /* @__PURE__ */ k$1("svg", {
+		width: "21",
+		height: "21",
+		viewBox: "0 0 24 24",
+		fill: "none",
+		stroke: "currentColor",
+		"stroke-width": "2",
+		"stroke-linecap": "round",
+		"stroke-linejoin": "round"
+	}, /* @__PURE__ */ k$1("polygon", { points: "5 4 15 12 5 20 5 4" }), /* @__PURE__ */ k$1("line", {
+		x1: "19",
+		y1: "5",
+		x2: "19",
+		y2: "19"
+	}))), /* @__PURE__ */ k$1("span", { class: "walk-side-lbl" }, "汇报进度"))), /* @__PURE__ */ k$1("div", { class: `walk-mic-caption phase-${walkPhase}` }, walkPhase === "listening" ? "说完自动发送 · 或轻点红色方块停止" : walkPhase === "speaking" ? "轻点圆麦随时插话 · 点字幕静音" : walkPhase === "transcribing" || walkPhase === "thinking" ? "正在处理你的语音指令…" : "轻点开始说话 · 戴耳机随时插话"), /* @__PURE__ */ k$1("div", { class: "walk-prefs-wrap" }, walkPrefsOpen && /* @__PURE__ */ k$1("div", {
+		class: "walk-prefs-drawer",
+		role: "region",
+		"aria-label": "随行偏好设置"
+	}, /* @__PURE__ */ k$1("button", {
+		type: "button",
+		class: `walk-pref-tile ${config.prefs.proactiveBriefing !== "manual" ? "on" : ""}`,
 		onClick: () => {
 			const order = [
 				"approvals",
@@ -5403,23 +5593,94 @@ function VoiceCopilotSheets() {
 			const next = order[(order.indexOf(config.prefs.proactiveBriefing) + 1) % order.length];
 			updatePrefPatch({ proactiveBriefing: next });
 		}
-	}, `🔔 播报：${config.prefs.proactiveBriefing === "approvals" ? "仅审批" : config.prefs.proactiveBriefing === "all" ? "审批+完成" : "手动"}`), /* @__PURE__ */ k$1("button", {
+	}, /* @__PURE__ */ k$1("span", { class: "walk-pref-ico" }, /* @__PURE__ */ k$1("svg", {
+		width: "16",
+		height: "16",
+		viewBox: "0 0 24 24",
+		fill: "none",
+		stroke: "currentColor",
+		"stroke-width": "2.1",
+		"stroke-linecap": "round"
+	}, /* @__PURE__ */ k$1("path", { d: "M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" }), /* @__PURE__ */ k$1("path", { d: "M13.73 21a2 2 0 0 1-3.46 0" }))), /* @__PURE__ */ k$1("span", { class: "walk-pref-copy" }, /* @__PURE__ */ k$1("span", { class: "walk-pref-t1" }, "主动播报"), /* @__PURE__ */ k$1("span", { class: "walk-pref-t2" }, config.prefs.proactiveBriefing === "approvals" ? "仅审批提醒" : config.prefs.proactiveBriefing === "all" ? "审批与完成" : "仅手动播报"))), /* @__PURE__ */ k$1("button", {
 		type: "button",
-		class: `walk-mini-toggle ${config.prefs.autoListenAfterBriefing ? "on" : ""}`,
+		class: `walk-pref-tile ${config.prefs.autoListenAfterBriefing ? "on" : ""}`,
 		onClick: () => void updatePrefPatch({ autoListenAfterBriefing: !config.prefs.autoListenAfterBriefing })
-	}, config.prefs.autoListenAfterBriefing ? "🎙️ 播完自动开麦" : "⚪ 手动点开麦"), /* @__PURE__ */ k$1("button", {
+	}, /* @__PURE__ */ k$1("span", { class: "walk-pref-ico" }, /* @__PURE__ */ k$1("svg", {
+		width: "16",
+		height: "16",
+		viewBox: "0 0 24 24",
+		fill: "none",
+		stroke: "currentColor",
+		"stroke-width": "2.1",
+		"stroke-linecap": "round"
+	}, /* @__PURE__ */ k$1("rect", {
+		x: "9",
+		y: "2",
+		width: "6",
+		height: "12",
+		rx: "3"
+	}), /* @__PURE__ */ k$1("path", { d: "M5 10a7 7 0 0 0 14 0" }))), /* @__PURE__ */ k$1("span", { class: "walk-pref-copy" }, /* @__PURE__ */ k$1("span", { class: "walk-pref-t1" }, "连续对话"), /* @__PURE__ */ k$1("span", { class: "walk-pref-t2" }, config.prefs.autoListenAfterBriefing ? "播完自动开麦" : "手动点开麦"))), /* @__PURE__ */ k$1("button", {
 		type: "button",
-		class: `walk-mini-toggle ${config.prefs.duckMusicMode ? "on" : ""}`,
+		class: `walk-pref-tile ${config.prefs.duckMusicMode ? "on" : ""}`,
 		onClick: () => {
 			const nextDuck = !config.prefs.duckMusicMode;
 			setWalkAudioSessionMode(nextDuck ? "ambient" : "auto");
 			updatePrefPatch({ duckMusicMode: nextDuck });
 		}
-	}, config.prefs.duckMusicMode ? "🎵 听歌压低混音" : "🔇 独占音频"), /* @__PURE__ */ k$1("button", {
+	}, /* @__PURE__ */ k$1("span", { class: "walk-pref-ico" }, /* @__PURE__ */ k$1("svg", {
+		width: "16",
+		height: "16",
+		viewBox: "0 0 24 24",
+		fill: "none",
+		stroke: "currentColor",
+		"stroke-width": "2.1",
+		"stroke-linecap": "round"
+	}, /* @__PURE__ */ k$1("path", { d: "M9 18V5l12-2v13" }), /* @__PURE__ */ k$1("circle", {
+		cx: "6",
+		cy: "18",
+		r: "3"
+	}), /* @__PURE__ */ k$1("circle", {
+		cx: "18",
+		cy: "16",
+		r: "3"
+	}))), /* @__PURE__ */ k$1("span", { class: "walk-pref-copy" }, /* @__PURE__ */ k$1("span", { class: "walk-pref-t1" }, "听歌混音"), /* @__PURE__ */ k$1("span", { class: "walk-pref-t2" }, config.prefs.duckMusicMode ? "压低背景音乐" : "独占音频"))), /* @__PURE__ */ k$1("button", {
 		type: "button",
-		class: `walk-mini-toggle ${config.prefs.autoVad ? "on" : ""}`,
+		class: `walk-pref-tile ${config.prefs.autoVad ? "on" : ""}`,
 		onClick: () => void updatePrefPatch({ autoVad: !config.prefs.autoVad })
-	}, config.prefs.autoVad ? "🟢 自动停顿发送" : "⚪ 手动点停")))), /* @__PURE__ */ k$1(VoiceProviderSheet, {
+	}, /* @__PURE__ */ k$1("span", { class: "walk-pref-ico" }, /* @__PURE__ */ k$1("svg", {
+		width: "16",
+		height: "16",
+		viewBox: "0 0 24 24",
+		fill: "none",
+		stroke: "currentColor",
+		"stroke-width": "2.1",
+		"stroke-linecap": "round"
+	}, /* @__PURE__ */ k$1("circle", {
+		cx: "12",
+		cy: "12",
+		r: "9"
+	}), /* @__PURE__ */ k$1("path", { d: "M9 10v4M15 10v4" }))), /* @__PURE__ */ k$1("span", { class: "walk-pref-copy" }, /* @__PURE__ */ k$1("span", { class: "walk-pref-t1" }, "停顿发送"), /* @__PURE__ */ k$1("span", { class: "walk-pref-t2" }, config.prefs.autoVad ? "自动停顿发送" : "手动点停止")))), /* @__PURE__ */ k$1("button", {
+		type: "button",
+		id: "walkPrefsToggleBtn",
+		class: `walk-prefs-capsule ${walkPrefsOpen ? "open" : ""}`,
+		"aria-expanded": walkPrefsOpen,
+		onClick: () => {
+			setWalkTextInputOpen(false);
+			setWalkPrefsOpen((v) => !v);
+		}
+	}, /* @__PURE__ */ k$1("span", { class: "walk-prefs-left" }, /* @__PURE__ */ k$1("span", {
+		class: "walk-prefs-dots",
+		"aria-hidden": "true"
+	}, /* @__PURE__ */ k$1("i", { class: config.prefs.proactiveBriefing !== "manual" ? "" : "off" }), /* @__PURE__ */ k$1("i", { class: config.prefs.autoListenAfterBriefing ? "" : "off" }), /* @__PURE__ */ k$1("i", { class: config.prefs.duckMusicMode ? "" : "off" }), /* @__PURE__ */ k$1("i", { class: config.prefs.autoVad ? "" : "off" })), /* @__PURE__ */ k$1("span", { class: "walk-prefs-summary" }, prefsSummaryText)), /* @__PURE__ */ k$1("svg", {
+		class: "walk-prefs-chevron",
+		width: "15",
+		height: "15",
+		viewBox: "0 0 24 24",
+		fill: "none",
+		stroke: "currentColor",
+		"stroke-width": "2.2",
+		"stroke-linecap": "round"
+	}, /* @__PURE__ */ k$1("path", { d: "M18 15l-6-6-6 6" })))))), /* @__PURE__ */ k$1(VoiceProviderSheet, {
 		open: labOpen,
 		onClose: () => setLabOpen(false),
 		config,

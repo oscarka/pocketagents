@@ -706,7 +706,7 @@ test('v0.9.29 native iOS shell audio bridge hooks and background SSE keepalive e
   assert.match(walkAudioSrc, /nativeBridge\.startRecording/);
   assert.match(voiceSheetsSrc, /setWalkBackgroundKeepAlive\(true,/);
   assert.match(voiceSheetsSrc, /setWalkBackgroundKeepAlive\(false, false, false\)/);
-  assert.match(voiceSheetsSrc, /🔒 后台常驻/);
+  assert.match(voiceSheetsSrc, /后台常驻/);
   assert.match(controllerSrc, /__dshWalkKeepAliveActive/);
 });
 
@@ -839,4 +839,38 @@ test('v0.9.32 native iOS shell v1.0.0 OTA safe-area fallback prevents Dynamic Is
   assert.match(ctrlSrc, /safeAreaManaged/);
   assert.match(cssSrc, /:root\.ios-native-shell-v1 \.top-bar/);
   assert.match(cssSrc, /:root\.ios-native-shell-v1 \.chat-navbar/);
+});
+
+test('v0.9.37 Walk Mode Option A follows Light/Dark/System theme variables and translates all labels to EN', async () => {
+  const fs = await import('node:fs');
+  const { translateZhStringToEn } = await import('../../hub/web/src/utils/i18n.js');
+  const cssSrc = fs.readFileSync(new URL('../../hub/web/src/styles/app.css', import.meta.url), 'utf8');
+  const voiceSheetsSrc = fs.readFileSync(new URL('../../hub/web/src/components/VoiceCopilotSheets.tsx', import.meta.url), 'utf8');
+
+  assert.match(cssSrc, /--walk-canvas:\s*#ffffff/);
+  assert.match(cssSrc, /:root\[data-theme="dark"\] \.walk-mode-overlay/);
+  assert.match(cssSrc, /:root:not\(\[data-theme="light"\]\) \.walk-mode-overlay/);
+  assert.match(voiceSheetsSrc, /id="walkPrefsToggleBtn"/);
+  assert.match(voiceSheetsSrc, /id="walkKeyboardBtn"/);
+  assert.match(voiceSheetsSrc, /id="walkBriefingBtn"/);
+
+  const optionASamples = [
+    '静音打字',
+    '汇报进度',
+    '2 项待审批',
+    '1 个任务运行中',
+    '就绪 · 后台常驻 · 常亮',
+    '轻点开始说话 · 戴耳机随时插话',
+    '仅审批播报 · 自动开麦 · 听歌混音',
+    '主动播报',
+    '仅审批提醒',
+    '连续对话',
+    '听歌混音',
+    '停顿发送',
+  ];
+  for (const zh of optionASamples) {
+    const en = translateZhStringToEn(zh);
+    assert.notEqual(en, zh, `expected English translation for: ${zh}`);
+    assert.doesNotMatch(en, /[\u4e00-\u9fa5]/, `leftover Chinese in "${zh}" -> "${en}"`);
+  }
 });

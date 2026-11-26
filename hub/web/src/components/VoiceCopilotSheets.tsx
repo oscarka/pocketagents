@@ -150,6 +150,7 @@ export function VoiceCopilotSheets() {
   const [pinSecLeft, setPinSecLeft] = useState(0);
   const [walkTextInputOpen, setWalkTextInputOpen] = useState(false);
   const [walkTextDraft, setWalkTextDraft] = useState('');
+  const [walkPrefsOpen, setWalkPrefsOpen] = useState(false);
   const [hubSummary, setHubSummary] = useState(() => summarizeHubState((window as any).__dshLastHubState));
 
   // Bench / Dry-Run Lab state
@@ -1122,55 +1123,107 @@ export function VoiceCopilotSheets() {
     setLabOpen(true);
     void refreshConfig(false);
   };
-  const orbScale = walkPhase === 'listening' ? 1 + Math.min(0.18, micLevel * 0.22) : 1;
+  const orbScale = walkPhase === 'listening' ? 1 + Math.min(0.16, micLevel * 0.22) : 1;
+  const briefingLabel =
+    config.prefs.proactiveBriefing === 'approvals'
+      ? '仅审批播报'
+      : config.prefs.proactiveBriefing === 'all'
+        ? '审批与完成播报'
+        : '手动播报';
+  const prefsSummaryParts: string[] = [briefingLabel];
+  if (config.prefs.autoListenAfterBriefing) prefsSummaryParts.push('自动开麦');
+  if (config.prefs.duckMusicMode) prefsSummaryParts.push('听歌混音');
+  if (config.prefs.autoVad) prefsSummaryParts.push('自动停顿');
+  const prefsSummaryText = prefsSummaryParts.slice(0, 3).join(' · ');
+
+  const statusMetaParts: string[] = [];
+  if (walkPhase === 'idle') {
+    statusMetaParts.push('就绪');
+    if (nativeShell) statusMetaParts.push('后台常驻');
+    if (wakeLocked) statusMetaParts.push('常亮');
+  } else if (walkPhase === 'listening') {
+    statusMetaParts.push('正在聆听…');
+  } else if (walkPhase === 'transcribing') {
+    statusMetaParts.push('正在转写…');
+  } else if (walkPhase === 'thinking') {
+    statusMetaParts.push('思考中…');
+  } else if (walkPhase === 'speaking') {
+    statusMetaParts.push('正在播报 · 点字幕静音');
+  }
+  const statusSubline = statusMetaParts.join(' · ');
+  const isLongReply = (lastReplyText || '').length > 96;
 
   return (
     <Fragment>
-      {/* 1. 全屏 OLED 随行耳机模式 Overlay */}
+      {/* 1. 全屏极简留白随行语音台（自动跟随设置里的 浅色 / 深色 / 跟随系统 主题） */}
       {walkOpen && (
-        <div id="walkModeOverlay" class="walk-mode-overlay" role="dialog" aria-label="随行耳机模式">
-          <div class="walk-top-bar">
-            <div class="walk-top-left">
-              <button
-                type="button"
-                class="walk-profile-pill"
-                onClick={openLabFromWalk}
-                title="点击快速切换语音配置"
-              >
-                <span>🎧</span>
+        <div
+          id="walkModeOverlay"
+          class={`walk-mode-overlay walk-phase-${walkPhase}`}
+          role="dialog"
+          aria-label="随行耳机模式"
+          onClick={() => {
+            if (walkPrefsOpen) setWalkPrefsOpen(false);
+          }}
+        >
+          {/* 顶部极简导航：左关闭 · 中配置标题与状态 · 右配置按钮 */}
+          <div class="walk-top-bar" onClick={e => e.stopPropagation()}>
+            <button
+              type="button"
+              class="walk-circle-nav-btn"
+              id="walkExitBtn"
+              aria-label="退出"
+              title="退出边走边听"
+              onClick={() => {
+                setWalkPrefsOpen(false);
+                setWalkOpen(false);
+              }}
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+                <path d="M18 6L6 18M6 6l12 12" />
+              </svg>
+            </button>
+
+            <button
+              type="button"
+              class="walk-profile-trigger"
+              onClick={openLabFromWalk}
+              title="点击切换语音配置"
+            >
+              <span class="walk-profile-title-row">
                 <span class="walk-profile-name">{activeProf.name}</span>
-                <span>▾</span>
-              </button>
-              {hubSummary.approvals.length > 0 && (
-                <span class="walk-badge-warn">{`⚠️ ${hubSummary.approvals.length} 待审批`}</span>
-              )}
-              {nativeShell && <span class="walk-badge-subtle">🔒 后台常驻</span>}
-              {wakeLocked && <span class="walk-badge-subtle">🔆 常亮</span>}
-            </div>
-            <div class="walk-top-right">
-              <button
-                type="button"
-                class="walk-top-btn"
-                id="walkOpenLabBtn"
-                onClick={openLabFromWalk}
-              >
-                ⚙️ 配置
-              </button>
-              <button
-                type="button"
-                class="walk-top-btn walk-exit-btn"
-                id="walkExitBtn"
-                onClick={() => setWalkOpen(false)}
-              >
-                退出 ✕
-              </button>
-            </div>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round">
+                  <path d="M6 9l6 6 6-6" />
+                </svg>
+              </span>
+              <span class={`walk-profile-subline phase-${walkPhase}`}>
+                <span class={`walk-status-dot phase-${walkPhase}`} />
+                <span>{statusSubline}</span>
+              </span>
+            </button>
+
+            <button
+              type="button"
+              class="walk-circle-nav-btn"
+              id="walkOpenLabBtn"
+              aria-label="语音配置"
+              title="语音配置"
+              onClick={openLabFromWalk}
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round">
+                <path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6" />
+              </svg>
+            </button>
           </div>
 
-          {/* 上半屏：大字字幕与轻点静音区 */}
+          {/* 中央大留白无框字幕区（播报时轻点静音） */}
           <div
             class="walk-stage"
             onClick={() => {
+              if (walkPrefsOpen) {
+                setWalkPrefsOpen(false);
+                return;
+              }
               if (walkPhase === 'speaking') {
                 playerRef.current?.stop();
                 setWalkPhase('idle');
@@ -1178,30 +1231,38 @@ export function VoiceCopilotSheets() {
               }
             }}
           >
-            <div class={`walk-phase-pill phase-${walkPhase}`}>
-              {walkPhase === 'idle' && '🟢 就绪 · 戴耳机随时说'}
-              {walkPhase === 'listening' && '🎙️ 正在聆听（说完自动停顿或再点圆球）'}
-              {walkPhase === 'transcribing' && '👂 正在高速转写…'}
-              {walkPhase === 'thinking' && '🧠 随行总管思考中…'}
-              {walkPhase === 'speaking' && '🔊 正在播报（轻点字幕静音 / 点圆球直接插话）'}
-            </div>
+            <button
+              type="button"
+              class={`walk-status-strip ${hubSummary.approvals.length > 0 ? 'has-approvals' : ''}`}
+              onClick={e => {
+                e.stopPropagation();
+                setWalkPrefsOpen(false);
+                void runBriefingTurn();
+              }}
+            >
+              <span class={hubSummary.approvals.length > 0 ? 'walk-strip-amber' : ''}>
+                {`${hubSummary.approvals.length} 项待审批`}
+              </span>
+              <span class="walk-strip-sep">·</span>
+              <span>{`${hubSummary.runningCount} 个任务运行中`}</span>
+            </button>
 
             {activePin && (
               <div class="walk-pin-card" onClick={e => e.stopPropagation()}>
                 <div class="walk-pin-head">
-                  <span>🔐 高危操作确认码</span>
+                  <span>高危操作语音确认码</span>
                   <span class="walk-pin-timer">{`${pinSecLeft}s 后过期`}</span>
                 </div>
-                <div class="walk-pin-digits">{activePin.pin.split('').join('  ')}</div>
+                <div class="walk-pin-digits">{activePin.pin.split('').join(' ')}</div>
                 <div class="walk-pin-desc">
                   {`${activePin.summary || activePin.code} · 请念出上方 3 位数字放行，或说「拒绝」`}
                 </div>
                 <div class="walk-pin-actions">
-                  <button type="button" class="walk-chip-danger" onClick={() => void handleClearPin(true)}>
-                    🚫 立即拒绝
+                  <button type="button" class="walk-pin-btn-deny" onClick={() => void handleClearPin(true)}>
+                    立即拒绝
                   </button>
-                  <button type="button" class="walk-chip-btn" onClick={() => void handleClearPin(false)}>
-                    ✕ 取消本次弹窗
+                  <button type="button" class="walk-pin-btn-cancel" onClick={() => void handleClearPin(false)}>
+                    取消弹窗
                   </button>
                 </div>
               </div>
@@ -1209,26 +1270,13 @@ export function VoiceCopilotSheets() {
 
             <div class="walk-subtitle-box">
               {lastUserText && <div class="walk-user-line">{`你：${lastUserText}`}</div>}
-              <div class="walk-reply-line">{lastReplyText}</div>
+              <div class={`walk-reply-line ${isLongReply ? 'compact' : ''}`}>{lastReplyText}</div>
               {(lastActionBadge || lastLatencyBadge) && (
                 <div class="walk-meta-row">
                   {lastActionBadge && <span class="walk-action-tag">{lastActionBadge}</span>}
                   {lastLatencyBadge && <span class="walk-latency-tag">{lastLatencyBadge}</span>}
                 </div>
               )}
-            </div>
-
-            <div class="walk-quick-strip" onClick={e => e.stopPropagation()}>
-              <button type="button" class="walk-chip-btn" onClick={() => void runBriefingTurn()}>
-                {`⏭ 汇报最新进度 (${hubSummary.approvals.length} 审批 · ${hubSummary.runningCount} 运行中)`}
-              </button>
-              <button
-                type="button"
-                class="walk-chip-btn"
-                onClick={() => setWalkTextInputOpen(v => !v)}
-              >
-                {walkTextInputOpen ? '⌨️ 收起打字' : '⌨️ 静音打字'}
-              </button>
             </div>
 
             {walkTextInputOpen && (
@@ -1263,65 +1311,202 @@ export function VoiceCopilotSheets() {
             )}
           </div>
 
-          {/* 下半屏：超大盲操麦克风圆球 */}
-          <div class="walk-orb-dock">
-            <button
-              type="button"
-              id="walkMicOrbBtn"
-              class={`walk-mic-orb phase-${walkPhase}`}
-              style={`transform: scale(${orbScale.toFixed(3)});`}
-              onClick={() => void toggleWalkMic()}
-            >
-              <span class="walk-orb-icon">
-                {walkPhase === 'listening' ? '⏹' : walkPhase === 'speaking' ? '🎙️' : walkPhase === 'thinking' || walkPhase === 'transcribing' ? '⏳' : '🎙️'}
-              </span>
-              <span class="walk-orb-label">
-                {walkPhase === 'listening'
-                  ? '说完再点发送'
-                  : walkPhase === 'speaking'
-                    ? '点此随时插话'
-                    : walkPhase === 'transcribing' || walkPhase === 'thinking'
-                      ? '处理中…'
-                      : '盲点开始说话'}
-              </span>
-            </button>
+          {/* 底部对称三键控制台 + 可展开偏好胶囊 */}
+          <div class="walk-orb-dock" onClick={e => e.stopPropagation()}>
+            <div class="walk-controls-row">
+              <div class="walk-side-btn-wrap">
+                <button
+                  type="button"
+                  id="walkKeyboardBtn"
+                  class={`walk-side-btn ${walkTextInputOpen ? 'active' : ''}`}
+                  aria-label="静音打字"
+                  onClick={() => {
+                    setWalkPrefsOpen(false);
+                    setWalkTextInputOpen(v => !v);
+                  }}
+                >
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="2" y="5" width="20" height="14" rx="3" />
+                    <path d="M6 9h.01M10 9h.01M14 9h.01M18 9h.01M6 13h.01M18 13h.01M10 13h4" />
+                  </svg>
+                </button>
+                <span class="walk-side-lbl">{walkTextInputOpen ? '收起打字' : '静音打字'}</span>
+              </div>
 
-            <div class="walk-footer-toggles">
+              <div class={`walk-mic-ring phase-${walkPhase}`}>
+                <button
+                  type="button"
+                  id="walkMicOrbBtn"
+                  class={`walk-mic-orb phase-${walkPhase}`}
+                  style={`transform: scale(${orbScale.toFixed(3)});`}
+                  aria-label={walkPhase === 'listening' ? '停止说话并发送' : '开始说话'}
+                  onClick={() => {
+                    if (walkPrefsOpen) setWalkPrefsOpen(false);
+                    void toggleWalkMic();
+                  }}
+                >
+                  {walkPhase === 'listening' ? (
+                    <svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor">
+                      <rect x="6" y="6" width="12" height="12" rx="3" />
+                    </svg>
+                  ) : walkPhase === 'thinking' || walkPhase === 'transcribing' ? (
+                    <svg class="walk-orb-spinner" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round">
+                      <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                    </svg>
+                  ) : (
+                    <svg width="31" height="31" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <rect x="9" y="2" width="6" height="12" rx="3" />
+                      <path d="M5 10a7 7 0 0 0 14 0" />
+                      <path d="M12 17v5" />
+                      <path d="M9 22h6" />
+                    </svg>
+                  )}
+                </button>
+              </div>
+
+              <div class="walk-side-btn-wrap">
+                <button
+                  type="button"
+                  id="walkBriefingBtn"
+                  class="walk-side-btn"
+                  aria-label="汇报进度"
+                  onClick={() => {
+                    setWalkPrefsOpen(false);
+                    void runBriefingTurn();
+                  }}
+                >
+                  {hubSummary.approvals.length > 0 && (
+                    <span class="walk-side-badge">{hubSummary.approvals.length > 9 ? '9+' : hubSummary.approvals.length}</span>
+                  )}
+                  <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <polygon points="5 4 15 12 5 20 5 4" />
+                    <line x1="19" y1="5" x2="19" y2="19" />
+                  </svg>
+                </button>
+                <span class="walk-side-lbl">汇报进度</span>
+              </div>
+            </div>
+
+            <div class={`walk-mic-caption phase-${walkPhase}`}>
+              {walkPhase === 'listening'
+                ? '说完自动发送 · 或轻点红色方块停止'
+                : walkPhase === 'speaking'
+                  ? '轻点圆麦随时插话 · 点字幕静音'
+                  : walkPhase === 'transcribing' || walkPhase === 'thinking'
+                    ? '正在处理你的语音指令…'
+                    : '轻点开始说话 · 戴耳机随时插话'}
+            </div>
+
+            <div class="walk-prefs-wrap">
+              {walkPrefsOpen && (
+                <div class="walk-prefs-drawer" role="region" aria-label="随行偏好设置">
+                  <button
+                    type="button"
+                    class={`walk-pref-tile ${config.prefs.proactiveBriefing !== 'manual' ? 'on' : ''}`}
+                    onClick={() => {
+                      const order: Array<'approvals' | 'all' | 'manual'> = ['approvals', 'all', 'manual'];
+                      const next = order[(order.indexOf(config.prefs.proactiveBriefing) + 1) % order.length];
+                      void updatePrefPatch({ proactiveBriefing: next });
+                    }}
+                  >
+                    <span class="walk-pref-ico">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round">
+                        <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+                        <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+                      </svg>
+                    </span>
+                    <span class="walk-pref-copy">
+                      <span class="walk-pref-t1">主动播报</span>
+                      <span class="walk-pref-t2">
+                        {config.prefs.proactiveBriefing === 'approvals'
+                          ? '仅审批提醒'
+                          : config.prefs.proactiveBriefing === 'all'
+                            ? '审批与完成'
+                            : '仅手动播报'}
+                      </span>
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    class={`walk-pref-tile ${config.prefs.autoListenAfterBriefing ? 'on' : ''}`}
+                    onClick={() => void updatePrefPatch({ autoListenAfterBriefing: !config.prefs.autoListenAfterBriefing })}
+                  >
+                    <span class="walk-pref-ico">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round">
+                        <rect x="9" y="2" width="6" height="12" rx="3" />
+                        <path d="M5 10a7 7 0 0 0 14 0" />
+                      </svg>
+                    </span>
+                    <span class="walk-pref-copy">
+                      <span class="walk-pref-t1">连续对话</span>
+                      <span class="walk-pref-t2">{config.prefs.autoListenAfterBriefing ? '播完自动开麦' : '手动点开麦'}</span>
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    class={`walk-pref-tile ${config.prefs.duckMusicMode ? 'on' : ''}`}
+                    onClick={() => {
+                      const nextDuck = !config.prefs.duckMusicMode;
+                      setWalkAudioSessionMode(nextDuck ? 'ambient' : 'auto');
+                      void updatePrefPatch({ duckMusicMode: nextDuck });
+                    }}
+                  >
+                    <span class="walk-pref-ico">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round">
+                        <path d="M9 18V5l12-2v13" />
+                        <circle cx="6" cy="18" r="3" />
+                        <circle cx="18" cy="16" r="3" />
+                      </svg>
+                    </span>
+                    <span class="walk-pref-copy">
+                      <span class="walk-pref-t1">听歌混音</span>
+                      <span class="walk-pref-t2">{config.prefs.duckMusicMode ? '压低背景音乐' : '独占音频'}</span>
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    class={`walk-pref-tile ${config.prefs.autoVad ? 'on' : ''}`}
+                    onClick={() => void updatePrefPatch({ autoVad: !config.prefs.autoVad })}
+                  >
+                    <span class="walk-pref-ico">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round">
+                        <circle cx="12" cy="12" r="9" />
+                        <path d="M9 10v4M15 10v4" />
+                      </svg>
+                    </span>
+                    <span class="walk-pref-copy">
+                      <span class="walk-pref-t1">停顿发送</span>
+                      <span class="walk-pref-t2">{config.prefs.autoVad ? '自动停顿发送' : '手动点停止'}</span>
+                    </span>
+                  </button>
+                </div>
+              )}
+
               <button
                 type="button"
-                class={`walk-mini-toggle ${config.prefs.proactiveBriefing !== 'manual' ? 'on' : ''}`}
+                id="walkPrefsToggleBtn"
+                class={`walk-prefs-capsule ${walkPrefsOpen ? 'open' : ''}`}
+                aria-expanded={walkPrefsOpen}
                 onClick={() => {
-                  const order: Array<'approvals' | 'all' | 'manual'> = ['approvals', 'all', 'manual'];
-                  const next = order[(order.indexOf(config.prefs.proactiveBriefing) + 1) % order.length];
-                  void updatePrefPatch({ proactiveBriefing: next });
+                  setWalkTextInputOpen(false);
+                  setWalkPrefsOpen(v => !v);
                 }}
               >
-                {`🔔 播报：${config.prefs.proactiveBriefing === 'approvals' ? '仅审批' : config.prefs.proactiveBriefing === 'all' ? '审批+完成' : '手动'}`}
-              </button>
-              <button
-                type="button"
-                class={`walk-mini-toggle ${config.prefs.autoListenAfterBriefing ? 'on' : ''}`}
-                onClick={() => void updatePrefPatch({ autoListenAfterBriefing: !config.prefs.autoListenAfterBriefing })}
-              >
-                {config.prefs.autoListenAfterBriefing ? '🎙️ 播完自动开麦' : '⚪ 手动点开麦'}
-              </button>
-              <button
-                type="button"
-                class={`walk-mini-toggle ${config.prefs.duckMusicMode ? 'on' : ''}`}
-                onClick={() => {
-                  const nextDuck = !config.prefs.duckMusicMode;
-                  setWalkAudioSessionMode(nextDuck ? 'ambient' : 'auto');
-                  void updatePrefPatch({ duckMusicMode: nextDuck });
-                }}
-              >
-                {config.prefs.duckMusicMode ? '🎵 听歌压低混音' : '🔇 独占音频'}
-              </button>
-              <button
-                type="button"
-                class={`walk-mini-toggle ${config.prefs.autoVad ? 'on' : ''}`}
-                onClick={() => void updatePrefPatch({ autoVad: !config.prefs.autoVad })}
-              >
-                {config.prefs.autoVad ? '🟢 自动停顿发送' : '⚪ 手动点停'}
+                <span class="walk-prefs-left">
+                  <span class="walk-prefs-dots" aria-hidden="true">
+                    <i class={config.prefs.proactiveBriefing !== 'manual' ? '' : 'off'} />
+                    <i class={config.prefs.autoListenAfterBriefing ? '' : 'off'} />
+                    <i class={config.prefs.duckMusicMode ? '' : 'off'} />
+                    <i class={config.prefs.autoVad ? '' : 'off'} />
+                  </span>
+                  <span class="walk-prefs-summary">{prefsSummaryText}</span>
+                </span>
+                <svg class="walk-prefs-chevron" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+                  <path d="M18 15l-6-6-6 6" />
+                </svg>
               </button>
             </div>
           </div>
