@@ -1054,6 +1054,22 @@ const EXACT_ZH_TO_EN = {
   '🟡 设备令牌已就绪，但云端 Hub 尚未配置 Apple .p8 推送密钥': '🟡 Device token ready, but Apple .p8 key is not configured on Hub yet',
   '🔕 已关闭本机原生 App 推送（不影响 Safari 网页推送）': '🔕 Disabled Native App push (Safari Web Push untouched)',
   '已刷新原生 APNs 推送状态': 'Native APNs push status refreshed',
+  // Antigravity IDE revert to step (v0.9.42)
+  '↩ 撤回到此处': '↩ Revert here',
+  '↩ 撤回到此消息': '↩ Revert to this message',
+  '目标消息': 'Target Message',
+  '撤回后，此消息及之后的对话内容将被移除，原消息文本会自动回填到输入框方便你修改重发。': 'Reverting removes this message and all later turns, and fills the original text back into the input box so you can edit and resend.',
+  '⏳ 正在查询受影响的代码文件…': '⏳ Checking affected code files…',
+  '✨ 此位置之后没有涉及代码文件改动': '✨ No code file changes after this point',
+  '还原修改': 'Restore',
+  '删除新建': 'Delete new',
+  '恢复已删': 'Recreate',
+  '↩ 撤回对话并还原代码': '↩ Revert Chat & Code',
+  '💬 仅撤回对话，保留已改代码': '💬 Revert Chat Only (Keep Code)',
+  '⏳ 正在撤回…': '⏳ Reverting…',
+  '✅ 已撤回对话并还原代码，原消息已回填至输入框': '✅ Reverted chat & code; prompt restored to input box',
+  '✅ 已仅撤回对话（保留已改代码），原消息已回填至输入框': '✅ Reverted chat only (code kept); prompt restored to input box',
+  '↩ 已撤回到对话起点，可重新输入指令': '↩ Reverted to start of conversation — ready for a new prompt',
 };
 
 const REGEX_ZH_TO_EN = [
@@ -1263,6 +1279,13 @@ const REGEX_ZH_TO_EN = [
   [/^✅ 「(.+)」已安装官方 agy CLI，ACP 直连通道已启用！$/, '✅ Installed agy CLI on "$1" — ACP direct channel active!'],
   [/^⚠️ 「(.+)」安装失败：(.+)$/, '⚠️ Install failed on "$1": $2'],
   [/^🔑 正在「(.+)」打开官方 agy 登录授权页，请在电脑确认 Google 登录\.\.\.$/, '🔑 Opening official agy sign-in on "$1" — please confirm in its browser...'],
+  // Antigravity IDE revert dynamic strings (v0.9.42)
+  [/^📁 受影响的代码文件（共 (\d+) 个）$/, '📁 Affected Code Files ($1)'],
+  [/^↩ 撤回对话并还原代码（(\d+) 个文件）$/, '↩ Revert Chat & Code ($1 files)'],
+  [/^⚠️ 暂未获取到代码改动预览（(.+)）。你仍可选择下方操作，或点击取消。$/, '⚠️ Could not load code diff preview ($1). You can still choose an option below or cancel.'],
+  [/^❌ 撤回失败：(.+)$/, '❌ Revert failed: $1'],
+  [/^✅ 已撤回对话并还原 (\d+) 个代码文件，原消息已回填至输入框$/, '✅ Reverted chat & restored $1 files; prompt filled into input'],
+  [/^✅ 已撤回对话并还原 (\d+) 个代码文件$/, '✅ Reverted chat & restored $1 files'],
 ];
 
 export function getLangPref() {

@@ -546,6 +546,33 @@ export function Sheets() {
         </div>
       </div>
 
+      {/* 抽屉：Antigravity 撤回到指定消息确认面板（带受影响文件预览与显式取消操作） */}
+      <div
+        class="sheet-backdrop"
+        id="revertConfirmSheet"
+        onClick={e => {
+          if (e.target === e.currentTarget) {
+            (window as any).cancelAntigravityRevertSheet?.();
+          }
+        }}
+      >
+        <div class="sheet-panel revert-confirm-sheet-panel">
+          <div class="sheet-handle"></div>
+          <div class="sheet-title" style="margin-bottom:10px;">
+            <span id="revertConfirmSheetTitle">↩ 撤回到此消息</span>
+            <button
+              type="button"
+              style="border:none;background:transparent;color:var(--muted);font-size:18px;cursor:pointer;padding:4px 8px;flex-shrink:0;"
+              aria-label="取消"
+              onClick={() => (window as any).cancelAntigravityRevertSheet?.()}
+            >
+              ✕
+            </button>
+          </div>
+          <div id="revertConfirmSheetBody"></div>
+        </div>
+      </div>
+
       {/* 全屏 HTML 交互预览层（自带顶部安全区返回栏，解决移动端与 iOS 主屏幕模式体验网页无返回键问题） */}
       <div
         id="htmlPreviewOverlay"

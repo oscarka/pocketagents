@@ -811,14 +811,20 @@ export function parseAntigravityTranscript(jsonlText, {
   // Guard against stale summaries from another LanguageServer instance whose `lastModifiedTime`
   // is older than `transcript.jsonl` on disk.
   const isSummaryOlderThanDisk = liveLastModifiedMs > 0 && mtimeMs > 0 && mtimeMs - liveLastModifiedMs > 5000
+  let revertedToEmpty = false
   if (liveStatus !== 'CASCADE_RUN_STATUS_RUNNING' && !isSummaryOlderThanDisk) {
-    if (typeof liveStepCount === 'number' && Number.isFinite(liveStepCount) && liveStepCount > 0) {
-      while (
-        lines.length > 0
-        && typeof lines[lines.length - 1].step_index === 'number'
-        && lines[lines.length - 1].step_index >= liveStepCount
-      ) {
-        lines.pop()
+    if (typeof liveStepCount === 'number' && Number.isFinite(liveStepCount) && liveStepCount >= 0) {
+      if (liveStepCount === 0 && hasLiveSummary && liveLastModifiedMs > 0) {
+        lines.length = 0
+        revertedToEmpty = true
+      } else if (liveStepCount > 0) {
+        while (
+          lines.length > 0
+          && typeof lines[lines.length - 1].step_index === 'number'
+          && lines[lines.length - 1].step_index >= liveStepCount
+        ) {
+          lines.pop()
+        }
       }
     }
     if (typeof liveLastUserInputStepIndex === 'number' && Number.isFinite(liveLastUserInputStepIndex) && liveLastUserInputStepIndex >= 0) {
@@ -831,7 +837,7 @@ export function parseAntigravityTranscript(jsonlText, {
     }
   }
 
-  if (lines.length === 0) return null
+  if (lines.length === 0 && !revertedToEmpty) return null
 
   const transcript = []
   let boundWs = nativeWorkspace || null
@@ -963,6 +969,9 @@ export function parseAntigravityTranscript(jsonlText, {
         tools: [],
         toolCalls: [],
         time: stepTime || lastActivity,
+        ...(typeof step.step_index === 'number' && Number.isFinite(step.step_index)
+          ? { stepIndex: step.step_index }
+          : {}),
       })
       continue
     }
@@ -1331,7 +1340,7 @@ export function parseAntigravityTranscript(jsonlText, {
     })
   }
 
-  if (transcript.length === 0) return null
+  if (transcript.length === 0 && !revertedToEmpty) return null
 
   const sessionId = `${AGY_IDE_PREFIX}${conversationId}`
   const firstUserMsg = transcript.find(m => m.role === 'user')?.text || ''
@@ -1348,7 +1357,7 @@ export function parseAntigravityTranscript(jsonlText, {
     parentConversationId
     || liveTrajectoryMeta?.subagentSpec
     || Number(liveTrajectoryMeta?.nestingDepth) > 0
-    || (!firstUserMsg && firstStep.type === 'SYSTEM_MESSAGE')
+    || (!firstUserMsg && firstStep?.type === 'SYSTEM_MESSAGE')
     || isWorkflowWorker,
   )
 
@@ -1665,7 +1674,7 @@ export function parseAntigravityTranscript(jsonlText, {
   const isErrorStep = lastStepType === 'ERROR_MESSAGE' || lastStep.status === 'ERROR' || Boolean(trailingError)
   const hasFinalConclusion = isConcludedStep
     || (!hasActiveBackgroundTask && !isLsRunning && !isErrorStep && lastConclusionAt > 0 && lastConclusionAt >= lastUserInputAt)
-  const isMidTurn = hasActiveBackgroundTask || isLsRunning || (!hasFinalConclusion && !isErrorStep)
+  const isMidTurn = !revertedToEmpty && (hasActiveBackgroundTask || isLsRunning || (!hasFinalConclusion && !isErrorStep))
 
   const isRecentlyActive = isLsRunning
     || hasActiveBackgroundTask
@@ -1760,7 +1769,7 @@ export function parseAntigravityTranscript(jsonlText, {
     updatedAt: lastActivity,
     lastConclusionAt: effectiveLastConclusionAt,
     lastInterruptedAt: isErrorStep ? lastActivity : 0,
-    lastOutput: lastConclusionText || lastOutput || String(slicedTranscript.at(-1)?.text || '').slice(0, 400),
+    lastOutput: lastConclusionText || lastOutput || String(slicedTranscript.at(-1)?.text || '').slice(0, 400) || (revertedToEmpty ? '↩ 已撤回到对话起点，可重新输入指令' : ''),
     runningSummary: runningSummary || lastOutput,
     queuedSteers: [],
     changedFiles,
@@ -4529,5 +4538,230 @@ export async function toggleAntigravityPlugin(
       enabled: Boolean(enabled),
       error: errText.slice(0, 180) || `执行 agy plugin ${verb} 失败`,
     }
+  }
+}
+
+function normalizeRevertFilePath(fileUri, preferredCwd = '') {
+  const raw = String(fileUri || '').trim()
+  if (!raw) return { fileUri: '', path: '', relPath: '', basename: '' }
+  let fsPath = raw.replace(/^file:\/\//i, '')
+  try {
+    fsPath = decodeURIComponent(fsPath)
+  } catch { }
+  const cleanCwd = String(preferredCwd || '').replace(/\/+$/, '')
+  let relPath = fsPath
+  if (cleanCwd && fsPath.startsWith(`${cleanCwd}/`)) {
+    relPath = fsPath.slice(cleanCwd.length + 1)
+  }
+  const base = fsPath.split('/').filter(Boolean).pop() || fsPath
+  return { fileUri: raw, path: fsPath, relPath, basename: base }
+}
+
+function normalizeRevertPreviewItem(item, preferredCwd = '') {
+  const info = normalizeRevertFilePath(item?.fileUri || item?.uri || '', preferredCwd)
+  if (!info.fileUri) return null
+  const rawAction = String(item?.actionType || '').toUpperCase()
+  let actionType = 'modify'
+  if (rawAction.includes('DELETE')) actionType = 'delete'
+  else if (rawAction.includes('CREATE')) actionType = 'create'
+  return {
+    ...info,
+    actionType,
+  }
+}
+
+/**
+ * Preview which workspace code files would be modified/deleted/recreated if an Antigravity IDE
+ * conversation is reverted to `stepIndex` via Connect-RPC `GetRevertPreview`.
+ */
+export async function previewAntigravityRevert(
+  sessionId,
+  stepIndex,
+  { preferredCwd = '', execImpl = execFileAsync, fetchImpl = globalThis.fetch } = {},
+) {
+  const rawConvId = toRawConversationId(sessionId)
+  const cleanStepIndex = Number(stepIndex)
+  if (!rawConvId || !isSafeAntigravityConvId(rawConvId)) {
+    return { ok: false, error: '无效的 Antigravity 会话 ID' }
+  }
+  if (!Number.isInteger(cleanStepIndex) || cleanStepIndex < 0) {
+    return { ok: false, error: '无效的撤回消息步骤索引' }
+  }
+  if (typeof fetchImpl !== 'function') {
+    return { ok: false, error: '当前环境不支持 Antigravity RPC 查询' }
+  }
+
+  const hubs = await discoverAntigravityHubInstances({ execImpl, preferredCwd })
+  if (hubs.length === 0) {
+    return { ok: false, error: '未检测到运行中的 Antigravity IDE 语言服务，请先在电脑上打开 Antigravity IDE' }
+  }
+
+  const orderedHubs = await probeHubsForTrajectory(hubs, rawConvId, fetchImpl)
+  let lastError = ''
+  for (const hub of orderedHubs) {
+    try {
+      const headers = {
+        'Content-Type': 'application/json',
+        'x-codeium-csrf-token': hub.csrfToken,
+      }
+      if (!hub.hasTargetTrajectory) {
+        await fetchImpl(
+          `http://${hub.address}/exa.language_server_pb.LanguageServerService/LoadTrajectory`,
+          {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ cascadeId: rawConvId }),
+          },
+        ).catch(() => {})
+      }
+      const { cascadeConfig } = await resolveCascadeConfigForHub(
+        hub,
+        rawConvId,
+        fetchImpl,
+        hub.trajectoryIds || [],
+      ).catch(() => ({ cascadeConfig: undefined }))
+      const resp = await fetchImpl(
+        `http://${hub.address}/exa.language_server_pb.LanguageServerService/GetRevertPreview`,
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            cascadeId: rawConvId,
+            stepIndex: cleanStepIndex,
+            ...(cascadeConfig ? { overrideConfig: cascadeConfig } : {}),
+          }),
+        },
+      )
+      const data = await resp.json().catch(() => ({}))
+      if (resp.ok && !data?.error && !data?.code) {
+        const rawList = Array.isArray(data?.codeEditPreviews) ? data.codeEditPreviews : []
+        const files = rawList
+          .map(it => normalizeRevertPreviewItem(it, preferredCwd))
+          .filter(Boolean)
+        return {
+          ok: true,
+          agentId: `${AGY_IDE_PREFIX}${rawConvId}`,
+          cascadeId: rawConvId,
+          stepIndex: cleanStepIndex,
+          files,
+          fileCount: files.length,
+        }
+      }
+      lastError = String(data?.message || data?.error || `HTTP ${resp.status}`).trim()
+    } catch (err) {
+      lastError = err?.message || String(err)
+    }
+  }
+  return {
+    ok: false,
+    error: redactText(lastError).slice(0, 180) || '无法获取 Antigravity 撤回预览，请确认对话已在电脑端加载',
+  }
+}
+
+/**
+ * Revert an Antigravity IDE conversation to `stepIndex` via Connect-RPC `RevertToCascadeStep`.
+ * Supports both full revert (`conversationOnly: false`, restoring code files) and chat-only revert
+ * (`conversationOnly: true`, keeping code changes intact).
+ */
+export async function revertAntigravityToStep(
+  sessionId,
+  stepIndex,
+  { conversationOnly = false, preferredCwd = '', execImpl = execFileAsync, fetchImpl = globalThis.fetch } = {},
+) {
+  const rawConvId = toRawConversationId(sessionId)
+  const cleanStepIndex = Number(stepIndex)
+  const onlyChat = Boolean(conversationOnly)
+  if (!rawConvId || !isSafeAntigravityConvId(rawConvId)) {
+    return { ok: false, error: '无效的 Antigravity 会话 ID' }
+  }
+  if (!Number.isInteger(cleanStepIndex) || cleanStepIndex < 0) {
+    return { ok: false, error: '无效的撤回消息步骤索引' }
+  }
+  if (typeof fetchImpl !== 'function') {
+    return { ok: false, error: '当前环境不支持 Antigravity RPC 撤回' }
+  }
+
+  const hubs = await discoverAntigravityHubInstances({ execImpl, preferredCwd })
+  if (hubs.length === 0) {
+    return { ok: false, error: '未检测到运行中的 Antigravity IDE 语言服务，请先在电脑上打开 Antigravity IDE' }
+  }
+
+  const orderedHubs = await probeHubsForTrajectory(hubs, rawConvId, fetchImpl)
+  let lastError = ''
+  for (const hub of orderedHubs) {
+    try {
+      const headers = {
+        'Content-Type': 'application/json',
+        'x-codeium-csrf-token': hub.csrfToken,
+      }
+      if (!hub.hasTargetTrajectory) {
+        await fetchImpl(
+          `http://${hub.address}/exa.language_server_pb.LanguageServerService/LoadTrajectory`,
+          {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ cascadeId: rawConvId }),
+          },
+        ).catch(() => {})
+      }
+      // Best-effort cancel any in-flight invocation before reverting
+      await fetchImpl(
+        `http://${hub.address}/exa.language_server_pb.LanguageServerService/CancelCascadeInvocation`,
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ cascadeId: rawConvId }),
+        },
+      ).catch(() => {})
+
+      const { cascadeConfig } = await resolveCascadeConfigForHub(
+        hub,
+        rawConvId,
+        fetchImpl,
+        hub.trajectoryIds || [],
+      ).catch(() => ({ cascadeConfig: undefined }))
+
+      const resp = await fetchImpl(
+        `http://${hub.address}/exa.language_server_pb.LanguageServerService/RevertToCascadeStep`,
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            cascadeId: rawConvId,
+            stepIndex: cleanStepIndex,
+            ...(cascadeConfig ? { overrideConfig: cascadeConfig } : {}),
+            conversationOnly: onlyChat,
+          }),
+        },
+      )
+      const data = await resp.json().catch(() => ({}))
+      if (resp.ok && !data?.error && !data?.code) {
+        cachedLiveSummariesAt = 0
+        sessionParseCache.delete(rawConvId)
+        const rawUris = Array.isArray(data?.metadata?.revertedUris) ? data.metadata.revertedUris : []
+        const revertedFiles = rawUris.map(u => normalizeRevertFilePath(u, preferredCwd)).filter(f => f.fileUri)
+        return {
+          ok: true,
+          agentId: `${AGY_IDE_PREFIX}${rawConvId}`,
+          cascadeId: rawConvId,
+          stepIndex: cleanStepIndex,
+          conversationOnly: onlyChat,
+          revertedFiles,
+          revertedCount: revertedFiles.length,
+          message: onlyChat
+            ? '✅ 已仅撤回对话（保留已改代码）'
+            : revertedFiles.length > 0
+              ? `✅ 已撤回对话并还原 ${revertedFiles.length} 个代码文件`
+              : '✅ 已撤回对话并还原代码',
+        }
+      }
+      lastError = String(data?.message || data?.error || `HTTP ${resp.status}`).trim()
+    } catch (err) {
+      lastError = err?.message || String(err)
+    }
+  }
+  return {
+    ok: false,
+    error: redactText(lastError).slice(0, 180) || '撤回失败，请确认 Antigravity IDE 正在电脑上运行',
   }
 }

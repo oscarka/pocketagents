@@ -198,6 +198,7 @@ test('v0.9.35 Web UI isolates native APNs route from Safari Web Push and transla
   assert.match(serverSrc, /\/api\/push\/apns\/unsubscribe/)
   assert.match(serverSrc, /\/api\/push\/apns\/test/)
   assert.match(controllerSrc, /isNativeIosApnsBridge/)
+  assert.match(controllerSrc, /__dshNativePush\.clearBadge/)
   assert.match(controllerSrc, /__dshHandleNativePushTap/)
   assert.match(controllerSrc, /__dshWalkStartReplyForPush/)
   assert.match(walkSheetsSrc, /__dshOnBackgroundPushWake/)

@@ -2128,9 +2128,29 @@ export class HubCore {
   }
 
   computeActionableBadgeCount(currentApprovalsCount = 0) {
+    const now = this.now()
+    const liveTaskIds = new Set()
+    const anyKnownTaskIds = new Set()
+    for (const host of this.hosts.values()) {
+      const tasks = Array.isArray(host?.bridgeState?.tasks) ? host.bridgeState.tasks : []
+      const isOnline = now - Number(host?.lastSeenAt || 0) <= 60_000
+      for (const t of tasks) {
+        if (!t?.id) continue
+        anyKnownTaskIds.add(String(t.id))
+        if (isOnline && !shouldSuppressTaskPush(t)) {
+          liveTaskIds.add(String(t.id))
+        }
+      }
+    }
     let unreadCount = 0
-    for (const entry of this.sessionReadState.values()) {
-      if (entry?.unread) unreadCount += 1
+    for (const [sessionId, entry] of this.sessionReadState.entries()) {
+      if (!entry?.unread) continue
+      if (liveTaskIds.has(String(sessionId))) {
+        unreadCount += 1
+      } else if (!anyKnownTaskIds.has(String(sessionId)) && now - Number(entry.at || 0) > 6 * 3600_000) {
+        // Clear stale ghost unread markers for deleted/gone sessions so badge never bloats forever
+        entry.unread = false
+      }
     }
     return Math.max(1, Number(currentApprovalsCount || 0) + unreadCount)
   }

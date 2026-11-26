@@ -439,6 +439,8 @@ export function initHubController() {
   const upgradingHostMap = {};
   const installingAgyCliMap = {};
   const dismissedAgyCliBannerHosts = new Set();
+  let lastRenderedUserMessages = {};
+  let activeRevertState = null;
   const selectedSessionModels = (() => {
     try {
       const raw = localStorage.getItem('dsh_selected_session_models_v1');
@@ -721,6 +723,9 @@ export function initHubController() {
 
   function clearHomeScreenAppBadge() {
     try {
+      if (typeof window !== 'undefined' && window.__dshNativePush && typeof window.__dshNativePush.clearBadge === 'function') {
+        Promise.resolve(window.__dshNativePush.clearBadge()).catch(() => { });
+      }
       if (navigator && typeof navigator.clearAppBadge === 'function') {
         navigator.clearAppBadge().catch(() => { });
       }
@@ -2985,13 +2990,13 @@ export function initHubController() {
     // DOM Diffing：如果会话内容和状态没变，不重绘 #chatMessages，保留用户展开的思考过程与滚动位置！
     const trSig = s.transcript
       .slice(-6)
-      .map(m => `${m.role}:${m.queuedCmdId || ''}:${m.expiredCmdId || ''}:${(m.text || '').length}:${(m.text || '').slice(-32)}:${(m.thinking || '').length}:${(m.tools || []).length}:${(m.artifacts || []).length}:${m.waitingForInput ? 1 : 0}`)
+      .map(m => `${m.role}:${typeof m.stepIndex === 'number' ? m.stepIndex : ''}:${m.queuedCmdId || ''}:${m.expiredCmdId || ''}:${(m.text || '').length}:${(m.text || '').slice(-32)}:${(m.thinking || '').length}:${(m.tools || []).length}:${(m.artifacts || []).length}:${m.waitingForInput ? 1 : 0}`)
       .join('|');
     const fcMeta = computeChangedFilesMeta(s.changedFiles);
     const fcReviewed = Boolean(fcMeta.sig && filesCardReviewedSigBySession.get(s.id) === fcMeta.sig);
     const fcCollapsed = !filesExpandedSessionIds.has(s.id);
     const artCollapsed = !artifactsExpandedSessionIds.has(s.id);
-    const chatKey = `${s.id}:${s.status}:${s.isStalledMidTurn ? 1 : 0}:${s.sessionRev || ''}:${s.transcript.length}:${hydratingWireSessionIds.has(s.id) ? 1 : 0}:${trSig}:${s.approvalObj?.code || ''}:${s.approvalObj?.settling ? 1 : 0}:${s.approvalObj?.lastError || ''}:${(s.changedFiles || []).length}:${fcMeta.sig}:${fcCollapsed ? 1 : 0}:${fcReviewed ? 1 : 0}:${artCollapsed ? 1 : 0}:${(s.artifacts || []).length}`;
+    const chatKey = `${s.id}:${s.status}:${hostOnline ? 1 : 0}:${s.isStalledMidTurn ? 1 : 0}:${s.sessionRev || ''}:${s.transcript.length}:${hydratingWireSessionIds.has(s.id) ? 1 : 0}:${trSig}:${s.approvalObj?.code || ''}:${s.approvalObj?.settling ? 1 : 0}:${s.approvalObj?.lastError || ''}:${(s.changedFiles || []).length}:${fcMeta.sig}:${fcCollapsed ? 1 : 0}:${fcReviewed ? 1 : 0}:${artCollapsed ? 1 : 0}:${(s.artifacts || []).length}`;
     if (chatKey === lastRenderedChatKey) {
       const existingBox = document.getElementById('chatMessages');
       if (existingBox) hydrateAntigravityPluginCards(found.host, existingBox);
@@ -3086,6 +3091,13 @@ export function initHubController() {
     }
 
     lastRenderedAssistantTexts = {};
+    lastRenderedUserMessages = {};
+    const isAntigravityRevertEligibleSession = Boolean(
+      (s.harness === 'antigravity-ide' || String(s.id || '').startsWith('agy-ide:')) &&
+      hostOnline &&
+      !isObserveOnly &&
+      s.status !== 'running'
+    );
     const bubblesHtml = msgs.map((m, msgIdx) => {
       if (m.role === 'user') {
         const queuedBadge = m.queuedCmdId
@@ -3111,6 +3123,32 @@ export function initHubController() {
           }).join('')}</div>`;
         } else if (parsedUser.pendingRemoteImgCount > 0) {
           mediaGridHtml = `<div class="queued-cmd-pill"><span>🖼️ 已附带 ${parsedUser.pendingRemoteImgCount} 张截图</span></div>`;
+        }
+        const canRevertThisMsg = Boolean(
+          isAntigravityRevertEligibleSession &&
+          typeof m.stepIndex === 'number' &&
+          Number.isFinite(m.stepIndex) &&
+          m.stepIndex >= 0 &&
+          !m.queuedCmdId &&
+          !m.expiredCmdId &&
+          !m.optimistic
+        );
+        if (canRevertThisMsg) {
+          lastRenderedUserMessages[msgIdx] = {
+            stepIndex: m.stepIndex,
+            text: parsedUser.text || '',
+            sessionId: s.id,
+            hostId: s.hostId || found?.host?.hostId || '',
+            cwd: s.cwd || '',
+          };
+          return `
+            <div class="user-bubble-group">
+              <div class="bubble user">${textHtml}${mediaGridHtml}${queuedBadge}</div>
+              <div class="user-bubble-actions">
+                <button type="button" class="user-revert-trigger" onclick="event.stopPropagation(); openAntigravityRevertSheet(${msgIdx})">↩ 撤回到此处</button>
+              </div>
+            </div>
+          `;
         }
         return `<div class="bubble user">${textHtml}${mediaGridHtml}${queuedBadge}</div>`;
       }
@@ -5214,6 +5252,298 @@ export function initHubController() {
       if (document.getElementById('pluginDetailSheet')?.classList.contains('open')) {
         renderAntigravityPluginSheetBody();
       }
+    }
+  }
+
+  async function waitForHostCommandResult(cmdId, timeoutMs = 10000) {
+    const cleanId = String(cmdId || '').trim();
+    if (!cleanId) return { ok: false, error: '无效的指令编号' };
+    const deadline = Date.now() + Math.max(1000, Number(timeoutMs) || 10000);
+    while (Date.now() < deadline) {
+      await sleepMs(220);
+      try {
+        const res = await apiFetch(`/api/commands/${encodeURIComponent(cleanId)}`);
+        const data = await res.json().catch(() => null);
+        if (data?.ready || data?.command?.status === 'completed') {
+          return data?.result || { ok: false, error: '电脑端未返回结果' };
+        }
+      } catch {
+        // retry until timeout
+      }
+    }
+    return { ok: false, error: '等待电脑端响应超时，请确认电脑在线且已更新至最新版' };
+  }
+
+  function renderAntigravityRevertSheetBody() {
+    const bodyEl = document.getElementById('revertConfirmSheetBody');
+    if (!bodyEl) return;
+    const st = activeRevertState;
+    if (!st) {
+      bodyEl.innerHTML = '';
+      return;
+    }
+    const quoteText = st.msgText ? st.msgText : '(媒体消息)';
+    let previewBoxHtml = '';
+    if (st.loadingPreview) {
+      previewBoxHtml = `
+        <div class="revert-files-box">
+          <div class="revert-preview-status">⏳ 正在查询受影响的代码文件…</div>
+        </div>
+      `;
+    } else if (st.previewError) {
+      previewBoxHtml = `
+        <div class="revert-files-box">
+          <div class="revert-preview-status warn">⚠️ 暂未获取到代码改动预览（${esc(st.previewError)}）。你仍可选择下方操作，或点击取消。</div>
+        </div>
+      `;
+    } else if (Array.isArray(st.previewFiles) && st.previewFiles.length > 0) {
+      const actionLabelMap = {
+        modify: '还原修改',
+        delete: '删除新建',
+        create: '恢复已删',
+      };
+      const rowsHtml = st.previewFiles.map(file => {
+        const kind = file?.actionType === 'delete' || file?.actionType === 'create' ? file.actionType : 'modify';
+        const label = actionLabelMap[kind] || '还原修改';
+        const fileName = file?.basename || file?.path || file?.fileUri || 'unknown';
+        const displayPath = file?.relPath || file?.path || '';
+        return `
+          <div class="revert-file-row">
+            <div class="revert-file-meta">
+              <div class="revert-file-name">${esc(fileName)}</div>
+              ${displayPath && displayPath !== fileName ? `<div class="revert-file-path">${esc(displayPath)}</div>` : ''}
+            </div>
+            <span class="revert-action-chip ${kind}">${label}</span>
+          </div>
+        `;
+      }).join('');
+      previewBoxHtml = `
+        <div class="revert-files-box">
+          <div class="revert-files-header">
+            <span>📁 受影响的代码文件（共 ${st.previewFiles.length} 个）</span>
+          </div>
+          <div class="revert-files-list">${rowsHtml}</div>
+        </div>
+      `;
+    } else {
+      previewBoxHtml = `
+        <div class="revert-files-box">
+          <div class="revert-preview-status clean">✨ 此位置之后没有涉及代码文件改动</div>
+        </div>
+      `;
+    }
+
+    const errorHtml = st.revertError
+      ? `<div class="revert-error-banner">❌ 撤回失败：${esc(st.revertError)}</div>`
+      : '';
+
+    const affectedCount = Array.isArray(st.previewFiles) ? st.previewFiles.length : 0;
+    const revertWithCodeLabel = st.reverting && st.revertingMode === 'with_code'
+      ? '⏳ 正在撤回…'
+      : (affectedCount > 0 ? `↩ 撤回对话并还原代码（${affectedCount} 个文件）` : '↩ 撤回对话并还原代码');
+    const revertChatOnlyLabel = st.reverting && st.revertingMode === 'chat_only'
+      ? '⏳ 正在撤回…'
+      : '💬 仅撤回对话，保留已改代码';
+
+    bodyEl.innerHTML = `
+      <div class="revert-quote-box">
+        <div class="revert-quote-label">目标消息</div>
+        <div class="revert-quote-text">${esc(quoteText)}</div>
+        <div class="revert-hint-line">撤回后，此消息及之后的对话内容将被移除，原消息文本会自动回填到输入框方便你修改重发。</div>
+      </div>
+      ${previewBoxHtml}
+      ${errorHtml}
+      <div class="revert-actions-stack">
+        <button
+          type="button"
+          class="revert-action-btn danger"
+          id="revertWithCodeBtn"
+          ${st.reverting ? 'disabled' : ''}
+          onclick="confirmAntigravityRevert(false)"
+        >${revertWithCodeLabel}</button>
+        <button
+          type="button"
+          class="revert-action-btn secondary"
+          id="revertChatOnlyBtn"
+          ${st.reverting ? 'disabled' : ''}
+          onclick="confirmAntigravityRevert(true)"
+        >${revertChatOnlyLabel}</button>
+        <button
+          type="button"
+          class="revert-action-btn cancel"
+          id="revertCancelBtn"
+          onclick="cancelAntigravityRevertSheet()"
+        >取消</button>
+      </div>
+    `;
+    applyLangToDom(bodyEl, langPref);
+  }
+
+  function cancelAntigravityRevertSheet() {
+    activeRevertState = null;
+    closeSheet('revertConfirmSheet');
+  }
+
+  async function openAntigravityRevertSheet(msgIdx) {
+    const meta = lastRenderedUserMessages[msgIdx];
+    if (!meta || typeof meta.stepIndex !== 'number') {
+      showToast('⚠️ 当前消息不支持撤回');
+      return;
+    }
+    const found = findSessionGlobal(meta.sessionId || activeSessionId);
+    const hostId = meta.hostId || found?.host?.hostId || '';
+    const sessionId = meta.sessionId || found?.session?.id || activeSessionId || '';
+    if (!hostId || !sessionId) {
+      showToast('⚠️ 找不到所属会话或电脑');
+      return;
+    }
+    if (found?.session?.status === 'running') {
+      showToast('⚠️ 任务正在执行中，请先停止后再撤回');
+      return;
+    }
+
+    const previewToken = `rev_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    activeRevertState = {
+      previewToken,
+      sessionId,
+      hostId,
+      cwd: meta.cwd || found?.session?.cwd || '',
+      stepIndex: meta.stepIndex,
+      msgText: meta.text || '',
+      loadingPreview: true,
+      previewFiles: [],
+      previewError: '',
+      reverting: false,
+      revertingMode: '',
+      revertError: '',
+    };
+    renderAntigravityRevertSheetBody();
+    openSheet('revertConfirmSheet');
+
+    try {
+      const dispatchRes = await dispatchHostCommand(hostId, {
+        type: 'revert_preview',
+        agentId: sessionId,
+        cwd: activeRevertState.cwd,
+        stepIndex: meta.stepIndex,
+      });
+      if (!activeRevertState || activeRevertState.previewToken !== previewToken) return;
+      if (!dispatchRes || dispatchRes.ok === false) {
+        activeRevertState.loadingPreview = false;
+        activeRevertState.previewError = dispatchRes?.error || '无法联系电脑端';
+        renderAntigravityRevertSheetBody();
+        return;
+      }
+      const cmdId = dispatchRes?.command?.id;
+      const result = await waitForHostCommandResult(cmdId, 9000);
+      if (!activeRevertState || activeRevertState.previewToken !== previewToken) return;
+      activeRevertState.loadingPreview = false;
+      if (result && result.ok !== false) {
+        activeRevertState.previewFiles = Array.isArray(result.files) ? result.files : [];
+        activeRevertState.previewError = '';
+      } else {
+        activeRevertState.previewFiles = [];
+        activeRevertState.previewError = result?.error || '预览请求失败';
+      }
+      renderAntigravityRevertSheetBody();
+    } catch (err) {
+      if (!activeRevertState || activeRevertState.previewToken !== previewToken) return;
+      activeRevertState.loadingPreview = false;
+      activeRevertState.previewError = (err && err.message) || String(err);
+      renderAntigravityRevertSheetBody();
+    }
+  }
+
+  async function confirmAntigravityRevert(conversationOnly = false) {
+    const st = activeRevertState;
+    if (!st || st.reverting) return;
+    const token = st.previewToken;
+    st.reverting = true;
+    st.revertingMode = conversationOnly ? 'chat_only' : 'with_code';
+    st.revertError = '';
+    renderAntigravityRevertSheetBody();
+
+    try {
+      const dispatchRes = await dispatchHostCommand(st.hostId, {
+        type: 'revert_to_step',
+        agentId: st.sessionId,
+        cwd: st.cwd,
+        stepIndex: st.stepIndex,
+        conversationOnly: Boolean(conversationOnly),
+      });
+      if (!activeRevertState || activeRevertState.previewToken !== token) return;
+      if (!dispatchRes || dispatchRes.ok === false) {
+        st.reverting = false;
+        st.revertingMode = '';
+        st.revertError = dispatchRes?.error || '指令发送失败';
+        renderAntigravityRevertSheetBody();
+        return;
+      }
+      const cmdId = dispatchRes?.command?.id;
+      const result = await waitForHostCommandResult(cmdId, 12000);
+      if (!activeRevertState || activeRevertState.previewToken !== token) return;
+      if (!result || result.ok === false) {
+        st.reverting = false;
+        st.revertingMode = '';
+        st.revertError = result?.error || result?.message || '电脑端执行撤回失败';
+        renderAntigravityRevertSheetBody();
+        return;
+      }
+
+      const restoredText = String(st.msgText || '').trim();
+      const targetSessionId = st.sessionId;
+      const revertedCount = Number(result.revertedCount) || (Array.isArray(result.revertedFiles) ? result.revertedFiles.length : 0);
+
+      // Clear local transcript caches so the rolled-back shorter transcript renders cleanly immediately
+      hydratedWireTranscriptBySession.delete(targetSessionId);
+      expandedTranscriptBySession.delete(targetSessionId);
+      lastRenderedChatKey = '';
+
+      activeRevertState = null;
+      closeSheet('revertConfirmSheet');
+
+      let filledIntoComposer = false;
+      const input = document.getElementById('globalPromptInput');
+      if (restoredText && input && !String(input.value || '').trim()) {
+        input.value = restoredText;
+        writeComposerDraftValue(targetSessionId, restoredText, { savedAt: Date.now() });
+        autoGrowComposer();
+        try {
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          input.focus();
+        } catch { }
+        filledIntoComposer = true;
+      }
+
+      if (conversationOnly) {
+        showToast(
+          filledIntoComposer
+            ? '✅ 已仅撤回对话（保留已改代码），原消息已回填至输入框'
+            : '✅ 已仅撤回对话（保留已改代码）'
+        );
+      } else if (revertedCount > 0) {
+        showToast(
+          filledIntoComposer
+            ? `✅ 已撤回对话并还原 ${revertedCount} 个代码文件，原消息已回填至输入框`
+            : `✅ 已撤回对话并还原 ${revertedCount} 个代码文件`
+        );
+      } else {
+        showToast(
+          filledIntoComposer
+            ? '✅ 已撤回对话并还原代码，原消息已回填至输入框'
+            : '✅ 已撤回对话并还原代码'
+        );
+      }
+
+      void fetchState({ silent: true, forceFresh: true });
+      setTimeout(() => { void fetchState({ silent: true, forceFresh: true }); }, 650);
+      setTimeout(() => { void fetchState({ silent: true, forceFresh: true }); }, 1600);
+    } catch (err) {
+      if (!activeRevertState || activeRevertState.previewToken !== token) return;
+      st.reverting = false;
+      st.revertingMode = '';
+      st.revertError = (err && err.message) || String(err);
+      renderAntigravityRevertSheetBody();
     }
   }
 
@@ -11790,6 +12120,9 @@ export function initHubController() {
     stripRedundantProjectPrefix,
     demoCopyNpx: () => demoSandbox?.copyNpxCommand?.(),
     demoResetSandbox: () => demoSandbox?.reset?.(),
+    openAntigravityRevertSheet,
+    confirmAntigravityRevert,
+    cancelAntigravityRevertSheet,
   });
 
   triageCtrl = createTriageDeckController({

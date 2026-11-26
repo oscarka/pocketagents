@@ -24,8 +24,10 @@ import {
   invalidateAntigravityPluginsCache,
   isAntigravityIdeSessionId,
   loadAntigravityIdeSessions,
+  previewAntigravityRevert,
   resolveAntigravityModelLabel,
   resolveAntigravityModelSlug,
+  revertAntigravityToStep,
   setAntigravityConversationPinned,
   setAntigravityConversationTitle,
   toggleAntigravityPlugin,
@@ -1443,7 +1445,14 @@ export class HubAgent {
             }
           }
           executedAny = true
-          if (cmd?.type === 'read_file' || cmd?.type === 'list_files' || cmd?.type === 'load_full_transcript' || cmd?.type === 'toggle_plugin') {
+          if (
+            cmd?.type === 'read_file'
+            || cmd?.type === 'list_files'
+            || cmd?.type === 'load_full_transcript'
+            || cmd?.type === 'toggle_plugin'
+            || cmd?.type === 'revert_preview'
+            || cmd?.type === 'revert_to_step'
+          ) {
             hasFastReadCmd = true
           }
           const outcome = await this.handleHubCommand(cmd)
@@ -1881,6 +1890,39 @@ export class HubAgent {
             execImpl: this.execImpl,
           })
           invalidateAntigravityPluginsCache()
+          return res
+        }
+        case 'revert_preview': {
+          const targetId = String(cmd.agentId ?? '').trim()
+          if (!isAntigravityIdeSessionId(targetId)) {
+            return { ok: false, error: '当前仅支持 Antigravity IDE 会话撤回预览' }
+          }
+          const agySess = (this.cachedAgySessions || []).find(s => s.id === targetId)
+          return await previewAntigravityRevert(targetId, cmd.stepIndex, {
+            preferredCwd: cmd.cwd || agySess?.cwd || '',
+            execImpl: this.execImpl,
+            fetchImpl: this.fetch,
+          })
+        }
+        case 'revert_to_step': {
+          const targetId = String(cmd.agentId ?? '').trim()
+          if (!isAntigravityIdeSessionId(targetId)) {
+            return { ok: false, error: '当前仅支持 Antigravity IDE 会话撤回' }
+          }
+          const agySess = (this.cachedAgySessions || []).find(s => s.id === targetId)
+          const res = await revertAntigravityToStep(targetId, cmd.stepIndex, {
+            conversationOnly: Boolean(cmd.conversationOnly),
+            preferredCwd: cmd.cwd || agySess?.cwd || '',
+            execImpl: this.execImpl,
+            fetchImpl: this.fetch,
+          })
+          if (res?.ok) {
+            this.pendingUserPrompts.delete(targetId)
+            this.lastFullHeartbeatAt = 0
+            this.lastAckedBridgeStateSig = ''
+            this.pendingRetick = true
+            this.scheduleFollowUpTick?.(450)
+          }
           return res
         }
         case 'list_files':
