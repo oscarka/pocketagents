@@ -3,12 +3,12 @@ name: FoloToy AI Passport Firmware
 on:
   push:
     branches:
+      - "main"
       - "feat/folotoy-passport"
     paths:
       - "firmware/folotoy-passport/**"
       - "hub/device-api.js"
-      - "hub/voice-copilot.js"
-      - "hub/server.js"
+      - "hub/device-setup.html"
       - "dsh-feishu/test/device-lite-api.test.js"
       - ".github/workflows/passport-firmware.yml"
   workflow_dispatch:

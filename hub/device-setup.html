@@ -277,12 +277,17 @@ pa set http://192.168.1.25:8788 dev_请先点上方一键生成令牌</div>
       return h;
     }
 
+    function formatCliSsid(ssid) {
+      return /\s/.test(ssid) ? `"${ssid.replace(/"/g, '')}"` : ssid;
+    }
+
     function updateCmdPreview() {
       const ssid = $('wifiSsid').value.trim() || 'MyHome_2.4G';
       const pass = $('wifiPass').value;
       const url = $('hubUrlInput').value.trim() || 'http://192.168.1.25:8788';
       const tok = $('deviceTokenInput').value.trim() || 'dev_请先点上方一键生成令牌';
-      const wifiLine = pass ? `pa wifi ${ssid} ${pass}` : `pa wifi ${ssid}`;
+      const safeSsid = formatCliSsid(ssid);
+      const wifiLine = pass ? `pa wifi ${safeSsid} ${pass}` : `pa wifi ${safeSsid}`;
       const setLine = `pa set ${url} ${tok}`;
       $('cmdPreview').textContent = `${wifiLine}\n${setLine}`;
 
@@ -502,10 +507,11 @@ pa set http://192.168.1.25:8788 dev_请先点上方一键生成令牌</div>
 
         const encoder = new TextEncoder();
         writer = port.writable.getWriter();
-        const wifiCmd = pass ? `pa wifi ${ssid} ${pass}\r\n` : `pa wifi ${ssid}\r\n`;
+        const safeSsid = formatCliSsid(ssid);
+        const wifiCmd = pass ? `pa wifi ${safeSsid} ${pass}\r\n` : `pa wifi ${safeSsid}\r\n`;
         const setCmd = tok ? `pa set ${url} ${tok}\r\n` : `pa set ${url}\r\n`;
 
-        appendLog(`> pa wifi ${ssid} ${pass ? '********' : '(open)'}\n`);
+        appendLog(`> pa wifi ${safeSsid} ${pass ? '********' : '(open)'}\n`);
         await writer.write(encoder.encode(wifiCmd));
         await new Promise(r => setTimeout(r, 350));
 

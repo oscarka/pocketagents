@@ -107,8 +107,10 @@ static void start_setup_portal_now(void)
 {
     s_portal_saved_at_ms = 0;
     if (pa_portal_start(&s_cfg, on_portal_phone, on_portal_saved)) {
+        char ap_ssid[32] = { 0 };
+        pa_portal_get_ap_ssid(ap_ssid, sizeof(ap_ssid));
         if (xSemaphoreTake(s_state_mux, pdMS_TO_TICKS(100)) == pdTRUE) {
-            pa_state_enter_setup(&s_state, PA_PORTAL_AP_SSID, now_ms());
+            pa_state_enter_setup(&s_state, ap_ssid, now_ms());
             xSemaphoreGive(s_state_mux);
         }
         refresh_ui_now();
@@ -195,8 +197,9 @@ static void console_worker_task(void *arg)
             }
             continue;
         }
-        if (pos + 1 < sizeof(line) && ch >= 0x20 && ch < 0x7F) {
-            line[pos++] = (char)ch;
+        // Accept full UTF-8 bytes (>= 0x20, excluding DEL 0x7F) so Chinese Wi-Fi SSIDs work via USB serial
+        if (pos + 1 < sizeof(line) && byte >= 0x20u && byte != 0x7Fu) {
+            line[pos++] = (char)byte;
         }
     }
 }
@@ -295,7 +298,8 @@ static void net_worker_task(void *arg)
     char last_rev[20] = { 0 };
     uint32_t last_poll_ms = 0;
     uint32_t last_bat_ms = 0;
-    uint32_t boot_ms = now_ms();
+    uint32_t disconnected_since_ms = now_ms();
+    bool ever_connected = false;
     bool auto_portal_triggered = false;
 
     while (true) {
@@ -309,7 +313,8 @@ static void net_worker_task(void *arg)
             if (job.dispatch.cmd == PA_CMD_EXIT_SETUP) {
                 stop_setup_portal_now();
                 pa_net_wifi_reconnect(&s_cfg);
-                boot_ms = now_ms();
+                disconnected_since_ms = now_ms();
+                ever_connected = false;
                 auto_portal_triggered = false;
                 last_rev[0] = '\0';
                 last_poll_ms = 0;
@@ -390,19 +395,26 @@ static void net_worker_task(void *arg)
             last_bat_ms = t;
         }
 
-        // 3. Cleanly tear down SoftAP 900ms after phone /save (gives TCP ACK time to deliver SAVE_OK_HTML),
-        //    then re-enable STA reconnect so right password joins in ~3s and wrong password auto-reopens SoftAP in 14s!
+        // 3. Cleanly tear down SoftAP 900ms after phone /save (gives TCP ACK time to deliver JSON/HTML),
+        //    then reconnect pure STA on the discovered channel in <1s!
         if (pa_portal_is_active() && s_portal_saved_at_ms != 0 && (t - s_portal_saved_at_ms) >= 900u) {
             s_portal_saved_at_ms = 0;
             stop_setup_portal_now();
             pa_net_wifi_reconnect(&s_cfg);
-            boot_ms = now_ms();
+            disconnected_since_ms = now_ms();
+            ever_connected = false;
             auto_portal_triggered = false;
             last_rev[0] = '\0';
             last_poll_ms = 0;
         }
 
         bool wifi_ok = pa_net_is_wifi_connected();
+        if (wifi_ok) {
+            ever_connected = true;
+            disconnected_since_ms = 0;
+        } else if (disconnected_since_ms == 0) {
+            disconnected_since_ms = t;
+        }
 
         // Skip Hub polling while in Offline Demo Mode or holding SoftAP open
         bool skip_poll = false;
@@ -412,24 +424,24 @@ static void net_worker_task(void *arg)
         }
         if (skip_poll) continue;
 
-        // 4. Auto-open SoftAP Captive Portal if Wi-Fi fails to connect on real hardware!
-        //    Fresh flash (no saved Wi-Fi): 4.5s (Web Simulator connects in ~1.5s!).
-        //    Saved Wi-Fi unreachable: 14s.
+        // 4. Auto-open SoftAP Captive Portal ONLY on cold boot failure (never on transient mid-session blips!)
         if (!wifi_ok) {
-            uint32_t grace_ms = s_cfg.has_saved_wifi ? 14000u : 4500u;
-            if (!auto_portal_triggered && (t - boot_ms) >= grace_ms) {
+            uint32_t elapsed = (disconnected_since_ms != 0) ? (t - disconnected_since_ms) : 0u;
+            if (pa_should_auto_open_portal(wifi_ok, ever_connected, s_cfg.has_saved_wifi,
+                                           auto_portal_triggered, elapsed)) {
                 auto_portal_triggered = true;
                 ESP_LOGI(TAG, "[PA] Wi-Fi not connected after %lums -> auto-starting SoftAP portal",
-                         (unsigned long)grace_ms);
+                         (unsigned long)elapsed);
                 start_setup_portal_now();
                 continue;
             }
             if (last_poll_ms != 0 && (t - last_poll_ms) < 1200u) continue;
             last_poll_ms = t;
+            int reason = pa_net_get_last_disconnect_reason();
             if (xSemaphoreTake(s_state_mux, pdMS_TO_TICKS(50)) == pdTRUE) {
                 s_state.net_status = PA_NET_CONNECTING;
                 s_state.wifi_ip[0] = '\0';
-                snprintf(s_state.net_detail, sizeof(s_state.net_detail), "正在连 Wi-Fi...");
+                pa_wifi_reason_zh(reason, s_state.net_detail, sizeof(s_state.net_detail));
                 xSemaphoreGive(s_state_mux);
             }
             refresh_ui_now();

@@ -282,12 +282,60 @@ static void test_dns_captive_portal_edns0(void)
     assert(pa_dns_build_captive_reply(bad, sizeof(bad), sizeof(bad), ip4) == 0);
 }
 
+static void test_wifi_reconnect_reason_and_quoted_cli(void)
+{
+    // 1. Quoted SSID with spaces & UTF-8 Chinese characters
+    char a1[160], a2[96];
+    assert(pa_parse_console_cmd("pa wifi \"My Home 2.4G\" my secret pass\r\n",
+                                a1, sizeof(a1), a2, sizeof(a2)) == 2);
+    assert(strcmp(a1, "My Home 2.4G") == 0);
+    assert(strcmp(a2, "my secret pass") == 0);
+
+    assert(pa_parse_console_cmd("pa wifi \"咖啡馆 2.4G\"\n",
+                                a1, sizeof(a1), a2, sizeof(a2)) == 2);
+    assert(strcmp(a1, "咖啡馆 2.4G") == 0);
+    assert(a2[0] == '\0');
+
+    // 2. Exponential backoff curve (78/esp-wifi-connect pattern)
+    assert(pa_wifi_backoff_ms(0) == 2000u);
+    assert(pa_wifi_backoff_ms(1) == 4000u);
+    assert(pa_wifi_backoff_ms(2) == 8000u);
+    assert(pa_wifi_backoff_ms(3) == 15000u);
+    assert(pa_wifi_backoff_ms(4) == 30000u);
+    assert(pa_wifi_backoff_ms(20) == 30000u);
+
+    // 3. Disconnect reason Chinese diagnostics
+    char msg[64];
+    pa_wifi_reason_zh(0, msg, sizeof(msg));
+    assert(strstr(msg, "Wi-Fi") != NULL);
+    pa_wifi_reason_zh(202, msg, sizeof(msg));
+    assert(strstr(msg, "密码错误") != NULL);
+    pa_wifi_reason_zh(15, msg, sizeof(msg));
+    assert(strstr(msg, "密码错误") != NULL);
+    pa_wifi_reason_zh(201, msg, sizeof(msg));
+    assert(strstr(msg, "2.4G") != NULL);
+    pa_wifi_reason_zh(200, msg, sizeof(msg));
+    assert(strstr(msg, "信号") != NULL);
+
+    // 4. Auto-portal guard: NEVER kick an already-connected session back to SoftAP on transient blip!
+    assert(pa_should_auto_open_portal(false, true, true, false, 60000u) == false);
+    assert(pa_should_auto_open_portal(true, false, false, false, 60000u) == false);
+    assert(pa_should_auto_open_portal(false, false, false, true, 60000u) == false);
+    // Cold boot without saved Wi-Fi -> opens after 4.5s (gives Web Simulator ~1.5s to connect)
+    assert(pa_should_auto_open_portal(false, false, false, false, 4499u) == false);
+    assert(pa_should_auto_open_portal(false, false, false, false, 4500u) == true);
+    // Cold boot with saved Wi-Fi -> waits 16s before opening SoftAP
+    assert(pa_should_auto_open_portal(false, false, true, false, 15999u) == false);
+    assert(pa_should_auto_open_portal(false, false, true, false, 16000u) == true);
+}
+
 int main(void)
 {
     test_digest_parsing_and_auto_popup();
     test_l2_pin_guard_and_ptt_voice();
     test_softap_form_pair_code_and_demo_mode();
     test_dns_captive_portal_edns0();
+    test_wifi_reconnect_reason_and_quoted_cli();
     printf("ALL pa_model C host tests PASSED!\n");
     return 0;
 }

@@ -215,8 +215,20 @@ bool pa_state_tick(pa_state_t *st, uint32_t now_ms);
 int pa_build_action_json(const pa_dispatch_t *cmd, char *out, size_t out_size);
 
 // Parse serial provisioning command:
-//   "pa set <hub_url> [token]" -> returns 1
-//   "pa wifi <ssid> [pass]"    -> returns 2
-//   unrecognized               -> returns 0
+//   "pa set <hub_url> [token]"              -> returns 1
+//   "pa wifi <ssid> [pass]"                 -> returns 2
+//   "pa wifi \"My Home 2.4G\" [pass]"       -> returns 2 (quoted SSID with spaces/UTF-8)
+//   unrecognized                            -> returns 0
 int pa_parse_console_cmd(const char *line, char *arg1, size_t arg1_size,
                          char *arg2, size_t arg2_size);
+
+// Map ESP-IDF wifi_err_reason_t disconnect code into concise Chinese status text for 240x320 UI & portal.
+void pa_wifi_reason_zh(int reason, char *out, size_t out_size);
+
+// Exponential reconnect backoff (ms) modeled on 78/esp-wifi-connect (2s -> 4s -> 8s -> 15s -> 30s).
+uint32_t pa_wifi_backoff_ms(int attempt);
+
+// Decide whether to auto-open SoftAP Captive Portal when STA is disconnected.
+// Never kicks an already-connected device back into SoftAP on transient router blips.
+bool pa_should_auto_open_portal(bool wifi_ok, bool ever_connected, bool has_saved_wifi,
+                                bool auto_portal_triggered, uint32_t disconnected_elapsed_ms);

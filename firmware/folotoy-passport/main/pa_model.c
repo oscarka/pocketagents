@@ -1297,8 +1297,17 @@ int pa_parse_console_cmd(const char *line, char *arg1, size_t arg1_size,
 
     while (*p == ' ' || *p == '\t') p++;
     const char *a1 = p;
-    while (*p && *p != ' ' && *p != '\t' && *p != '\r' && *p != '\n') p++;
-    size_t a1_len = (size_t)(p - a1);
+    size_t a1_len = 0;
+    if (*p == '"' || *p == '\'') {
+        char quote = *p++;
+        a1 = p;
+        while (*p && *p != quote && *p != '\r' && *p != '\n') p++;
+        a1_len = (size_t)(p - a1);
+        if (*p == quote) p++;
+    } else {
+        while (*p && *p != ' ' && *p != '\t' && *p != '\r' && *p != '\n') p++;
+        a1_len = (size_t)(p - a1);
+    }
     if (a1_len == 0) return 0;
     if (arg1 && arg1_size > 1) {
         size_t n = a1_len < (arg1_size - 1) ? a1_len : (arg1_size - 1);
@@ -1317,4 +1326,60 @@ int pa_parse_console_cmd(const char *line, char *arg1, size_t arg1_size,
         arg2[n] = '\0';
     }
     return kind;
+}
+
+void pa_wifi_reason_zh(int reason, char *out, size_t out_size)
+{
+    if (!out || out_size == 0) return;
+    switch (reason) {
+    case 0:
+        snprintf(out, out_size, "正在连 Wi-Fi...");
+        return;
+    case 2:   // WIFI_REASON_AUTH_EXPIRE
+    case 14:  // WIFI_REASON_MIC_FAILURE
+    case 15:  // WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT
+    case 16:  // WIFI_REASON_GROUP_KEY_UPDATE_TIMEOUT
+    case 23:  // WIFI_REASON_802_1X_AUTH_FAILED
+    case 202: // WIFI_REASON_AUTH_FAIL
+    case 204: // WIFI_REASON_HANDSHAKE_TIMEOUT
+        snprintf(out, out_size, "Wi-Fi 密码错误");
+        return;
+    case 201: // WIFI_REASON_NO_AP_FOUND
+    case 210: // WIFI_REASON_NO_AP_FOUND_W_COMPATIBLE_SECURITY
+    case 211: // WIFI_REASON_NO_AP_FOUND_IN_AUTHMODE_THRESHOLD
+    case 212: // WIFI_REASON_NO_AP_FOUND_IN_RSSI_THRESHOLD
+        snprintf(out, out_size, "找不到 2.4G 热点");
+        return;
+    case 5:   // WIFI_REASON_ASSOC_TOOMANY
+    case 203: // WIFI_REASON_ASSOC_FAIL
+    case 205: // WIFI_REASON_CONNECTION_FAIL
+        snprintf(out, out_size, "路由器拒绝，重试中");
+        return;
+    case 200: // WIFI_REASON_BEACON_TIMEOUT
+        snprintf(out, out_size, "Wi-Fi 信号中断");
+        return;
+    default:
+        snprintf(out, out_size, "连网失败 (码%d)", reason);
+        return;
+    }
+}
+
+uint32_t pa_wifi_backoff_ms(int attempt)
+{
+    if (attempt <= 0) return 2000u;
+    if (attempt == 1) return 4000u;
+    if (attempt == 2) return 8000u;
+    if (attempt == 3) return 15000u;
+    return 30000u;
+}
+
+bool pa_should_auto_open_portal(bool wifi_ok, bool ever_connected, bool has_saved_wifi,
+                                bool auto_portal_triggered, uint32_t disconnected_elapsed_ms)
+{
+    if (wifi_ok || auto_portal_triggered) return false;
+    // Once Wi-Fi succeeded in this session, keep auto-reconnecting in STA mode on router hiccups
+    // instead of abruptly kicking the user into SoftAP setup mode.
+    if (ever_connected) return false;
+    uint32_t grace_ms = has_saved_wifi ? 16000u : 4500u;
+    return disconnected_elapsed_ms >= grace_ms;
 }
