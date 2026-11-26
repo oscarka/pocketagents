@@ -1,5 +1,7 @@
 // main/main.c
 // PocketAgents Hardware Remote for FoloToy AI Passport (ESP32-C3 + LVGL 9.5 + ES8311).
+// Includes automatic SoftAP phone provisioning (PocketAgents-Setup @ 192.168.4.1),
+// 6-digit pair-code exchange, USB-Serial-JTAG setup, and built-in offline demo mode.
 #include "bsp_battery.h"
 #include "bsp_button.h"
 #include "bsp_display.h"
@@ -7,6 +9,7 @@
 #include "pa_audio.h"
 #include "pa_model.h"
 #include "pa_net.h"
+#include "pa_portal.h"
 #include "pa_ui.h"
 
 #include "esp_log.h"
@@ -44,6 +47,8 @@ static QueueHandle_t s_btn_queue;
 static QueueHandle_t s_net_queue;
 static QueueHandle_t s_chime_queue;
 static bool s_battery_ok = false;
+static volatile bool s_portal_manual_hold = false;
+static volatile uint32_t s_portal_saved_at_ms = 0;
 
 static uint32_t now_ms(void)
 {
@@ -71,6 +76,49 @@ static void refresh_ui_now(void)
         bsp_lvgl_unlock();
     }
     xSemaphoreGive(s_ui_snap_mux);
+}
+
+static void on_portal_phone(bool connected)
+{
+    if (xSemaphoreTake(s_state_mux, pdMS_TO_TICKS(100)) == pdTRUE) {
+        s_state.setup_phone_connected = connected;
+        xSemaphoreGive(s_state_mux);
+    }
+    refresh_ui_now();
+}
+
+static void on_portal_saved(void)
+{
+    s_portal_manual_hold = false;
+    s_portal_saved_at_ms = now_ms();
+    net_job_t job;
+    memset(&job, 0, sizeof(job));
+    job.dispatch.cmd = PA_CMD_FORCE_REFRESH;
+    (void)xQueueSend(s_net_queue, &job, 0);
+}
+
+static void start_setup_portal_now(bool manual)
+{
+    s_portal_manual_hold = manual;
+    s_portal_saved_at_ms = 0;
+    if (pa_portal_start(&s_cfg, on_portal_phone, on_portal_saved)) {
+        if (xSemaphoreTake(s_state_mux, pdMS_TO_TICKS(100)) == pdTRUE) {
+            pa_state_enter_setup(&s_state, PA_PORTAL_AP_SSID, now_ms());
+            xSemaphoreGive(s_state_mux);
+        }
+        refresh_ui_now();
+    }
+}
+
+static void stop_setup_portal_now(void)
+{
+    s_portal_manual_hold = false;
+    pa_portal_stop();
+    if (xSemaphoreTake(s_state_mux, pdMS_TO_TICKS(100)) == pdTRUE) {
+        pa_state_exit_setup(&s_state, now_ms());
+        xSemaphoreGive(s_state_mux);
+    }
+    refresh_ui_now();
 }
 
 // Button callback runs in shared esp_timer context -> enqueue only!
@@ -111,12 +159,24 @@ static void console_worker_task(void *arg)
                 int kind = pa_parse_console_cmd(line, a1, sizeof(a1), a2, sizeof(a2));
                 if (kind == 1) {
                     pa_net_save_hub_config(&s_cfg, a1, a2);
+                    if (xSemaphoreTake(s_state_mux, pdMS_TO_TICKS(100)) == pdTRUE) {
+                        s_state.demo_mode = false;
+                        xSemaphoreGive(s_state_mux);
+                    }
                     net_job_t job;
                     memset(&job, 0, sizeof(job));
-                    job.dispatch.cmd = PA_CMD_FORCE_REFRESH;
+                    job.dispatch.cmd = PA_CMD_EXIT_SETUP;
                     (void)xQueueSend(s_net_queue, &job, pdMS_TO_TICKS(100));
                 } else if (kind == 2) {
                     pa_net_save_wifi_config(&s_cfg, a1, a2);
+                    if (xSemaphoreTake(s_state_mux, pdMS_TO_TICKS(100)) == pdTRUE) {
+                        s_state.demo_mode = false;
+                        xSemaphoreGive(s_state_mux);
+                    }
+                    net_job_t job;
+                    memset(&job, 0, sizeof(job));
+                    job.dispatch.cmd = PA_CMD_EXIT_SETUP;
+                    (void)xQueueSend(s_net_queue, &job, pdMS_TO_TICKS(100));
                 }
                 pos = 0;
             }
@@ -144,8 +204,10 @@ static void input_worker_task(void *arg)
             else continue;
 
             pa_dispatch_t disp;
+            bool in_demo = false;
             if (xSemaphoreTake(s_state_mux, pdMS_TO_TICKS(100)) == pdTRUE) {
                 disp = pa_state_on_key(&s_state, key, kev, now_ms());
+                in_demo = s_state.demo_mode;
                 xSemaphoreGive(s_state_mux);
             } else {
                 continue;
@@ -154,6 +216,39 @@ static void input_worker_task(void *arg)
             if (disp.chime != PA_CHIME_NONE) {
                 enqueue_chime(disp.chime);
             }
+
+            // Handle local Demo Mode actions with 0ms latency!
+            if (disp.cmd == PA_CMD_START_DEMO) {
+                net_job_t stop_job;
+                memset(&stop_job, 0, sizeof(stop_job));
+                stop_job.dispatch.cmd = PA_CMD_START_DEMO;
+                (void)xQueueSend(s_net_queue, &stop_job, pdMS_TO_TICKS(100));
+                pa_chime_t dch = PA_CHIME_NONE;
+                if (xSemaphoreTake(s_state_mux, pdMS_TO_TICKS(100)) == pdTRUE) {
+                    dch = pa_demo_start(&s_state, now_ms());
+                    xSemaphoreGive(s_state_mux);
+                }
+                enqueue_chime(dch);
+                refresh_ui_now();
+                continue;
+            }
+            if (in_demo && (disp.cmd == PA_CMD_APPROVE || disp.cmd == PA_CMD_DENY ||
+                            disp.cmd == PA_CMD_ANSWER || disp.cmd == PA_CMD_VOICE_STOP)) {
+                if (disp.cmd == PA_CMD_VOICE_STOP) {
+                    size_t pcm_len = 0;
+                    uint8_t *pcm = pa_audio_record_stop(&pcm_len);
+                    if (pcm) free(pcm);
+                }
+                pa_chime_t dch = PA_CHIME_NONE;
+                if (xSemaphoreTake(s_state_mux, pdMS_TO_TICKS(100)) == pdTRUE) {
+                    dch = pa_demo_handle_cmd(&s_state, &disp, now_ms());
+                    xSemaphoreGive(s_state_mux);
+                }
+                enqueue_chime(dch);
+                refresh_ui_now();
+                continue;
+            }
+
             if (disp.cmd == PA_CMD_VOICE_START) {
                 (void)pa_audio_record_start();
             } else if (disp.cmd == PA_CMD_VOICE_STOP) {
@@ -187,11 +282,32 @@ static void net_worker_task(void *arg)
     char last_rev[20] = { 0 };
     uint32_t last_poll_ms = 0;
     uint32_t last_bat_ms = 0;
+    uint32_t boot_ms = now_ms();
+    bool auto_portal_triggered = false;
 
     while (true) {
-        // 1. Handle high-priority queued actions / PTT uploads first
+        // 1. Handle high-priority queued actions / portal / PTT uploads first
         net_job_t job;
         while (xQueueReceive(s_net_queue, &job, pdMS_TO_TICKS(80)) == pdTRUE) {
+            if (job.dispatch.cmd == PA_CMD_ENTER_SETUP) {
+                start_setup_portal_now(true);
+                continue;
+            }
+            if (job.dispatch.cmd == PA_CMD_EXIT_SETUP) {
+                stop_setup_portal_now();
+                pa_net_wifi_reconnect(&s_cfg);
+                boot_ms = now_ms();
+                auto_portal_triggered = false;
+                last_rev[0] = '\0';
+                last_poll_ms = 0;
+                continue;
+            }
+            if (job.dispatch.cmd == PA_CMD_START_DEMO) {
+                if (pa_portal_is_active()) {
+                    pa_portal_stop();
+                }
+                continue;
+            }
             if (job.dispatch.cmd == PA_CMD_FORCE_REFRESH) {
                 last_rev[0] = '\0';
                 last_poll_ms = 0;
@@ -217,7 +333,6 @@ static void net_worker_task(void *arg)
                 }
                 enqueue_chime(ch);
                 refresh_ui_now();
-                // Force immediate digest refresh after successful action
                 last_rev[0] = '\0';
                 last_poll_ms = 0;
                 continue;
@@ -262,20 +377,63 @@ static void net_worker_task(void *arg)
             last_bat_ms = t;
         }
 
-        // 3. Periodic lightweight digest poll
-        if (last_poll_ms != 0 && (t - last_poll_ms) < (uint32_t)s_cfg.poll_interval_ms) {
-            continue;
+        // 3. Auto-teardown SoftAP once Wi-Fi connects (wait 2s after /save so phone gets HTML reply)
+        bool wifi_ok = pa_net_is_wifi_connected();
+        if (wifi_ok && pa_portal_is_active() && !s_portal_manual_hold) {
+            if (s_portal_saved_at_ms == 0 || (t - s_portal_saved_at_ms) >= 2000) {
+                stop_setup_portal_now();
+                last_rev[0] = '\0';
+                last_poll_ms = 0;
+            }
         }
-        last_poll_ms = t;
 
-        if (!pa_net_is_wifi_connected()) {
+        // Skip Hub polling while in Offline Demo Mode or holding SoftAP open
+        bool skip_poll = false;
+        if (xSemaphoreTake(s_state_mux, pdMS_TO_TICKS(50)) == pdTRUE) {
+            skip_poll = s_state.demo_mode || s_state.screen == PA_SCREEN_SETUP;
+            xSemaphoreGive(s_state_mux);
+        }
+        if (skip_poll) continue;
+
+        // 4. Auto-open SoftAP Captive Portal if Wi-Fi fails to connect on real hardware!
+        //    Fresh flash (no saved Wi-Fi): 4.5s (Web Simulator connects in ~1.5s!).
+        //    Saved Wi-Fi unreachable: 14s.
+        if (!wifi_ok) {
+            uint32_t grace_ms = s_cfg.has_saved_wifi ? 14000u : 4500u;
+            if (!auto_portal_triggered && (t - boot_ms) >= grace_ms) {
+                auto_portal_triggered = true;
+                ESP_LOGI(TAG, "[PA] Wi-Fi not connected after %lums -> auto-starting SoftAP portal",
+                         (unsigned long)grace_ms);
+                start_setup_portal_now(false);
+                continue;
+            }
+            if (last_poll_ms != 0 && (t - last_poll_ms) < 1200u) continue;
+            last_poll_ms = t;
             if (xSemaphoreTake(s_state_mux, pdMS_TO_TICKS(50)) == pdTRUE) {
                 s_state.net_status = PA_NET_CONNECTING;
+                s_state.wifi_ip[0] = '\0';
                 snprintf(s_state.net_detail, sizeof(s_state.net_detail), "正在连 Wi-Fi...");
                 xSemaphoreGive(s_state_mux);
             }
             refresh_ui_now();
             continue;
+        }
+
+        // 5. Wi-Fi is connected -> record IP & auto-exchange 6-digit pair code if user entered one!
+        if (last_poll_ms != 0 && (t - last_poll_ms) < (uint32_t)s_cfg.poll_interval_ms) {
+            continue;
+        }
+        last_poll_ms = t;
+
+        char cur_ip[20] = { 0 };
+        pa_net_get_ip_str(cur_ip, sizeof(cur_ip));
+        if (xSemaphoreTake(s_state_mux, pdMS_TO_TICKS(50)) == pdTRUE) {
+            snprintf(s_state.wifi_ip, sizeof(s_state.wifi_ip), "%s", cur_ip);
+            xSemaphoreGive(s_state_mux);
+        }
+
+        if (pa_is_pair_code(s_cfg.hub_token)) {
+            (void)pa_net_exchange_pair_code_if_needed(&s_cfg);
         }
 
         int status = pa_net_fetch_digest(&s_cfg, last_rev, &s_net_digest);

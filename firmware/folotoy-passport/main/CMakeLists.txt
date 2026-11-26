@@ -4,6 +4,7 @@ set(PA_SRCS
     "pa_ui.c"
     "pa_audio.c"
     "pa_net.c"
+    "pa_portal.c"
 )
 
 set(PA_HAS_FULL_ZH 0)
@@ -15,7 +16,7 @@ endif()
 idf_component_register(
     SRCS ${PA_SRCS}
     INCLUDE_DIRS "."
-    REQUIRES bsp esp_event esp_http_client esp_hw_support esp_netif esp_timer esp_wifi nvs_flash mbedtls
+    REQUIRES bsp esp_event esp_http_client esp_http_server esp_hw_support esp_netif esp_timer esp_wifi lwip nvs_flash mbedtls
 )
 
 if(PA_HAS_FULL_ZH)

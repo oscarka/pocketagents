@@ -6,7 +6,14 @@
 
 Turn your **FoloToy AI Passport** into a pocket remote control for Claude Code, OpenAI Codex, Antigravity IDE, DeepSeek Harness (DSH), and WorkBuddy running on your computer. Glance at your desk status, approve routine commands, answer multiple-choice prompts, block destructive actions behind a 3-digit confirmation code, or hold OK to talk—all in a clean full-Chinese UI with 3-tier automatic translation.
 
-## 3-Step Quick Start (Zero Serial Commands Required)
+## Phone Hotspot Wi-Fi Setup (Recommended — No Computer Needed to Connect Wi-Fi)
+
+1. Boot the flashed device: if no Wi-Fi is saved (after ~4.5s), or anytime you **long-press `UP`**, AI Passport opens an open temporary hotspot **`PocketAgents-Setup`** and displays setup steps on screen.
+2. Connect your phone to **`PocketAgents-Setup`** and open **`http://192.168.4.1`** (usually auto-pops as a captive portal).
+3. Tap your **2.4 GHz Wi-Fi** from the live scan list, enter its password, and optionally enter your PocketAgents hub URL (e.g. `http://192.168.1.25:8788`) plus the **6-digit pairing code** shown in your terminal (automatically exchanged for a revocable `dev_` token!).
+4. Don't have PocketAgents running on a computer yet? Press **`DOWN`** on the setup screen to try the **built-in interactive offline demo** immediately!
+
+## Alternative: 3-Step Quick Start via Computer USB (`/device-setup`)
 
 ### Step 1: Flash the Firmware
 1. Connect your powered-on AI Passport to your computer with a data-capable USB-C cable.

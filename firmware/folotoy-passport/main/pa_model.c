@@ -701,6 +701,274 @@ pa_chime_t pa_state_apply_voice_result(pa_state_t *st, const pa_voice_result_t *
     return res->ok ? PA_CHIME_OK : PA_CHIME_DENY;
 }
 
+bool pa_parse_pair_exchange_json(const char *json, char *out_token, size_t out_size)
+{
+    if (!json || !out_token || out_size < 8) return false;
+    out_token[0] = '\0';
+    jcur_t c = { .p = json, .end = json + strlen(json) };
+    if (!j_consume(&c, '{')) return false;
+    if (j_consume(&c, '}')) return false;
+
+    bool ok = false;
+    char tok_primary[96] = { 0 };
+    char tok_fallback[96] = { 0 };
+    char key[32];
+    while (c.p < c.end) {
+        if (!j_parse_string(&c, key, sizeof(key))) return false;
+        if (!j_consume(&c, ':')) return false;
+        if (strcmp(key, "ok") == 0) {
+            if (!j_parse_bool(&c, &ok)) return false;
+        } else if (strcmp(key, "deviceToken") == 0) {
+            if (!j_parse_string(&c, tok_primary, sizeof(tok_primary))) return false;
+        } else if (strcmp(key, "token") == 0) {
+            if (!j_parse_string(&c, tok_fallback, sizeof(tok_fallback))) return false;
+        } else {
+            if (!j_skip_value(&c, 1)) return false;
+        }
+        if (j_consume(&c, ',')) continue;
+        if (!j_consume(&c, '}')) return false;
+        break;
+    }
+    const char *chosen = tok_primary[0] ? tok_primary : tok_fallback;
+    if (!ok || chosen[0] == '\0') return false;
+    copy_utf8_trunc(out_token, out_size, chosen);
+    return true;
+}
+
+size_t pa_url_decode(const char *src, size_t src_len, char *dst, size_t dst_size)
+{
+    if (!dst || dst_size == 0) return 0;
+    size_t out = 0;
+    size_t max_out = dst_size - 1;
+    for (size_t i = 0; src && i < src_len && out < max_out; i++) {
+        char ch = src[i];
+        if (ch == '+') {
+            dst[out++] = ' ';
+        } else if (ch == '%' && i + 2 < src_len) {
+            int hi = hex_val(src[i + 1]);
+            int lo = hex_val(src[i + 2]);
+            if (hi >= 0 && lo >= 0) {
+                dst[out++] = (char)((hi << 4) | lo);
+                i += 2;
+            } else {
+                dst[out++] = ch;
+            }
+        } else {
+            dst[out++] = ch;
+        }
+    }
+    dst[out] = '\0';
+    return out;
+}
+
+bool pa_parse_form_field(const char *body, const char *key, char *out, size_t out_size)
+{
+    if (out && out_size > 0) out[0] = '\0';
+    if (!body || !key || !key[0] || !out || out_size == 0) return false;
+
+    size_t klen = strlen(key);
+    const char *p = body;
+    while (*p != '\0') {
+        const char *amp = strchr(p, '&');
+        size_t seg_len = amp ? (size_t)(amp - p) : strlen(p);
+        const char *eq = memchr(p, '=', seg_len);
+        if (eq) {
+            size_t name_len = (size_t)(eq - p);
+            if (name_len == klen && memcmp(p, key, klen) == 0) {
+                const char *val = eq + 1;
+                size_t val_len = seg_len - name_len - 1;
+                (void)pa_url_decode(val, val_len, out, out_size);
+                return true;
+            }
+        }
+        if (!amp) break;
+        p = amp + 1;
+    }
+    return false;
+}
+
+bool pa_is_pair_code(const char *token_or_code)
+{
+    if (!token_or_code) return false;
+    size_t len = strlen(token_or_code);
+    if (len != 6) return false;
+    for (size_t i = 0; i < len; i++) {
+        if (!isdigit((unsigned char)token_or_code[i])) return false;
+    }
+    return true;
+}
+
+void pa_state_enter_setup(pa_state_t *st, const char *ap_ssid, uint32_t now_ms)
+{
+    if (!st) return;
+    st->demo_mode = false;
+    st->busy = false;
+    st->setup_ap_active = true;
+    st->setup_phone_connected = false;
+    copy_utf8_trunc(st->setup_ap_ssid, sizeof(st->setup_ap_ssid),
+                    (ap_ssid && ap_ssid[0]) ? ap_ssid : "PocketAgents-Setup");
+    st->screen = PA_SCREEN_SETUP;
+    set_toast(st, "已开启手机配网热点", false, now_ms, 2200);
+}
+
+void pa_state_exit_setup(pa_state_t *st, uint32_t now_ms)
+{
+    if (!st) return;
+    st->setup_ap_active = false;
+    st->setup_phone_connected = false;
+    if (st->screen == PA_SCREEN_SETUP) {
+        st->screen = st->digest.approval_count > 0 ? PA_SCREEN_APPROVAL : PA_SCREEN_DASHBOARD;
+    }
+    (void)now_ms;
+}
+
+pa_chime_t pa_demo_start(pa_state_t *st, uint32_t now_ms)
+{
+    if (!st) return PA_CHIME_NONE;
+    st->demo_mode = true;
+    st->setup_ap_active = false;
+    st->setup_phone_connected = false;
+    st->busy = false;
+    st->l2_pin_active = false;
+    st->l2_pin_code[0] = '\0';
+    st->l2_target_code[0] = '\0';
+    st->selected_approval = 0;
+    st->selected_option = 0;
+    st->selected_task = 0;
+
+    pa_digest_t *d = &st->digest;
+    memset(d, 0, sizeof(*d));
+    d->ok = true;
+    copy_utf8_trunc(d->rev, sizeof(d->rev), "demo-v1");
+    d->hosts_online = 1;
+    d->hosts_total = 1;
+    d->running_count = 1;
+    d->pending_count = 3;
+    d->approval_count = 3;
+
+    // Demo #1: L1 standard Bash command
+    pa_approval_t *a0 = &d->approvals[0];
+    a0->slot = 1;
+    copy_utf8_trunc(a0->host_name, sizeof(a0->host_name), "演示电脑");
+    copy_utf8_trunc(a0->code, sizeof(a0->code), "DEMO-1");
+    copy_utf8_trunc(a0->session, sizeof(a0->session), "修复支付单测");
+    copy_utf8_trunc(a0->tool, sizeof(a0->tool), "终端命令");
+    a0->risk = PA_RISK_L1;
+    copy_utf8_trunc(a0->title, sizeof(a0->title), "运行自动化测试");
+    copy_utf8_trunc(a0->cmd, sizeof(a0->cmd), "npm test -- device-lite-api.test.js");
+
+    // Demo #2: Multi-choice Chinese question
+    pa_approval_t *a1 = &d->approvals[1];
+    a1->slot = 2;
+    copy_utf8_trunc(a1->host_name, sizeof(a1->host_name), "演示电脑");
+    copy_utf8_trunc(a1->code, sizeof(a1->code), "DEMO-2");
+    copy_utf8_trunc(a1->session, sizeof(a1->session), "v0.9.21 发布");
+    copy_utf8_trunc(a1->tool, sizeof(a1->tool), "请你选择");
+    a1->is_question = true;
+    a1->risk = PA_RISK_L0;
+    copy_utf8_trunc(a1->title, sizeof(a1->title), "选择发布策略");
+    a1->option_count = 3;
+    copy_utf8_trunc(a1->options[0], sizeof(a1->options[0]), "灰度发布 10%");
+    copy_utf8_trunc(a1->options[1], sizeof(a1->options[1]), "全量正式上线");
+    copy_utf8_trunc(a1->options[2], sizeof(a1->options[2]), "暂缓并查日志");
+
+    // Demo #3: L2 High-Risk command with 3-digit PIN guard
+    pa_approval_t *a2 = &d->approvals[2];
+    a2->slot = 3;
+    copy_utf8_trunc(a2->host_name, sizeof(a2->host_name), "演示电脑");
+    copy_utf8_trunc(a2->code, sizeof(a2->code), "DEMO-3");
+    copy_utf8_trunc(a2->session, sizeof(a2->session), "清理构建缓存");
+    copy_utf8_trunc(a2->tool, sizeof(a2->tool), "终端命令");
+    a2->risk = PA_RISK_L2;
+    copy_utf8_trunc(a2->title, sizeof(a2->title), "高危：删文件并强推代码");
+    copy_utf8_trunc(a2->cmd, sizeof(a2->cmd), "rm -rf /tmp/old-build && git push --force origin main");
+
+    // 3 Demo tasks
+    d->task_count = 3;
+    copy_utf8_trunc(d->tasks[0].title, sizeof(d->tasks[0].title), "修复支付单测");
+    copy_utf8_trunc(d->tasks[0].status, sizeof(d->tasks[0].status), "approval");
+    d->tasks[0].pending = true;
+    copy_utf8_trunc(d->tasks[1].title, sizeof(d->tasks[1].title), "v0.9.21 发布");
+    copy_utf8_trunc(d->tasks[1].status, sizeof(d->tasks[1].status), "approval");
+    d->tasks[1].pending = true;
+    copy_utf8_trunc(d->tasks[2].title, sizeof(d->tasks[2].title), "清理构建缓存");
+    copy_utf8_trunc(d->tasks[2].status, sizeof(d->tasks[2].status), "approval");
+    d->tasks[2].pending = true;
+
+    st->screen = PA_SCREEN_APPROVAL;
+    set_toast(st, "已进入离线演示 · 长按↑可配网", false, now_ms, 2600);
+    return PA_CHIME_NEW_APPROVAL;
+}
+
+pa_chime_t pa_demo_handle_cmd(pa_state_t *st, const pa_dispatch_t *cmd, uint32_t now_ms)
+{
+    if (!st || !cmd) return PA_CHIME_NONE;
+    st->busy = false;
+    pa_digest_t *d = &st->digest;
+
+    if (cmd->cmd == PA_CMD_VOICE_STOP) {
+        st->voice_phase = PA_VOICE_REPLY;
+        copy_utf8_trunc(st->voice_transcript, sizeof(st->voice_transcript), "演示语音（离线模式）");
+        copy_utf8_trunc(st->voice_reply, sizeof(st->voice_reply),
+                        "连上电脑 PocketAgents 后即可真实语音审批与播报。");
+        return PA_CHIME_OK;
+    }
+
+    if (d->approval_count <= 0) return PA_CHIME_NONE;
+    int idx = st->selected_approval;
+    if (idx < 0 || idx >= d->approval_count) idx = 0;
+    const pa_approval_t *cur = &d->approvals[idx];
+
+    // L2 single-click OK triggers built-in PIN lock banner!
+    if (cmd->cmd == PA_CMD_APPROVE && cur->risk == PA_RISK_L2) {
+        st->l2_pin_active = true;
+        copy_utf8_trunc(st->l2_pin_code, sizeof(st->l2_pin_code), "628");
+        copy_utf8_trunc(st->l2_target_code, sizeof(st->l2_target_code), cur->code);
+        set_toast(st, "高危拦截！长按↓拒绝", true, now_ms, 5000);
+        return PA_CHIME_WARN_L2;
+    }
+
+    // Remove handled demo approval & update matching task status
+    for (int i = 0; i < d->task_count; i++) {
+        if (strcmp(d->tasks[i].title, cur->session) == 0) {
+            d->tasks[i].pending = false;
+            copy_utf8_trunc(d->tasks[i].status, sizeof(d->tasks[i].status),
+                            cmd->cmd == PA_CMD_DENY ? "idle" : "running");
+        }
+    }
+    for (int i = idx; i + 1 < d->approval_count; i++) {
+        d->approvals[i] = d->approvals[i + 1];
+        d->approvals[i].slot = i + 1;
+    }
+    d->approval_count--;
+    d->pending_count = d->approval_count;
+    d->running_count = 0;
+    for (int i = 0; i < d->task_count; i++) {
+        if (strcmp(d->tasks[i].status, "running") == 0) d->running_count++;
+    }
+    st->l2_pin_active = false;
+    st->l2_pin_code[0] = '\0';
+    st->l2_target_code[0] = '\0';
+    st->selected_option = 0;
+
+    if (d->approval_count == 0) {
+        st->selected_approval = 0;
+        st->screen = PA_SCREEN_DASHBOARD;
+        set_toast(st, cmd->cmd == PA_CMD_DENY ? "已拒绝 · 演示完成" : "全部处理完 · 演示完成",
+                  false, now_ms, 2600);
+    } else {
+        if (st->selected_approval >= d->approval_count) st->selected_approval = 0;
+        if (cmd->cmd == PA_CMD_ANSWER) {
+            char msg[48];
+            snprintf(msg, sizeof(msg), "演示：已选第 %d 项", cmd->option_index);
+            set_toast(st, msg, false, now_ms, 2000);
+        } else {
+            set_toast(st, cmd->cmd == PA_CMD_DENY ? "演示：已拒绝" : "演示：已放行", false, now_ms, 2000);
+        }
+    }
+    return cmd->cmd == PA_CMD_DENY ? PA_CHIME_DENY : PA_CHIME_OK;
+}
+
 pa_dispatch_t pa_state_on_key(pa_state_t *st, pa_key_t key, pa_key_ev_t ev, uint32_t now_ms)
 {
     pa_dispatch_t out;
@@ -715,6 +983,29 @@ pa_dispatch_t pa_state_on_key(pa_state_t *st, pa_key_t key, pa_key_ev_t ev, uint
             out.cmd = PA_CMD_VOICE_STOP;
             out.chime = PA_CHIME_PTT_STOP;
             out.ui_dirty = true;
+        }
+        return out;
+    }
+
+    // Long-press UP from anywhere (when not recording) opens/re-opens Phone SoftAP Wi-Fi Setup!
+    if (key == PA_KEY_UP && ev == PA_KEY_EV_LONG && !st->busy) {
+        out.cmd = PA_CMD_ENTER_SETUP;
+        out.chime = PA_CHIME_OK;
+        out.ui_dirty = true;
+        return out;
+    }
+
+    // Setup SoftAP screen interactions
+    if (st->screen == PA_SCREEN_SETUP) {
+        if (ev == PA_KEY_EV_CLICK && key == PA_KEY_DOWN) {
+            out.cmd = PA_CMD_START_DEMO;
+            out.ui_dirty = true;
+            return out;
+        }
+        if (ev == PA_KEY_EV_CLICK && key == PA_KEY_OK) {
+            out.cmd = PA_CMD_EXIT_SETUP;
+            out.ui_dirty = true;
+            return out;
         }
         return out;
     }
@@ -749,6 +1040,9 @@ pa_dispatch_t pa_state_on_key(pa_state_t *st, pa_key_t key, pa_key_ev_t ev, uint
             if (st->digest.approval_count > 0) {
                 st->screen = PA_SCREEN_APPROVAL;
                 out.ui_dirty = true;
+            } else if (st->demo_mode) {
+                out.cmd = PA_CMD_START_DEMO;
+                out.ui_dirty = true;
             } else {
                 set_toast(st, "正在同步...", false, now_ms, 1200);
                 out.cmd = PA_CMD_FORCE_REFRESH;
@@ -759,6 +1053,11 @@ pa_dispatch_t pa_state_on_key(pa_state_t *st, pa_key_t key, pa_key_ev_t ev, uint
         if (ev == PA_KEY_EV_CLICK && (key == PA_KEY_UP || key == PA_KEY_DOWN)) {
             if (st->digest.approval_count > 0) {
                 st->screen = PA_SCREEN_APPROVAL;
+                out.ui_dirty = true;
+                return out;
+            }
+            if (st->digest.task_count == 0 && !st->demo_mode && key == PA_KEY_DOWN) {
+                out.cmd = PA_CMD_START_DEMO;
                 out.ui_dirty = true;
                 return out;
             }

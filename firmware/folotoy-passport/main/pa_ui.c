@@ -1,5 +1,6 @@
 // main/pa_ui.c
 // Original PocketAgents 240x320 LVGL 9.5 Full-Chinese interface (zero runtime widget churn).
+// Calibrated for physical FoloToy AI Passport 30px rounded display bezel + SoftAP phone setup view.
 #include "pa_ui.h"
 #include "lvgl.h"
 
@@ -50,6 +51,9 @@ static lv_obj_t *s_task_rows[4];
 static lv_obj_t *s_task_dots[4];
 static lv_obj_t *s_task_titles[4];
 static lv_obj_t *s_task_tags[4];
+static lv_obj_t *s_dash_guide_card;
+static lv_obj_t *s_dash_guide_title;
+static lv_obj_t *s_dash_guide_body;
 
 // Approval / Question view
 static lv_obj_t *s_app_view;
@@ -72,6 +76,13 @@ static lv_obj_t *s_voice_badge;
 static lv_obj_t *s_voice_badge_lbl;
 static lv_obj_t *s_voice_user_lbl;
 static lv_obj_t *s_voice_reply_lbl;
+
+// Phone SoftAP Wi-Fi Setup view
+static lv_obj_t *s_setup_view;
+static lv_obj_t *s_setup_pill;
+static lv_obj_t *s_setup_pill_lbl;
+static lv_obj_t *s_setup_ssid_lbl;
+static lv_obj_t *s_setup_hint_lbl;
 
 static lv_obj_t *make_clean_box(lv_obj_t *parent, int x, int y, int w, int h,
                                 uint32_t bg, int radius, uint32_t border_col, int border_w)
@@ -100,13 +111,13 @@ static lv_obj_t *make_metric_tile(lv_obj_t *parent, int x, int y, int w, int h,
     lv_obj_t *val = lv_label_create(box);
     lv_obj_set_style_text_font(val, &lv_font_montserrat_20, 0);
     lv_obj_set_style_text_color(val, lv_color_hex(accent), 0);
-    lv_obj_align(val, LV_ALIGN_TOP_MID, 0, 6);
+    lv_obj_align(val, LV_ALIGN_TOP_MID, 0, 5);
     lv_label_set_text(val, "0");
 
     lv_obj_t *cap = lv_label_create(box);
     lv_obj_set_style_text_font(cap, &s_font_12, 0);
     lv_obj_set_style_text_color(cap, lv_color_hex(COL_MUTED), 0);
-    lv_obj_align(cap, LV_ALIGN_BOTTOM_MID, 0, -6);
+    lv_obj_align(cap, LV_ALIGN_BOTTOM_MID, 0, -5);
     lv_label_set_text(cap, caption);
 
     *out_val = val;
@@ -153,15 +164,15 @@ void pa_ui_init(void)
 
     (void)make_clean_box(s_scr, 14, 36, 212, 1, COL_BORDER, 0, 0, 0);
 
-    // --- 1. Dashboard View (y = 42..272) ---
-    s_dash_view = make_clean_box(s_scr, 0, 42, 240, 232, COL_BG, 0, 0, 0);
+    // --- 1. Dashboard View (y = 40..268) ---
+    s_dash_view = make_clean_box(s_scr, 0, 40, 240, 228, COL_BG, 0, 0, 0);
 
-    (void)make_metric_tile(s_dash_view, 12, 4, 68, 54, "电脑", COL_SKY, &s_tile_hosts_val);
-    (void)make_metric_tile(s_dash_view, 86, 4, 68, 54, "运行", COL_EMERALD, &s_tile_run_val);
-    s_tile_wait_box = make_metric_tile(s_dash_view, 160, 4, 68, 54, "待批", COL_AMBER, &s_tile_wait_val);
+    (void)make_metric_tile(s_dash_view, 12, 4, 68, 52, "电脑", COL_SKY, &s_tile_hosts_val);
+    (void)make_metric_tile(s_dash_view, 86, 4, 68, 52, "运行", COL_EMERALD, &s_tile_run_val);
+    s_tile_wait_box = make_metric_tile(s_dash_view, 160, 4, 68, 52, "待批", COL_AMBER, &s_tile_wait_val);
 
     // Status banner
-    s_dash_banner = make_clean_box(s_dash_view, 12, 64, 216, 26, COL_CARD_ALT, 8, COL_BORDER, 1);
+    s_dash_banner = make_clean_box(s_dash_view, 12, 62, 216, 26, COL_CARD_ALT, 8, COL_BORDER, 1);
     s_dash_banner_lbl = lv_label_create(s_dash_banner);
     lv_obj_set_style_text_font(s_dash_banner_lbl, &s_font_12, 0);
     lv_obj_set_style_text_color(s_dash_banner_lbl, lv_color_hex(COL_MUTED), 0);
@@ -169,12 +180,12 @@ void pa_ui_init(void)
     lv_obj_set_width(s_dash_banner_lbl, 204);
     lv_obj_set_style_text_align(s_dash_banner_lbl, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_center(s_dash_banner_lbl);
-    lv_label_set_text(s_dash_banner_lbl, "正在连接 Wi-Fi...");
+    lv_label_set_text(s_dash_banner_lbl, "正在连 Wi-Fi...");
 
     // 4 compact task rows
     for (int i = 0; i < 4; i++) {
-        int ry = 96 + i * 33;
-        s_task_rows[i] = make_clean_box(s_dash_view, 12, ry, 216, 29, COL_CARD, 8, COL_BORDER, 1);
+        int ry = 94 + i * 32;
+        s_task_rows[i] = make_clean_box(s_dash_view, 12, ry, 216, 28, COL_CARD, 8, COL_BORDER, 1);
         s_task_dots[i] = make_clean_box(s_task_rows[i], 8, 10, 8, 8, COL_MUTED, 4, 0, 0);
 
         s_task_titles[i] = lv_label_create(s_task_rows[i]);
@@ -182,7 +193,7 @@ void pa_ui_init(void)
         lv_obj_set_style_text_color(s_task_titles[i], lv_color_hex(COL_TEXT), 0);
         lv_label_set_long_mode(s_task_titles[i], LV_LABEL_LONG_DOT);
         lv_obj_set_width(s_task_titles[i], 148);
-        lv_obj_set_pos(s_task_titles[i], 22, 5);
+        lv_obj_set_pos(s_task_titles[i], 22, 4);
         lv_label_set_text(s_task_titles[i], "");
 
         s_task_tags[i] = lv_label_create(s_task_rows[i]);
@@ -194,8 +205,27 @@ void pa_ui_init(void)
         lv_obj_add_flag(s_task_rows[i], LV_OBJ_FLAG_HIDDEN);
     }
 
-    // --- 2. Approval / Multi-Choice Triage View (y = 42..272) ---
-    s_app_view = make_clean_box(s_scr, 0, 42, 240, 232, COL_BG, 0, 0, 0);
+    // Helpful guide card when no tasks / not connected yet (never leave a blank void!)
+    s_dash_guide_card = make_clean_box(s_dash_view, 12, 94, 216, 124, COL_CARD, 10, COL_BORDER, 1);
+    s_dash_guide_title = lv_label_create(s_dash_guide_card);
+    lv_obj_set_style_text_font(s_dash_guide_title, &s_font_16, 0);
+    lv_obj_set_style_text_color(s_dash_guide_title, lv_color_hex(COL_SKY), 0);
+    lv_obj_set_width(s_dash_guide_title, 196);
+    lv_obj_set_pos(s_dash_guide_title, 10, 10);
+    lv_label_set_text(s_dash_guide_title, "快速上手");
+
+    s_dash_guide_body = lv_label_create(s_dash_guide_card);
+    lv_obj_set_style_text_font(s_dash_guide_body, &s_font_12, 0);
+    lv_obj_set_style_text_color(s_dash_guide_body, lv_color_hex(COL_TEXT), 0);
+    lv_label_set_long_mode(s_dash_guide_body, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(s_dash_guide_body, 196);
+    lv_obj_set_style_text_line_space(s_dash_guide_body, 5, 0);
+    lv_obj_set_pos(s_dash_guide_body, 10, 36);
+    lv_label_set_text(s_dash_guide_body, "");
+    lv_obj_add_flag(s_dash_guide_card, LV_OBJ_FLAG_HIDDEN);
+
+    // --- 2. Approval / Multi-Choice Triage View (y = 40..268) ---
+    s_app_view = make_clean_box(s_scr, 0, 40, 240, 228, COL_BG, 0, 0, 0);
 
     s_app_slot_lbl = lv_label_create(s_app_view);
     lv_obj_set_style_text_font(s_app_slot_lbl, &s_font_16, 0);
@@ -217,10 +247,10 @@ void pa_ui_init(void)
     lv_obj_set_style_text_color(s_app_meta_lbl, lv_color_hex(COL_SKY), 0);
     lv_label_set_long_mode(s_app_meta_lbl, LV_LABEL_LONG_DOT);
     lv_obj_set_width(s_app_meta_lbl, 212);
-    lv_obj_set_pos(s_app_meta_lbl, 14, 28);
+    lv_obj_set_pos(s_app_meta_lbl, 14, 27);
     lv_label_set_text(s_app_meta_lbl, "");
 
-    s_app_card = make_clean_box(s_app_view, 12, 48, 216, 178, COL_CARD, 12, COL_AMBER, 2);
+    s_app_card = make_clean_box(s_app_view, 12, 46, 216, 174, COL_CARD, 12, COL_AMBER, 2);
 
     s_app_title_lbl = lv_label_create(s_app_card);
     lv_obj_set_style_text_font(s_app_title_lbl, &s_font_16, 0);
@@ -230,19 +260,17 @@ void pa_ui_init(void)
     lv_obj_set_pos(s_app_title_lbl, 10, 8);
     lv_label_set_text(s_app_title_lbl, "");
 
-    // Raw command line stays legible in crisp ASCII with CJK fallback
     s_app_cmd_lbl = lv_label_create(s_app_card);
     lv_obj_set_style_text_font(s_app_cmd_lbl, &s_font_cmd_14, 0);
     lv_obj_set_style_text_color(s_app_cmd_lbl, lv_color_hex(COL_MUTED), 0);
     lv_label_set_long_mode(s_app_cmd_lbl, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(s_app_cmd_lbl, 194);
-    lv_obj_set_pos(s_app_cmd_lbl, 10, 52);
+    lv_obj_set_pos(s_app_cmd_lbl, 10, 50);
     lv_label_set_text(s_app_cmd_lbl, "");
 
-    // Multi-choice options container inside card
-    s_opt_box = make_clean_box(s_app_card, 8, 52, 200, 118, COL_CARD, 0, 0, 0);
+    s_opt_box = make_clean_box(s_app_card, 8, 50, 200, 116, COL_CARD, 0, 0, 0);
     for (int i = 0; i < PA_MAX_OPTIONS; i++) {
-        s_opt_rows[i] = make_clean_box(s_opt_box, 0, i * 29, 200, 26, COL_CARD_ALT, 6, COL_BORDER, 1);
+        s_opt_rows[i] = make_clean_box(s_opt_box, 0, i * 28, 200, 25, COL_CARD_ALT, 6, COL_BORDER, 1);
         s_opt_lbls[i] = lv_label_create(s_opt_rows[i]);
         lv_obj_set_style_text_font(s_opt_lbls[i], &s_font_16, 0);
         lv_obj_set_style_text_color(s_opt_lbls[i], lv_color_hex(COL_TEXT), 0);
@@ -253,8 +281,7 @@ void pa_ui_init(void)
     }
     lv_obj_add_flag(s_opt_box, LV_OBJ_FLAG_HIDDEN);
 
-    // L2 PIN lock overlay bar at bottom of card (never overlapped by toast)
-    s_l2_banner = make_clean_box(s_app_card, 8, 134, 200, 34, COL_CRIMSON, 8, 0, 0);
+    s_l2_banner = make_clean_box(s_app_card, 8, 130, 200, 34, COL_CRIMSON, 8, 0, 0);
     s_l2_banner_lbl = lv_label_create(s_l2_banner);
     lv_obj_set_style_text_font(s_l2_banner_lbl, &s_font_12, 0);
     lv_obj_set_style_text_color(s_l2_banner_lbl, lv_color_hex(COL_TEXT), 0);
@@ -264,17 +291,17 @@ void pa_ui_init(void)
 
     lv_obj_add_flag(s_app_view, LV_OBJ_FLAG_HIDDEN);
 
-    // --- 3. Voice Push-To-Talk View (y = 42..272) ---
-    s_voice_view = make_clean_box(s_scr, 0, 42, 240, 232, COL_BG, 0, 0, 0);
+    // --- 3. Voice Push-To-Talk View (y = 40..268) ---
+    s_voice_view = make_clean_box(s_scr, 0, 40, 240, 228, COL_BG, 0, 0, 0);
 
-    s_voice_badge = make_clean_box(s_voice_view, 36, 10, 168, 30, COL_SKY, 15, 0, 0);
+    s_voice_badge = make_clean_box(s_voice_view, 36, 8, 168, 30, COL_SKY, 15, 0, 0);
     s_voice_badge_lbl = lv_label_create(s_voice_badge);
     lv_obj_set_style_text_font(s_voice_badge_lbl, &s_font_16, 0);
     lv_obj_set_style_text_color(s_voice_badge_lbl, lv_color_hex(COL_DARK_TEXT), 0);
     lv_obj_center(s_voice_badge_lbl);
     lv_label_set_text(s_voice_badge_lbl, "语音对讲");
 
-    lv_obj_t *v_card = make_clean_box(s_voice_view, 12, 50, 216, 174, COL_CARD, 12, COL_SKY, 2);
+    lv_obj_t *v_card = make_clean_box(s_voice_view, 12, 46, 216, 174, COL_CARD, 12, COL_SKY, 2);
     s_voice_user_lbl = lv_label_create(v_card);
     lv_obj_set_style_text_font(s_voice_user_lbl, &s_font_16, 0);
     lv_obj_set_style_text_color(s_voice_user_lbl, lv_color_hex(COL_SKY), 0);
@@ -293,8 +320,57 @@ void pa_ui_init(void)
 
     lv_obj_add_flag(s_voice_view, LV_OBJ_FLAG_HIDDEN);
 
+    // --- 4. Phone SoftAP Wi-Fi Setup View (y = 40..268) ---
+    s_setup_view = make_clean_box(s_scr, 0, 40, 240, 228, COL_BG, 0, 0, 0);
+
+    s_setup_pill = make_clean_box(s_setup_view, 40, 6, 160, 26, COL_AMBER, 13, 0, 0);
+    s_setup_pill_lbl = lv_label_create(s_setup_pill);
+    lv_obj_set_style_text_font(s_setup_pill_lbl, &s_font_12, 0);
+    lv_obj_set_style_text_color(s_setup_pill_lbl, lv_color_hex(COL_DARK_TEXT), 0);
+    lv_obj_center(s_setup_pill_lbl);
+    lv_label_set_text(s_setup_pill_lbl, "手机热点配网中");
+
+    lv_obj_t *s_card = make_clean_box(s_setup_view, 12, 38, 216, 182, COL_CARD, 12, COL_SKY, 2);
+
+    lv_obj_t *st1 = lv_label_create(s_card);
+    lv_obj_set_style_text_font(st1, &s_font_12, 0);
+    lv_obj_set_style_text_color(st1, lv_color_hex(COL_MUTED), 0);
+    lv_obj_set_pos(st1, 10, 10);
+    lv_label_set_text(st1, "1. 手机连免密 Wi-Fi 热点:");
+
+    lv_obj_t *ssid_box = make_clean_box(s_card, 10, 29, 194, 30, COL_CARD_ALT, 8, COL_SKY, 1);
+    s_setup_ssid_lbl = lv_label_create(ssid_box);
+    lv_obj_set_style_text_font(s_setup_ssid_lbl, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_color(s_setup_ssid_lbl, lv_color_hex(COL_SKY), 0);
+    lv_obj_center(s_setup_ssid_lbl);
+    lv_label_set_text(s_setup_ssid_lbl, "PocketAgents-Setup");
+
+    lv_obj_t *st2 = lv_label_create(s_card);
+    lv_obj_set_style_text_font(st2, &s_font_12, 0);
+    lv_obj_set_style_text_color(st2, lv_color_hex(COL_MUTED), 0);
+    lv_obj_set_pos(st2, 10, 67);
+    lv_label_set_text(st2, "2. 自动弹窗或浏览器打开:");
+
+    lv_obj_t *ip_box = make_clean_box(s_card, 10, 86, 194, 28, 0x0B2B22u, 8, COL_EMERALD, 1);
+    lv_obj_t *ip_lbl = lv_label_create(ip_box);
+    lv_obj_set_style_text_font(ip_lbl, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_color(ip_lbl, lv_color_hex(COL_EMERALD), 0);
+    lv_obj_center(ip_lbl);
+    lv_label_set_text(ip_lbl, "192.168.4.1");
+
+    s_setup_hint_lbl = lv_label_create(s_card);
+    lv_obj_set_style_text_font(s_setup_hint_lbl, &s_font_12, 0);
+    lv_obj_set_style_text_color(s_setup_hint_lbl, lv_color_hex(COL_TEXT), 0);
+    lv_label_set_long_mode(s_setup_hint_lbl, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(s_setup_hint_lbl, 194);
+    lv_obj_set_style_text_line_space(s_setup_hint_lbl, 4, 0);
+    lv_obj_set_pos(s_setup_hint_lbl, 10, 122);
+    lv_label_set_text(s_setup_hint_lbl, "3. 选 2.4G Wi-Fi 点保存即可\n没开电脑？按 ↓ 先体验演示");
+
+    lv_obj_add_flag(s_setup_view, LV_OBJ_FLAG_HIDDEN);
+
     // --- Toast pill ---
-    s_toast_box = make_clean_box(s_scr, 18, 240, 204, 28, COL_EMERALD, 14, 0, 0);
+    s_toast_box = make_clean_box(s_scr, 18, 236, 204, 26, COL_EMERALD, 13, 0, 0);
     s_toast_lbl = lv_label_create(s_toast_box);
     lv_obj_set_style_text_font(s_toast_lbl, &s_font_12, 0);
     lv_obj_set_style_text_color(s_toast_lbl, lv_color_hex(COL_DARK_TEXT), 0);
@@ -304,15 +380,15 @@ void pa_ui_init(void)
     lv_obj_center(s_toast_lbl);
     lv_obj_add_flag(s_toast_box, LV_OBJ_FLAG_HIDDEN);
 
-    // --- Footer keybar (well clear of 30px curved bottom corners) ---
-    (void)make_clean_box(s_scr, 22, 274, 196, 1, COL_BORDER, 0, 0, 0);
+    // --- Footer keybar (raised 4px for crisp clearance above real physical bottom corner bezel) ---
+    (void)make_clean_box(s_scr, 22, 270, 196, 1, COL_BORDER, 0, 0, 0);
     s_footer_lbl = lv_label_create(s_scr);
     lv_obj_set_style_text_font(s_footer_lbl, &s_font_12, 0);
     lv_obj_set_style_text_color(s_footer_lbl, lv_color_hex(COL_MUTED), 0);
     lv_obj_set_width(s_footer_lbl, 196);
     lv_obj_set_style_text_align(s_footer_lbl, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(s_footer_lbl, LV_ALIGN_BOTTOM_MID, 0, -22);
-    lv_label_set_text(s_footer_lbl, "OK:同步  长按:说话");
+    lv_obj_align(s_footer_lbl, LV_ALIGN_BOTTOM_MID, 0, -26);
+    lv_label_set_text(s_footer_lbl, "OK:同步  长按↑:配网");
 
     lv_screen_load(s_scr);
 }
@@ -320,7 +396,8 @@ void pa_ui_init(void)
 static void render_header(const pa_state_t *st)
 {
     uint32_t dot_col = COL_AMBER;
-    if (st->net_status == PA_NET_ONLINE) dot_col = COL_EMERALD;
+    if (st->demo_mode) dot_col = COL_SKY;
+    else if (st->net_status == PA_NET_ONLINE) dot_col = COL_EMERALD;
     else if (st->net_status == PA_NET_AUTH_ERROR || st->net_status == PA_NET_ERROR) dot_col = COL_CRIMSON;
     else if (st->net_status == PA_NET_OFFLINE) dot_col = COL_MUTED;
     lv_obj_set_style_bg_color(s_net_dot, lv_color_hex(dot_col), 0);
@@ -342,10 +419,20 @@ static void render_dashboard(const pa_state_t *st)
                                   lv_color_hex(st->digest.pending_count > 0 ? COL_AMBER : COL_BORDER), 0);
     lv_obj_set_style_border_width(s_tile_wait_box, st->digest.pending_count > 0 ? 2 : 1, 0);
 
-    if (st->net_status != PA_NET_ONLINE) {
-        lv_obj_set_style_bg_color(s_dash_banner, lv_color_hex(COL_CARD_ALT), 0);
-        lv_obj_set_style_text_color(s_dash_banner_lbl, lv_color_hex(COL_AMBER), 0);
-        lv_label_set_text(s_dash_banner_lbl, st->net_detail[0] ? st->net_detail : "正在连接...");
+    if (st->demo_mode) {
+        lv_obj_set_style_bg_color(s_dash_banner, lv_color_hex(0x0B2B22u), 0);
+        lv_obj_set_style_text_color(s_dash_banner_lbl, lv_color_hex(COL_EMERALD), 0);
+        lv_label_set_text(s_dash_banner_lbl, "演示模式 · 全部就绪");
+    } else if (st->net_status != PA_NET_ONLINE) {
+        if (st->wifi_ip[0] != '\0') {
+            lv_obj_set_style_bg_color(s_dash_banner, lv_color_hex(0x0B2B22u), 0);
+            lv_obj_set_style_text_color(s_dash_banner_lbl, lv_color_hex(COL_EMERALD), 0);
+            lv_label_set_text_fmt(s_dash_banner_lbl, "Wi-Fi已连 %s", st->wifi_ip);
+        } else {
+            lv_obj_set_style_bg_color(s_dash_banner, lv_color_hex(COL_CARD_ALT), 0);
+            lv_obj_set_style_text_color(s_dash_banner_lbl, lv_color_hex(COL_AMBER), 0);
+            lv_label_set_text(s_dash_banner_lbl, st->net_detail[0] ? st->net_detail : "正在连 Wi-Fi...");
+        }
     } else if (st->digest.pending_count > 0) {
         lv_obj_set_style_bg_color(s_dash_banner, lv_color_hex(0x3B2A0Au), 0);
         lv_obj_set_style_text_color(s_dash_banner_lbl, lv_color_hex(COL_AMBER), 0);
@@ -357,33 +444,52 @@ static void render_dashboard(const pa_state_t *st)
     }
 
     int count = st->digest.task_count < 4 ? st->digest.task_count : 4;
-    for (int i = 0; i < 4; i++) {
-        if (i >= count) {
-            lv_obj_add_flag(s_task_rows[i], LV_OBJ_FLAG_HIDDEN);
-            continue;
+    if (count == 0 && !st->demo_mode) {
+        for (int i = 0; i < 4; i++) lv_obj_add_flag(s_task_rows[i], LV_OBJ_FLAG_HIDDEN);
+        lv_obj_remove_flag(s_dash_guide_card, LV_OBJ_FLAG_HIDDEN);
+        if (st->wifi_ip[0] != '\0') {
+            lv_label_set_text(s_dash_guide_title, "尚未连上电脑控制台");
+            lv_label_set_text(s_dash_guide_body,
+                              "• 长按 ↑ 键手机填电脑地址与\n  6 位配对码\n• 按 ↓ 键立即离线体验演示");
+        } else {
+            lv_label_set_text(s_dash_guide_title, "首次使用指引");
+            lv_label_set_text(s_dash_guide_body,
+                              "• 未连网将自动开配网热点\n• 随时长按 ↑ 键手机配 Wi-Fi\n• 按 ↓ 键直接体验离线演示");
         }
-        lv_obj_remove_flag(s_task_rows[i], LV_OBJ_FLAG_HIDDEN);
-        const pa_task_t *t = &st->digest.tasks[i];
-        bool sel = (i == st->selected_task);
-        lv_obj_set_style_border_color(s_task_rows[i], lv_color_hex(sel ? COL_SKY : COL_BORDER), 0);
+    } else {
+        lv_obj_add_flag(s_dash_guide_card, LV_OBJ_FLAG_HIDDEN);
+        for (int i = 0; i < 4; i++) {
+            if (i >= count) {
+                lv_obj_add_flag(s_task_rows[i], LV_OBJ_FLAG_HIDDEN);
+                continue;
+            }
+            lv_obj_remove_flag(s_task_rows[i], LV_OBJ_FLAG_HIDDEN);
+            const pa_task_t *t = &st->digest.tasks[i];
+            bool sel = (i == st->selected_task);
+            lv_obj_set_style_border_color(s_task_rows[i], lv_color_hex(sel ? COL_SKY : COL_BORDER), 0);
 
-        uint32_t dcol = COL_MUTED;
-        const char *tag = "空闲";
-        if (t->pending || strcmp(t->status, "approval") == 0) {
-            dcol = COL_AMBER;
-            tag = "待批";
-        } else if (strcmp(t->status, "running") == 0) {
-            dcol = COL_EMERALD;
-            tag = "运行";
+            uint32_t dcol = COL_MUTED;
+            const char *tag = "空闲";
+            if (t->pending || strcmp(t->status, "approval") == 0) {
+                dcol = COL_AMBER;
+                tag = "待批";
+            } else if (strcmp(t->status, "running") == 0) {
+                dcol = COL_EMERALD;
+                tag = "运行";
+            }
+            lv_obj_set_style_bg_color(s_task_dots[i], lv_color_hex(dcol), 0);
+            lv_obj_set_style_text_color(s_task_tags[i], lv_color_hex(dcol), 0);
+            lv_label_set_text(s_task_titles[i], t->title[0] ? t->title : t->agent_id);
+            lv_label_set_text(s_task_tags[i], tag);
         }
-        lv_obj_set_style_bg_color(s_task_dots[i], lv_color_hex(dcol), 0);
-        lv_obj_set_style_text_color(s_task_tags[i], lv_color_hex(dcol), 0);
-        lv_label_set_text(s_task_titles[i], t->title[0] ? t->title : t->agent_id);
-        lv_label_set_text(s_task_tags[i], tag);
     }
 
-    if (st->digest.pending_count > 0) {
-        lv_label_set_text(s_footer_lbl, "OK:去审批  长按:说话");
+    if (st->demo_mode) {
+        lv_label_set_text(s_footer_lbl, "OK:重播演示  长按↑:配网");
+    } else if (st->digest.pending_count > 0) {
+        lv_label_set_text(s_footer_lbl, "OK:去审批  长按OK:说话");
+    } else if (count == 0) {
+        lv_label_set_text(s_footer_lbl, "↓:演示体验  长按↑:配网");
     } else {
         lv_label_set_text(s_footer_lbl, "↑↓:切换  长按OK:说话");
     }
@@ -432,7 +538,7 @@ static void render_approval(const pa_state_t *st)
             bool sel = (i == st->selected_option);
             lv_obj_set_style_bg_color(s_opt_rows[i], lv_color_hex(sel ? 0x163A5Fu : COL_CARD_ALT), 0);
             lv_obj_set_style_border_color(s_opt_rows[i], lv_color_hex(sel ? COL_SKY : COL_BORDER), 0);
-            char line[56];
+            char line[64];
             snprintf(line, sizeof(line), "%s %d. %s", sel ? ">" : " ", i + 1, a->options[i]);
             lv_label_set_text(s_opt_lbls[i], line);
         }
@@ -488,26 +594,43 @@ static void render_voice(const pa_state_t *st)
     }
 }
 
+static void render_setup(const pa_state_t *st)
+{
+    if (st->setup_phone_connected) {
+        lv_obj_set_style_bg_color(s_setup_pill, lv_color_hex(COL_EMERALD), 0);
+        lv_obj_set_style_text_color(s_setup_pill_lbl, lv_color_hex(COL_DARK_TEXT), 0);
+        lv_label_set_text(s_setup_pill_lbl, "手机已连入 · 开网页");
+    } else {
+        lv_obj_set_style_bg_color(s_setup_pill, lv_color_hex(COL_AMBER), 0);
+        lv_obj_set_style_text_color(s_setup_pill_lbl, lv_color_hex(COL_DARK_TEXT), 0);
+        lv_label_set_text(s_setup_pill_lbl, "手机热点配网中");
+    }
+    lv_label_set_text(s_setup_ssid_lbl, st->setup_ap_ssid[0] ? st->setup_ap_ssid : "PocketAgents-Setup");
+    lv_label_set_text(s_footer_lbl, "↓:演示体验  OK:重试连网");
+}
+
 void pa_ui_render(const pa_state_t *st)
 {
     if (!st || !s_scr) return;
     render_header(st);
 
+    lv_obj_add_flag(s_dash_view, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(s_app_view, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(s_voice_view, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(s_setup_view, LV_OBJ_FLAG_HIDDEN);
+
     if (st->screen == PA_SCREEN_DASHBOARD) {
         lv_obj_remove_flag(s_dash_view, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_add_flag(s_app_view, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_add_flag(s_voice_view, LV_OBJ_FLAG_HIDDEN);
         render_dashboard(st);
     } else if (st->screen == PA_SCREEN_APPROVAL) {
-        lv_obj_add_flag(s_dash_view, LV_OBJ_FLAG_HIDDEN);
         lv_obj_remove_flag(s_app_view, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_add_flag(s_voice_view, LV_OBJ_FLAG_HIDDEN);
         render_approval(st);
-    } else {
-        lv_obj_add_flag(s_dash_view, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_add_flag(s_app_view, LV_OBJ_FLAG_HIDDEN);
+    } else if (st->screen == PA_SCREEN_VOICE) {
         lv_obj_remove_flag(s_voice_view, LV_OBJ_FLAG_HIDDEN);
         render_voice(st);
+    } else {
+        lv_obj_remove_flag(s_setup_view, LV_OBJ_FLAG_HIDDEN);
+        render_setup(st);
     }
 
     bool l2_banner_visible = (st->screen == PA_SCREEN_APPROVAL && st->l2_pin_active &&
@@ -515,7 +638,7 @@ void pa_ui_render(const pa_state_t *st)
                               st->selected_approval < st->digest.approval_count &&
                               strcmp(st->l2_target_code, st->digest.approvals[st->selected_approval].code) == 0);
 
-    if (st->toast[0] != '\0' && !l2_banner_visible) {
+    if (st->toast[0] != '\0' && !l2_banner_visible && st->screen != PA_SCREEN_SETUP) {
         lv_obj_remove_flag(s_toast_box, LV_OBJ_FLAG_HIDDEN);
         lv_obj_set_style_bg_color(s_toast_box, lv_color_hex(st->toast_is_error ? COL_CRIMSON : COL_EMERALD), 0);
         lv_obj_set_style_text_color(s_toast_lbl,

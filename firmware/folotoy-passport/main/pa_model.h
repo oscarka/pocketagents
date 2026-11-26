@@ -1,6 +1,7 @@
 // main/pa_model.h
-// Pure C state machine & zero-malloc JSON parser for PocketAgents Lite Device API.
-// Strictly independent of ESP-IDF and LVGL so all logic is verified by host unit tests.
+// Pure C state machine, zero-malloc JSON/form parsers, and built-in interactive demo mode
+// for PocketAgents on FoloToy AI Passport.
+// Strictly independent of ESP-IDF and LVGL so all logic is verified by host ASan/UBSan unit tests.
 #pragma once
 
 #include <stdbool.h>
@@ -21,6 +22,7 @@ typedef enum {
     PA_SCREEN_DASHBOARD = 0,
     PA_SCREEN_APPROVAL  = 1,
     PA_SCREEN_VOICE     = 2,
+    PA_SCREEN_SETUP     = 3,
 } pa_screen_t;
 
 typedef enum {
@@ -59,6 +61,9 @@ typedef enum {
     PA_CMD_VOICE_START,
     PA_CMD_VOICE_STOP,
     PA_CMD_FORCE_REFRESH,
+    PA_CMD_ENTER_SETUP,
+    PA_CMD_EXIT_SETUP,
+    PA_CMD_START_DEMO,
 } pa_cmd_type_t;
 
 typedef enum {
@@ -140,6 +145,11 @@ typedef struct {
 typedef struct {
     pa_net_status_t net_status;
     char net_detail[64];
+    char wifi_ip[20];
+    bool setup_ap_active;
+    bool setup_phone_connected;
+    char setup_ap_ssid[32];
+    bool demo_mode;
     int battery_soc; // -1 when unavailable (e.g. simulator)
     pa_screen_t screen;
     pa_digest_t digest;
@@ -162,10 +172,16 @@ typedef struct {
 
 void pa_state_init(pa_state_t *st);
 
-// Zero-heap JSON parsers for /api/device/digest, /api/device/action, /api/device/voice-turn.
+// Zero-heap JSON parsers for /api/device/* and /api/pairing/exchange
 bool pa_parse_digest_json(const char *json, pa_digest_t *out);
 bool pa_parse_action_result_json(const char *json, pa_action_result_t *out);
 bool pa_parse_voice_result_json(const char *json, pa_voice_result_t *out);
+bool pa_parse_pair_exchange_json(const char *json, char *out_token, size_t out_size);
+
+// SoftAP HTML form URL decoding & 6-digit pairing code detection
+size_t pa_url_decode(const char *src, size_t src_len, char *dst, size_t dst_size);
+bool pa_parse_form_field(const char *body, const char *key, char *out, size_t out_size);
+bool pa_is_pair_code(const char *token_or_code);
 
 // Apply freshly fetched digest to state. Returns PA_CHIME_NEW_APPROVAL if a new approval arrived.
 pa_chime_t pa_state_apply_digest(pa_state_t *st, const pa_digest_t *d, uint32_t now_ms);
@@ -176,6 +192,14 @@ pa_chime_t pa_state_apply_action_result(pa_state_t *st, const pa_action_result_t
 
 // Apply voice turn result from /api/device/voice-turn.
 pa_chime_t pa_state_apply_voice_result(pa_state_t *st, const pa_voice_result_t *res, uint32_t now_ms);
+
+// Built-in offline interactive demo mode (so reviewers & new users can try all cards immediately)
+pa_chime_t pa_demo_start(pa_state_t *st, uint32_t now_ms);
+pa_chime_t pa_demo_handle_cmd(pa_state_t *st, const pa_dispatch_t *cmd, uint32_t now_ms);
+
+// SoftAP setup screen state transitions
+void pa_state_enter_setup(pa_state_t *st, const char *ap_ssid, uint32_t now_ms);
+void pa_state_exit_setup(pa_state_t *st, uint32_t now_ms);
 
 // Pure button state machine (UP / DOWN / OK, single-button events only).
 pa_dispatch_t pa_state_on_key(pa_state_t *st, pa_key_t key, pa_key_ev_t ev, uint32_t now_ms);
