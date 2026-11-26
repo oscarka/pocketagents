@@ -61,8 +61,8 @@ export async function findOfficialAgyCliPath({
     )
   } else {
     candidates.push(
-      join(home, '.local', 'bin', 'agy'),
       join(home, '.gemini', 'bin', 'agy'),
+      join(home, '.local', 'bin', 'agy'),
       '/opt/homebrew/bin/agy',
       '/usr/local/bin/agy',
     )

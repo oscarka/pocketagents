@@ -3013,8 +3013,8 @@ export async function discoverAntigravityModelCatalog({
         const home = homedir()
         for (const cand of [
           process.env.ANTIGRAVITY_AGENTAPI_EXE,
-          join(home, '.local', 'bin', 'agy'),
           join(home, '.gemini', 'bin', 'agy'),
+          join(home, '.local', 'bin', 'agy'),
           '/opt/homebrew/bin/agy',
           '/usr/local/bin/agy',
         ].filter(Boolean)) {
@@ -4332,8 +4332,8 @@ async function resolveOfficialAgyCliPath() {
   const home = homedir()
   const candidates = [
     process.env.ANTIGRAVITY_AGENTAPI_EXE,
-    join(home, '.local', 'bin', 'agy'),
     join(home, '.gemini', 'bin', 'agy'),
+    join(home, '.local', 'bin', 'agy'),
     '/opt/homebrew/bin/agy',
     '/usr/local/bin/agy',
   ].filter(Boolean)
