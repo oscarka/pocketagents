@@ -305,8 +305,175 @@ n = { __e: function(n, t, r, i) {
 }, x.prototype.render = M, i$1 = [], f$1 = 0, e$1 = function(n, t) {
 	return n.__v.__b - t.__v.__b;
 }, o$1 = Symbol(), l$1 = /(PointerCapture)$|Capture$/i, c$1 = 0, a$1 = {};
+// node_modules/.pnpm/preact@11.1.1/node_modules/preact/hooks/dist/hooks.mjs
+var t;
+var r;
+var u;
+var i;
+var o = Object.is;
+var f = 0;
+var c = [];
+var e = [];
+var a = n;
+var v = a.__b;
+var l = a.__r;
+var m = a.diffed;
+var h = a.__c;
+var s = a.unmount;
+var p = a.__;
+function y(n, t) {
+	a.__h && a.__h(r, n, f || t), f = 0;
+	var u = r.__H || (r.__H = {
+		__: [],
+		__h: []
+	});
+	return n >= u.__.length && u.__.push({}), u.__[n];
+}
+function d(n) {
+	return f = 1, _(G, n);
+}
+function _(n, u, i) {
+	var f = y(t++, 2);
+	if (f.t = n, !f.__c && (f.__ = [i ? i(u) : G(void 0, u), function(n) {
+		var t = f.__N ? f.__N[0] : f.__[0], r = f.t(t, n);
+		o(t, r) || (f.__N = [r, f.__[1]], f.__c.setState({}));
+	}], f.__c = r, !r.__f)) {
+		r.__f = !0;
+		var c = r.shouldComponentUpdate;
+		r.shouldComponentUpdate = function(n, t, r) {
+			var u = this.__H;
+			if (!u) return !0;
+			var i = !1, f = this.props != n;
+			if (u.__.some(function(n) {
+				n.__N && (i = !0, o(n.__[0], n.__N[0]) || (f = !0));
+			}), c) {
+				var e = c.call(this, n, t, r);
+				return i ? e || f : e;
+			}
+			return !i || f;
+		};
+	}
+	return f.__;
+}
+function A(n, u) {
+	var i = y(t++, 3);
+	!a.__s && E(i.__H, u) && (i.__P = !0, i.__ = n, i.u = u, r.__H.__h.push(i));
+}
+function T(n) {
+	return f = 5, w(function() {
+		return { current: n };
+	}, []);
+}
+function w(n, r) {
+	var u = y(t++, 7);
+	return E(u.__H, r) && (u.__ = n(), u.__H = r), u.__;
+}
+function g() {
+	var n;
+	do {
+		for (; n = e.shift();) try {
+			C(n);
+		} catch (t) {
+			a.__e(t, { __: (n = n.__P) && n.__v });
+		}
+		for (; n = c.shift();) {
+			var t = n.__H;
+			if (n.__P && t) try {
+				t.__h.some(C), t.__h.some(D), t.__h = [];
+			} catch (r) {
+				t.__h = [], a.__e(r, n.__v);
+			}
+		}
+	} while (e.length);
+}
+a.__b = function(n) {
+	r = null, v && v(n);
+}, a.__ = function(n, t) {
+	n && t.__k && t.__k.__m && (n.__m = t.__k.__m), p && p(n, t);
+}, a.__r = function(n) {
+	l && l(n), t = 0;
+	var i = (r = n.__c).__H;
+	i && (u == r ? r.__h = [] : (i.__h.some(C), i.__h.some(D), t = 0), i.__h = [], i.__.some(function(n) {
+		n.__N && (n.__ = n.__N), n.u = n.__N = void 0;
+	})), u = r;
+}, a.diffed = function(n) {
+	m && m(n);
+	var t = n.__c;
+	t && t.__H && (t.__H.__h.length && B(c.push(t)), t.__H.__.some(function(n) {
+		n.u && (n.__H = n.u);
+	})), u = r = null;
+}, a.__c = function(n, t) {
+	t.some(function(n) {
+		try {
+			n.__h.some(C), n.__h = n.__h.filter(function(n) {
+				return !n.__ || D(n);
+			});
+		} catch (t) {
+			n.__h = [function() {
+				throw t;
+			}];
+		}
+	}), h && h(n, t);
+}, a.unmount = function(n) {
+	s && s(n);
+	var t, r, u = n.__c;
+	u && u.__H && (u.__H.__.some(function(u) {
+		try {
+			if (u.__P && u.__c) {
+				if (void 0 === r) {
+					for (r = n.__; r && (!r.__c || !r.__c.__P);) r = r.__;
+					r = r && r.__c;
+				}
+				u.__P = r, B(e.push(u));
+			} else C(u);
+		} catch (n) {
+			t = n;
+		}
+	}), u.__H = void 0, t && a.__e(t, u.__v));
+};
+var k = "function" == typeof requestAnimationFrame;
+function z(n) {
+	var t, r = function() {
+		clearTimeout(u), k && cancelAnimationFrame(t), setTimeout(n);
+	}, u = setTimeout(r, 35);
+	k && (t = requestAnimationFrame(r));
+}
+function B(n) {
+	1 != n && i == a.requestAnimationFrame || ((i = a.requestAnimationFrame) || z)(g);
+}
+function C(n) {
+	var t = r, u = n.__c;
+	"function" == typeof u && (n.__c = void 0, u()), r = t;
+}
+function D(n) {
+	var t = r;
+	n.__c = n.__(), r = t;
+}
+function E(n, t) {
+	return !n || n.length != t.length || t.some(function(t, r) {
+		return !o(t, n[r]);
+	});
+}
+function G(n, t) {
+	return "function" == typeof t ? t(n) : t;
+}
 // hub/web/src/components/TopBar.tsx
 function TopBar() {
+	const [walkState, setWalkState] = d({
+		active: Boolean(window.__dshWalkModeOpen),
+		phase: "idle"
+	});
+	A(() => {
+		const onWalkState = (ev) => {
+			const detail = ev?.detail || {};
+			setWalkState({
+				active: Boolean(detail.active),
+				phase: String(detail.phase || "idle")
+			});
+		};
+		window.addEventListener("dsh:walk-state", onWalkState);
+		return () => window.removeEventListener("dsh:walk-state", onWalkState);
+	}, []);
 	return /* @__PURE__ */ k$1(M, null, /* @__PURE__ */ k$1("header", {
 		class: "top-bar",
 		id: "mobileTopHostBtn"
@@ -325,11 +492,27 @@ function TopBar() {
 		id: "turboBadgeBtn",
 		onClick: () => window.openTurboGuideSheet?.(),
 		style: "border:1px solid #a7f3d0;background:#ecfdf5;color:#059669;border-radius:999px;padding:4px 9px;font-size:11.5px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0;"
-	}, "⚡ 极速")), /* @__PURE__ */ k$1("div", { style: "display:flex;align-items:center;gap:6px;flex-shrink:0;" }, /* @__PURE__ */ k$1("button", {
+	}, "⚡ 极速")), /* @__PURE__ */ k$1("div", { style: "display:flex;align-items:center;gap:5px;flex-shrink:0;" }, /* @__PURE__ */ k$1("button", {
+		type: "button",
+		id: "topWalkModeBtn",
+		class: `top-walk-btn ${walkState.active ? `active phase-${walkState.phase}` : ""}`,
+		"aria-label": "边走边听",
+		title: walkState.active ? "边走边听运行中 · 点击展开" : "开启边走边听",
+		onClick: () => window.openWalkMode?.()
+	}, /* @__PURE__ */ k$1("svg", {
+		width: "14",
+		height: "14",
+		viewBox: "0 0 24 24",
+		fill: "none",
+		stroke: "currentColor",
+		"stroke-width": "2.2",
+		"stroke-linecap": "round",
+		"stroke-linejoin": "round"
+	}, /* @__PURE__ */ k$1("path", { d: "M3 18v-6a9 9 0 0 1 18 0v6" }), /* @__PURE__ */ k$1("path", { d: "M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z" })), walkState.active && /* @__PURE__ */ k$1("span", { class: "top-walk-live-dot" })), /* @__PURE__ */ k$1("button", {
 		type: "button",
 		"data-lang-toggle": "1",
 		onClick: () => window.toggleLangPreference?.(),
-		style: "border:1px solid var(--border);background:var(--subtle);color:var(--text-secondary);border-radius:999px;padding:4px 8px;font-size:11.5px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0;"
+		style: "border:1px solid var(--border);background:var(--subtle);color:var(--text-secondary);border-radius:999px;padding:4px 7px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0;"
 	}, "🌐 EN"), /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: "new-chat-btn",
@@ -996,158 +1179,6 @@ function Sheets() {
 		style: "flex:1;position:relative;background:#ffffff;overflow:auto;"
 	})));
 }
-// node_modules/.pnpm/preact@11.1.1/node_modules/preact/hooks/dist/hooks.mjs
-var t;
-var r;
-var u;
-var i;
-var o = Object.is;
-var f = 0;
-var c = [];
-var e = [];
-var a = n;
-var v = a.__b;
-var l = a.__r;
-var m = a.diffed;
-var h = a.__c;
-var s = a.unmount;
-var p = a.__;
-function y(n, t) {
-	a.__h && a.__h(r, n, f || t), f = 0;
-	var u = r.__H || (r.__H = {
-		__: [],
-		__h: []
-	});
-	return n >= u.__.length && u.__.push({}), u.__[n];
-}
-function d(n) {
-	return f = 1, _(G, n);
-}
-function _(n, u, i) {
-	var f = y(t++, 2);
-	if (f.t = n, !f.__c && (f.__ = [i ? i(u) : G(void 0, u), function(n) {
-		var t = f.__N ? f.__N[0] : f.__[0], r = f.t(t, n);
-		o(t, r) || (f.__N = [r, f.__[1]], f.__c.setState({}));
-	}], f.__c = r, !r.__f)) {
-		r.__f = !0;
-		var c = r.shouldComponentUpdate;
-		r.shouldComponentUpdate = function(n, t, r) {
-			var u = this.__H;
-			if (!u) return !0;
-			var i = !1, f = this.props != n;
-			if (u.__.some(function(n) {
-				n.__N && (i = !0, o(n.__[0], n.__N[0]) || (f = !0));
-			}), c) {
-				var e = c.call(this, n, t, r);
-				return i ? e || f : e;
-			}
-			return !i || f;
-		};
-	}
-	return f.__;
-}
-function A(n, u) {
-	var i = y(t++, 3);
-	!a.__s && E(i.__H, u) && (i.__P = !0, i.__ = n, i.u = u, r.__H.__h.push(i));
-}
-function T(n) {
-	return f = 5, w(function() {
-		return { current: n };
-	}, []);
-}
-function w(n, r) {
-	var u = y(t++, 7);
-	return E(u.__H, r) && (u.__ = n(), u.__H = r), u.__;
-}
-function g() {
-	var n;
-	do {
-		for (; n = e.shift();) try {
-			C(n);
-		} catch (t) {
-			a.__e(t, { __: (n = n.__P) && n.__v });
-		}
-		for (; n = c.shift();) {
-			var t = n.__H;
-			if (n.__P && t) try {
-				t.__h.some(C), t.__h.some(D), t.__h = [];
-			} catch (r) {
-				t.__h = [], a.__e(r, n.__v);
-			}
-		}
-	} while (e.length);
-}
-a.__b = function(n) {
-	r = null, v && v(n);
-}, a.__ = function(n, t) {
-	n && t.__k && t.__k.__m && (n.__m = t.__k.__m), p && p(n, t);
-}, a.__r = function(n) {
-	l && l(n), t = 0;
-	var i = (r = n.__c).__H;
-	i && (u == r ? r.__h = [] : (i.__h.some(C), i.__h.some(D), t = 0), i.__h = [], i.__.some(function(n) {
-		n.__N && (n.__ = n.__N), n.u = n.__N = void 0;
-	})), u = r;
-}, a.diffed = function(n) {
-	m && m(n);
-	var t = n.__c;
-	t && t.__H && (t.__H.__h.length && B(c.push(t)), t.__H.__.some(function(n) {
-		n.u && (n.__H = n.u);
-	})), u = r = null;
-}, a.__c = function(n, t) {
-	t.some(function(n) {
-		try {
-			n.__h.some(C), n.__h = n.__h.filter(function(n) {
-				return !n.__ || D(n);
-			});
-		} catch (t) {
-			n.__h = [function() {
-				throw t;
-			}];
-		}
-	}), h && h(n, t);
-}, a.unmount = function(n) {
-	s && s(n);
-	var t, r, u = n.__c;
-	u && u.__H && (u.__H.__.some(function(u) {
-		try {
-			if (u.__P && u.__c) {
-				if (void 0 === r) {
-					for (r = n.__; r && (!r.__c || !r.__c.__P);) r = r.__;
-					r = r && r.__c;
-				}
-				u.__P = r, B(e.push(u));
-			} else C(u);
-		} catch (n) {
-			t = n;
-		}
-	}), u.__H = void 0, t && a.__e(t, u.__v));
-};
-var k = "function" == typeof requestAnimationFrame;
-function z(n) {
-	var t, r = function() {
-		clearTimeout(u), k && cancelAnimationFrame(t), setTimeout(n);
-	}, u = setTimeout(r, 35);
-	k && (t = requestAnimationFrame(r));
-}
-function B(n) {
-	1 != n && i == a.requestAnimationFrame || ((i = a.requestAnimationFrame) || z)(g);
-}
-function C(n) {
-	var t = r, u = n.__c;
-	"function" == typeof u && (n.__c = void 0, u()), r = t;
-}
-function D(n) {
-	var t = r;
-	n.__c = n.__(), r = t;
-}
-function E(n, t) {
-	return !n || n.length != t.length || t.some(function(t, r) {
-		return !o(t, n[r]);
-	});
-}
-function G(n, t) {
-	return "function" == typeof t ? t(n) : t;
-}
 // hub/web/src/utils/i18n.js
 var EXACT_ZH_TO_EN = {
 	"🔒 DSH 远控总控台": "🔒 DSH Remote Control Hub",
@@ -1207,6 +1238,22 @@ var EXACT_ZH_TO_EN = {
 	"去添加": "Add",
 	"已接入电脑": "Connected Computers",
 	"边走边听": "Walk Mode",
+	"收起": "Minimize",
+	"结束边走边听": "End Walk Mode",
+	"播报详略（点击切换）": "Briefing Detail (Tap to Cycle)",
+	"详细要点 · 约 140–280 字讲清结论与选项": "Detailed · ~140-280 chars covering findings & options",
+	"原文精读 · 几乎不压缩，保留原话直读（最快）": "Full Readout · Minimal trimming, fastest direct TTS",
+	"极简一句 · 约 60–80 字快速摘要": "Concise · Short 1-2 sentence summary",
+	"详细要点": "Detailed",
+	"原文精读": "Full Readout",
+	"极简一句": "Concise",
+	"边走边听 · 待命": "Walk Mode · Ready",
+	"边走边听 · 正在播报": "Walk Mode · Speaking",
+	"边走边听 · 正在聆听…": "Walk Mode · Listening…",
+	"边走边听 · 处理中…": "Walk Mode · Thinking…",
+	"轻点展开语音台": "Tap to expand voice console",
+	"跳过播报": "Skip",
+	"🎧 已收起至悬浮条，后台播报继续运行": "🎧 Minimized to floating bar — background briefing stays active",
 	"锁屏通知": "Notifications",
 	"外观": "Appearance",
 	"语言": "Language",
@@ -2468,6 +2515,22 @@ function notifyNativeBackgroundWakeDone() {
 	try {
 		const bridge = getNativeAudioBridge();
 		if (bridge?.notifyBackgroundWakeDone) bridge.notifyBackgroundWakeDone().catch(() => {});
+	} catch {}
+}
+/**
+* Tell the native iOS shell that WKWebView is awake and actively generating cloud TTS
+* (e.g. Doubao / Volcengine Seed-TTS), cancelling the premature native Siri fallback timer.
+* Backward-compatible with PocketAgentsShell v1.1.1 via empty playBase64Audio disarm!
+*/
+function claimNativeBackgroundWakeForCloudTts() {
+	try {
+		const bridge = getNativeAudioBridge();
+		if (!bridge) return;
+		if (bridge.claimBackgroundWakeForCloudTts) bridge.claimBackgroundWakeForCloudTts().catch(() => {});
+		else if (bridge.playBase64Audio) bridge.playBase64Audio("", "audio/mpeg", {
+			duckMusic: false,
+			keepSessionAfter: false
+		}).catch(() => {});
 	} catch {}
 }
 /**
@@ -4385,6 +4448,7 @@ var DEFAULT_CONFIG = {
 		activeProfileId: "native",
 		l2Policy: "pin",
 		proactiveBriefing: "approvals",
+		briefingDetail: "detailed",
 		autoVad: true,
 		vadSilenceMs: 850,
 		autoListenAfterBriefing: true,
@@ -4487,6 +4551,8 @@ function summarizeHubState(state) {
 }
 function VoiceCopilotSheets() {
 	const [walkOpen, setWalkOpen] = d(false);
+	const [walkExpanded, setWalkExpanded] = d(false);
+	const [chatScreenOpen, setChatScreenOpen] = d(false);
 	const [labOpen, setLabOpen] = d(false);
 	const [labInitialView, setLabInitialView] = d("list");
 	const [config, setConfig] = d(DEFAULT_CONFIG);
@@ -4527,9 +4593,41 @@ function VoiceCopilotSheets() {
 	}, []);
 	A(() => {
 		if (!walkOpen) return;
-		const el = document.getElementById("walkModeOverlay");
-		if (el) applyLangToDom(el, getLangPref());
+		const overlayEl = document.getElementById("walkModeOverlay");
+		if (overlayEl) applyLangToDom(overlayEl, getLangPref());
+		const miniEl = document.getElementById("walkMiniBar");
+		if (miniEl) applyLangToDom(miniEl, getLangPref());
 	});
+	A(() => {
+		const syncChatOpen = () => {
+			const chatEl = document.getElementById("chatFullscreen");
+			setChatScreenOpen(Boolean(chatEl && chatEl.classList.contains("open")));
+		};
+		syncChatOpen();
+		const chatEl = document.getElementById("chatFullscreen");
+		if (!chatEl || typeof MutationObserver === "undefined") return;
+		const mo = new MutationObserver(syncChatOpen);
+		mo.observe(chatEl, {
+			attributes: true,
+			attributeFilter: ["class"]
+		});
+		return () => mo.disconnect();
+	}, []);
+	A(() => {
+		document.body.classList.toggle("walk-minibar-active", Boolean(walkOpen && !walkExpanded));
+		window.dispatchEvent(new CustomEvent("dsh:walk-state", { detail: {
+			active: walkOpen,
+			expanded: walkExpanded,
+			phase: walkPhase
+		} }));
+		return () => {
+			document.body.classList.remove("walk-minibar-active");
+		};
+	}, [
+		walkOpen,
+		walkExpanded,
+		walkPhase
+	]);
 	const recorderRef = T(null);
 	const playerRef = T(null);
 	const wakeRef = T(null);
@@ -4537,6 +4635,7 @@ function VoiceCopilotSheets() {
 	const voiceSessionIdRef = T(`walk_${Math.random().toString(36).slice(2, 10)}`);
 	const seenApprovalsRef = T(/* @__PURE__ */ new Set());
 	const seenCompletedRef = T(/* @__PURE__ */ new Set());
+	const recentPushAgentsRef = T(/* @__PURE__ */ new Map());
 	const focusedApprovalRef = T(null);
 	const focusedSessionRef = T(null);
 	const briefingQueueRef = T([]);
@@ -4584,11 +4683,18 @@ function VoiceCopilotSheets() {
 		}
 	};
 	A(() => {
-		window.openWalkMode = () => {
+		window.openWalkMode = (opts) => {
 			setWalkOpen(true);
+			setWalkExpanded(!opts?.minimized);
 			refreshConfig(true);
 		};
+		window.minimizeWalkMode = () => {
+			setWalkPrefsOpen(false);
+			setWalkExpanded(false);
+		};
 		window.closeWalkMode = () => {
+			setWalkPrefsOpen(false);
+			setWalkExpanded(false);
 			setWalkOpen(false);
 		};
 		window.openVoiceLab = (tab) => {
@@ -4601,11 +4707,56 @@ function VoiceCopilotSheets() {
 			setLabOpen(false);
 		};
 		window.__dshRefreshVoiceConfig = () => refreshConfig(true);
-		window.__dshOnBackgroundPushWake = (_payload) => {
+		window.__dshOnBackgroundPushWake = (payload) => {
 			if (!walkOpenRef.current) {
 				notifyNativeBackgroundWakeDone();
 				return false;
 			}
+			if ((configRef.current?.activeProfile?.tts?.provider || "native") !== "native") claimNativeBackgroundWakeForCloudTts();
+			const mode = configRef.current?.prefs?.proactiveBriefing || "approvals";
+			const evType = String(payload?.type || "").trim();
+			const hostId = String(payload?.hostId || "").trim();
+			const agentId = String(payload?.agentId || "").trim();
+			const code = String(payload?.code || "").trim().toUpperCase();
+			let directEnqueued = false;
+			if (mode !== "manual" && hostId) {
+				const snap = summarizeHubState(window.__dshLastHubState);
+				const matchedHost = Array.isArray(window.__dshLastHubState?.hosts) ? window.__dshLastHubState.hosts.find((h) => h?.hostId === hostId) : null;
+				const hostName = String(matchedHost?.hostName || hostId);
+				if (evType === "approval" && code) {
+					const k = `${hostId}:${code}`;
+					if (!seenApprovalsRef.current.has(k)) {
+						seenApprovalsRef.current.add(k);
+						briefingQueueRef.current.push({
+							kind: "approval",
+							key: k,
+							hostId,
+							hostName,
+							code,
+							agentId,
+							title: code
+						});
+						directEnqueued = true;
+					}
+				} else if ((evType === "completed" || evType === "failed") && mode === "all" && agentId) {
+					const agentKey = `${hostId}:${agentId}`;
+					const prevPushAt = recentPushAgentsRef.current.get(agentKey) || 0;
+					if (Date.now() - prevPushAt > 12e3) {
+						recentPushAgentsRef.current.set(agentKey, Date.now());
+						const matchedTask = snap.completedKeys.find((c) => c.hostId === hostId && c.agentId === agentId);
+						briefingQueueRef.current.push({
+							kind: "completed",
+							key: `push:${agentKey}:${Date.now()}`,
+							hostId,
+							hostName,
+							agentId,
+							title: matchedTask?.title || ""
+						});
+						directEnqueued = true;
+					}
+				}
+			}
+			if (directEnqueued && walkPhaseRef.current === "idle") drainBriefingQueue();
 			const fetchFn = window.fetchState;
 			if (typeof fetchFn === "function") {
 				Promise.resolve(fetchFn({
@@ -4614,12 +4765,12 @@ function VoiceCopilotSheets() {
 				})).catch(() => null).finally(() => {
 					setTimeout(() => {
 						if (!drainingBriefingRef.current && briefingQueueRef.current.length === 0 && walkPhaseRef.current === "idle") notifyNativeBackgroundWakeDone();
-					}, 900);
+					}, 1400);
 				});
 				return true;
 			}
-			notifyNativeBackgroundWakeDone();
-			return false;
+			if (!directEnqueued) notifyNativeBackgroundWakeDone();
+			return directEnqueued;
 		};
 		window.__dshWalkStartReplyForPush = (payload) => {
 			if (!walkOpenRef.current) return false;
@@ -4822,7 +4973,8 @@ function VoiceCopilotSheets() {
 					code: nextItem.code || "",
 					agentId: nextItem.agentId || "",
 					profileId: cfg.activeProfile.id,
-					voiceSessionId: voiceSessionIdRef.current
+					voiceSessionId: voiceSessionIdRef.current,
+					detailLevel: cfg.prefs.briefingDetail || "detailed"
 				})
 			})).json().catch(() => null);
 			if (!walkOpenRef.current) return;
@@ -4885,18 +5037,22 @@ function VoiceCopilotSheets() {
 				});
 				enqueued = true;
 			}
-			if (mode === "all") for (const c of snap.completedKeys) {
-				if (seenCompletedRef.current.has(c.key)) continue;
-				seenCompletedRef.current.add(c.key);
-				briefingQueueRef.current.push({
-					kind: "completed",
-					key: c.key,
-					hostId: c.hostId,
-					hostName: c.hostName,
-					agentId: c.agentId,
-					title: c.title
-				});
-				enqueued = true;
+			if (mode === "all") {
+				const nowTs = Date.now();
+				for (const c of snap.completedKeys) {
+					if (seenCompletedRef.current.has(c.key)) continue;
+					seenCompletedRef.current.add(c.key);
+					if (nowTs - (recentPushAgentsRef.current.get(`${c.hostId}:${c.agentId}`) || 0) < 18e3) continue;
+					briefingQueueRef.current.push({
+						kind: "completed",
+						key: c.key,
+						hostId: c.hostId,
+						hostName: c.hostName,
+						agentId: c.agentId,
+						title: c.title
+					});
+					enqueued = true;
+				}
 			}
 			if (briefingQueueRef.current.length > 12) briefingQueueRef.current.splice(0, briefingQueueRef.current.length - 12);
 			if (enqueued && walkPhaseRef.current === "idle") drainBriefingQueue();
@@ -5440,11 +5596,14 @@ function VoiceCopilotSheets() {
 		refreshConfig(false);
 	};
 	const orbScale = walkPhase === "listening" ? 1 + Math.min(.16, micLevel * .22) : 1;
-	const prefsSummaryParts = [config.prefs.proactiveBriefing === "approvals" ? "仅审批播报" : config.prefs.proactiveBriefing === "all" ? "审批与完成播报" : "手动播报"];
+	const briefingLabel = config.prefs.proactiveBriefing === "approvals" ? "仅审批播报" : config.prefs.proactiveBriefing === "all" ? "审批与完成播报" : "手动播报";
+	const detailMode = config.prefs.briefingDetail || "detailed";
+	const prefsSummaryParts = [briefingLabel, detailMode === "verbatim" ? "原文精读" : detailMode === "concise" ? "极简一句" : "详细要点"];
 	if (config.prefs.autoListenAfterBriefing) prefsSummaryParts.push("自动开麦");
 	if (config.prefs.duckMusicMode) prefsSummaryParts.push("听歌混音");
-	if (config.prefs.autoVad) prefsSummaryParts.push("自动停顿");
 	const prefsSummaryText = prefsSummaryParts.slice(0, 3).join(" · ");
+	const miniBarTitle = walkPhase === "speaking" ? "边走边听 · 正在播报" : walkPhase === "listening" ? "边走边听 · 正在聆听…" : walkPhase === "thinking" || walkPhase === "transcribing" ? "边走边听 · 处理中…" : "边走边听 · 待命";
+	const miniBarPreview = walkPhase === "listening" ? lastUserText || "说完自动发送 · 点右侧方块停止" : lastReplyText || "轻点展开语音台";
 	const statusMetaParts = [];
 	if (walkPhase === "idle") {
 		statusMetaParts.push("就绪");
@@ -5456,7 +5615,7 @@ function VoiceCopilotSheets() {
 	else if (walkPhase === "speaking") statusMetaParts.push("正在播报 · 点字幕静音");
 	const statusSubline = statusMetaParts.join(" · ");
 	const isLongReply = (lastReplyText || "").length > 96;
-	return /* @__PURE__ */ k$1(M, null, walkOpen && /* @__PURE__ */ k$1("div", {
+	return /* @__PURE__ */ k$1(M, null, walkOpen && walkExpanded && /* @__PURE__ */ k$1("div", {
 		id: "walkModeOverlay",
 		class: `walk-mode-overlay walk-phase-${walkPhase}`,
 		role: "dialog",
@@ -5470,22 +5629,24 @@ function VoiceCopilotSheets() {
 	}, /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: "walk-circle-nav-btn",
-		id: "walkExitBtn",
-		"aria-label": "退出",
-		title: "退出边走边听",
+		id: "walkMinimizeBtn",
+		"aria-label": "收起",
+		title: "收起至悬浮条（后台继续播报）",
 		onClick: () => {
 			setWalkPrefsOpen(false);
-			setWalkOpen(false);
+			setWalkExpanded(false);
+			toast("🎧 已收起至悬浮条，后台播报继续运行");
 		}
 	}, /* @__PURE__ */ k$1("svg", {
-		width: "18",
-		height: "18",
+		width: "19",
+		height: "19",
 		viewBox: "0 0 24 24",
 		fill: "none",
 		stroke: "currentColor",
-		"stroke-width": "2.2",
-		"stroke-linecap": "round"
-	}, /* @__PURE__ */ k$1("path", { d: "M18 6L6 18M6 6l12 12" }))), /* @__PURE__ */ k$1("button", {
+		"stroke-width": "2.3",
+		"stroke-linecap": "round",
+		"stroke-linejoin": "round"
+	}, /* @__PURE__ */ k$1("path", { d: "M6 9l6 6 6-6" }))), /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: "walk-profile-trigger",
 		onClick: openLabFromWalk,
@@ -5498,7 +5659,7 @@ function VoiceCopilotSheets() {
 		stroke: "currentColor",
 		"stroke-width": "2.4",
 		"stroke-linecap": "round"
-	}, /* @__PURE__ */ k$1("path", { d: "M6 9l6 6 6-6" }))), /* @__PURE__ */ k$1("span", { class: `walk-profile-subline phase-${walkPhase}` }, /* @__PURE__ */ k$1("span", { class: `walk-status-dot phase-${walkPhase}` }), /* @__PURE__ */ k$1("span", null, statusSubline))), /* @__PURE__ */ k$1("button", {
+	}, /* @__PURE__ */ k$1("path", { d: "M6 9l6 6 6-6" }))), /* @__PURE__ */ k$1("span", { class: `walk-profile-subline phase-${walkPhase}` }, /* @__PURE__ */ k$1("span", { class: `walk-status-dot phase-${walkPhase}` }), /* @__PURE__ */ k$1("span", null, statusSubline))), /* @__PURE__ */ k$1("div", { class: "walk-top-right-group" }, /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: "walk-circle-nav-btn",
 		id: "walkOpenLabBtn",
@@ -5506,14 +5667,39 @@ function VoiceCopilotSheets() {
 		title: "语音配置",
 		onClick: openLabFromWalk
 	}, /* @__PURE__ */ k$1("svg", {
-		width: "18",
-		height: "18",
+		width: "17",
+		height: "17",
 		viewBox: "0 0 24 24",
 		fill: "none",
 		stroke: "currentColor",
 		"stroke-width": "1.9",
 		"stroke-linecap": "round"
-	}, /* @__PURE__ */ k$1("path", { d: "M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6" })))), /* @__PURE__ */ k$1("div", {
+	}, /* @__PURE__ */ k$1("path", { d: "M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6" }))), /* @__PURE__ */ k$1("button", {
+		type: "button",
+		class: "walk-circle-nav-btn danger",
+		id: "walkExitBtn",
+		"aria-label": "结束边走边听",
+		title: "结束边走边听",
+		onClick: () => {
+			setWalkPrefsOpen(false);
+			setWalkExpanded(false);
+			setWalkOpen(false);
+		}
+	}, /* @__PURE__ */ k$1("svg", {
+		width: "16",
+		height: "16",
+		viewBox: "0 0 24 24",
+		fill: "none",
+		stroke: "currentColor",
+		"stroke-width": "2.2",
+		"stroke-linecap": "round",
+		"stroke-linejoin": "round"
+	}, /* @__PURE__ */ k$1("path", { d: "M18.36 6.64a9 9 0 1 1-12.73 0" }), /* @__PURE__ */ k$1("line", {
+		x1: "12",
+		y1: "2",
+		x2: "12",
+		y2: "12"
+	}))))), /* @__PURE__ */ k$1("div", {
 		class: "walk-stage",
 		onClick: () => {
 			if (walkPrefsOpen) {
@@ -5671,6 +5857,44 @@ function VoiceCopilotSheets() {
 		"aria-label": "随行偏好设置"
 	}, /* @__PURE__ */ k$1("button", {
 		type: "button",
+		id: "walkBriefingDetailTile",
+		class: `walk-pref-tile full-span ${detailMode !== "concise" ? "on" : ""}`,
+		onClick: () => {
+			const order = [
+				"detailed",
+				"verbatim",
+				"concise"
+			];
+			const cur = config.prefs.briefingDetail || "detailed";
+			const next = order[(order.indexOf(cur) + 1) % order.length];
+			updatePrefPatch({ briefingDetail: next });
+		}
+	}, /* @__PURE__ */ k$1("span", { class: "walk-pref-ico" }, /* @__PURE__ */ k$1("svg", {
+		width: "16",
+		height: "16",
+		viewBox: "0 0 24 24",
+		fill: "none",
+		stroke: "currentColor",
+		"stroke-width": "2.1",
+		"stroke-linecap": "round",
+		"stroke-linejoin": "round"
+	}, /* @__PURE__ */ k$1("line", {
+		x1: "4",
+		y1: "6",
+		x2: "20",
+		y2: "6"
+	}), /* @__PURE__ */ k$1("line", {
+		x1: "4",
+		y1: "12",
+		x2: "18",
+		y2: "12"
+	}), /* @__PURE__ */ k$1("line", {
+		x1: "4",
+		y1: "18",
+		x2: "14",
+		y2: "18"
+	}))), /* @__PURE__ */ k$1("span", { class: "walk-pref-copy" }, /* @__PURE__ */ k$1("span", { class: "walk-pref-t1" }, "播报详略（点击切换）"), /* @__PURE__ */ k$1("span", { class: "walk-pref-t2" }, detailMode === "verbatim" ? "原文精读 · 几乎不压缩，保留原话直读（最快）" : detailMode === "concise" ? "极简一句 · 约 60–80 字快速摘要" : "详细要点 · 约 140–280 字讲清结论与选项"))), /* @__PURE__ */ k$1("button", {
+		type: "button",
 		class: `walk-pref-tile ${config.prefs.proactiveBriefing !== "manual" ? "on" : ""}`,
 		onClick: () => {
 			const order = [
@@ -5768,7 +5992,109 @@ function VoiceCopilotSheets() {
 		stroke: "currentColor",
 		"stroke-width": "2.2",
 		"stroke-linecap": "round"
-	}, /* @__PURE__ */ k$1("path", { d: "M18 15l-6-6-6 6" })))))), /* @__PURE__ */ k$1(VoiceProviderSheet, {
+	}, /* @__PURE__ */ k$1("path", { d: "M18 15l-6-6-6 6" })))))), walkOpen && !walkExpanded && /* @__PURE__ */ k$1("div", {
+		id: "walkMiniBar",
+		class: `walk-mini-bar phase-${walkPhase} ${chatScreenOpen ? "in-chat" : ""}`,
+		role: "region",
+		"aria-label": "边走边听悬浮条"
+	}, /* @__PURE__ */ k$1("button", {
+		type: "button",
+		class: "walk-mini-main",
+		id: "walkMiniExpandBtn",
+		onClick: () => setWalkExpanded(true),
+		title: "点击展开全屏语音台"
+	}, /* @__PURE__ */ k$1("span", {
+		class: `walk-mini-orb phase-${walkPhase}`,
+		"aria-hidden": "true"
+	}, /* @__PURE__ */ k$1("svg", {
+		width: "15",
+		height: "15",
+		viewBox: "0 0 24 24",
+		fill: "none",
+		stroke: "currentColor",
+		"stroke-width": "2.2",
+		"stroke-linecap": "round",
+		"stroke-linejoin": "round"
+	}, /* @__PURE__ */ k$1("path", { d: "M3 18v-6a9 9 0 0 1 18 0v6" }), /* @__PURE__ */ k$1("path", { d: "M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z" }))), /* @__PURE__ */ k$1("span", { class: "walk-mini-copy" }, /* @__PURE__ */ k$1("span", { class: "walk-mini-title-row" }, /* @__PURE__ */ k$1("span", { class: "walk-mini-title" }, miniBarTitle), hubSummary.approvals.length > 0 && /* @__PURE__ */ k$1("span", { class: "walk-mini-badge" }, `${hubSummary.approvals.length} 待审批`)), /* @__PURE__ */ k$1("span", { class: "walk-mini-sub" }, miniBarPreview))), /* @__PURE__ */ k$1("div", { class: "walk-mini-actions" }, /* @__PURE__ */ k$1("button", {
+		type: "button",
+		id: "walkMiniMicBtn",
+		class: `walk-mini-btn primary phase-${walkPhase}`,
+		"aria-label": walkPhase === "speaking" ? "跳过播报" : walkPhase === "listening" ? "停止说话并发送" : "开始说话",
+		title: walkPhase === "speaking" ? "跳过当前播报" : walkPhase === "listening" ? "停止并发送" : "直接说话",
+		onClick: (e) => {
+			e.stopPropagation();
+			if (walkPhase === "speaking") {
+				playerRef.current?.stop();
+				setWalkPhase("idle");
+				toast("🔇 已跳过当前播报");
+			} else toggleWalkMic();
+		}
+	}, walkPhase === "listening" ? /* @__PURE__ */ k$1("svg", {
+		width: "13",
+		height: "13",
+		viewBox: "0 0 24 24",
+		fill: "currentColor"
+	}, /* @__PURE__ */ k$1("rect", {
+		x: "6",
+		y: "6",
+		width: "12",
+		height: "12",
+		rx: "3"
+	})) : walkPhase === "speaking" ? /* @__PURE__ */ k$1("svg", {
+		width: "15",
+		height: "15",
+		viewBox: "0 0 24 24",
+		fill: "none",
+		stroke: "currentColor",
+		"stroke-width": "2.2",
+		"stroke-linecap": "round",
+		"stroke-linejoin": "round"
+	}, /* @__PURE__ */ k$1("polygon", { points: "11 5 6 9 2 9 2 15 6 15 11 19 11 5" }), /* @__PURE__ */ k$1("line", {
+		x1: "23",
+		y1: "9",
+		x2: "17",
+		y2: "15"
+	}), /* @__PURE__ */ k$1("line", {
+		x1: "17",
+		y1: "9",
+		x2: "23",
+		y2: "15"
+	})) : /* @__PURE__ */ k$1("svg", {
+		width: "15",
+		height: "15",
+		viewBox: "0 0 24 24",
+		fill: "none",
+		stroke: "currentColor",
+		"stroke-width": "2.2",
+		"stroke-linecap": "round",
+		"stroke-linejoin": "round"
+	}, /* @__PURE__ */ k$1("rect", {
+		x: "9",
+		y: "2",
+		width: "6",
+		height: "12",
+		rx: "3"
+	}), /* @__PURE__ */ k$1("path", { d: "M5 10a7 7 0 0 0 14 0" }), /* @__PURE__ */ k$1("path", { d: "M12 17v5" }))), /* @__PURE__ */ k$1("button", {
+		type: "button",
+		id: "walkMiniEndBtn",
+		class: "walk-mini-btn end",
+		"aria-label": "结束边走边听",
+		title: "结束边走边听",
+		onClick: (e) => {
+			e.stopPropagation();
+			setWalkPrefsOpen(false);
+			setWalkExpanded(false);
+			setWalkOpen(false);
+		}
+	}, /* @__PURE__ */ k$1("svg", {
+		width: "14",
+		height: "14",
+		viewBox: "0 0 24 24",
+		fill: "none",
+		stroke: "currentColor",
+		"stroke-width": "2.3",
+		"stroke-linecap": "round"
+	}, /* @__PURE__ */ k$1("path", { d: "M18 6L6 18M6 6l12 12" }))))), /* @__PURE__ */ k$1(VoiceProviderSheet, {
 		open: labOpen,
 		onClose: () => setLabOpen(false),
 		config,

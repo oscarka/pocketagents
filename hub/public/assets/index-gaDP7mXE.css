@@ -5391,6 +5391,282 @@
       padding: 2px 0 6px;
     }
 
+    .walk-top-right-group {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+
+    .walk-circle-nav-btn.danger {
+      color: #ef4444;
+      background: rgba(239, 68, 68, 0.08);
+      border-color: rgba(239, 68, 68, 0.22);
+    }
+
+    :root[data-theme="dark"] .walk-circle-nav-btn.danger {
+      color: #fca5a5;
+      background: rgba(239, 68, 68, 0.16);
+      border-color: rgba(248, 113, 113, 0.3);
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) .walk-circle-nav-btn.danger {
+        color: #fca5a5;
+        background: rgba(239, 68, 68, 0.16);
+        border-color: rgba(248, 113, 113, 0.3);
+      }
+    }
+
+    /* 首页顶栏极简耳机快捷入口 */
+    .top-walk-btn {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 30px;
+      height: 28px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: var(--subtle);
+      color: var(--text-secondary);
+      cursor: pointer;
+      flex-shrink: 0;
+      padding: 0;
+      transition: background 0.16s ease, color 0.16s ease, border-color 0.16s ease, transform 0.1s ease;
+    }
+
+    .top-walk-btn:active {
+      transform: scale(0.92);
+    }
+
+    .top-walk-btn.active {
+      background: rgba(37, 99, 235, 0.12);
+      border-color: rgba(37, 99, 235, 0.35);
+      color: var(--primary);
+    }
+
+    .top-walk-btn.active.phase-speaking {
+      background: rgba(16, 185, 129, 0.14);
+      border-color: rgba(16, 185, 129, 0.42);
+      color: #059669;
+    }
+
+    .top-walk-btn.active.phase-listening {
+      background: rgba(239, 68, 68, 0.14);
+      border-color: rgba(239, 68, 68, 0.42);
+      color: #dc2626;
+    }
+
+    .top-walk-live-dot {
+      position: absolute;
+      top: 3px;
+      right: 3px;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: currentColor;
+      box-shadow: 0 0 0 2px var(--surface);
+    }
+
+    /* 收起态：Apple Music 式迷你悬浮语音条 */
+    .walk-mini-bar {
+      position: fixed;
+      left: 12px;
+      right: 12px;
+      bottom: calc(64px + var(--safe-bottom));
+      z-index: 68;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 7px 9px 7px 10px;
+      border-radius: 18px;
+      background: rgba(255, 255, 255, 0.92);
+      backdrop-filter: blur(22px);
+      -webkit-backdrop-filter: blur(22px);
+      border: 1px solid rgba(15, 23, 42, 0.1);
+      box-shadow: 0 10px 28px rgba(15, 23, 42, 0.14), 0 2px 6px rgba(15, 23, 42, 0.06);
+      color: var(--text);
+      transition: transform 0.2s ease, opacity 0.2s ease, border-color 0.2s ease;
+    }
+
+    .walk-mini-bar.in-chat {
+      bottom: auto;
+      top: calc(env(safe-area-inset-top, 0px) + 60px);
+    }
+
+    :root.ios-native-shell-v1 .walk-mini-bar.in-chat {
+      top: calc(var(--safe-top, 0px) + 60px);
+    }
+
+    .walk-mini-bar.phase-speaking {
+      border-color: rgba(16, 185, 129, 0.45);
+    }
+
+    .walk-mini-bar.phase-listening {
+      border-color: rgba(239, 68, 68, 0.48);
+    }
+
+    :root[data-theme="dark"] .walk-mini-bar {
+      background: rgba(15, 23, 42, 0.92);
+      border-color: rgba(148, 163, 184, 0.22);
+      box-shadow: 0 12px 32px rgba(0, 0, 0, 0.48);
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) .walk-mini-bar {
+        background: rgba(15, 23, 42, 0.92);
+        border-color: rgba(148, 163, 184, 0.22);
+        box-shadow: 0 12px 32px rgba(0, 0, 0, 0.48);
+      }
+    }
+
+    @media (min-width: 769px) {
+      .walk-mini-bar {
+        left: 50%;
+        right: auto;
+        transform: translateX(-50%);
+        width: min(440px, calc(100vw - 32px));
+      }
+      .walk-mini-bar.in-chat {
+        top: auto;
+        bottom: 18px;
+      }
+    }
+
+    .walk-mini-main {
+      flex: 1;
+      min-width: 0;
+      border: none;
+      background: transparent;
+      padding: 0;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      text-align: left;
+      cursor: pointer;
+      color: inherit;
+    }
+
+    .walk-mini-orb {
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      background: rgba(37, 99, 235, 0.12);
+      color: var(--primary);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .walk-mini-orb.phase-speaking {
+      background: rgba(16, 185, 129, 0.16);
+      color: #059669;
+    }
+
+    .walk-mini-orb.phase-listening {
+      background: rgba(239, 68, 68, 0.16);
+      color: #dc2626;
+    }
+
+    .walk-mini-copy {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .walk-mini-title-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      min-width: 0;
+    }
+
+    .walk-mini-title {
+      font-size: 12.5px;
+      font-weight: 700;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .walk-mini-badge {
+      font-size: 10.5px;
+      font-weight: 700;
+      padding: 1px 6px;
+      border-radius: 999px;
+      background: rgba(245, 158, 11, 0.16);
+      color: #d97706;
+      flex-shrink: 0;
+    }
+
+    .walk-mini-sub {
+      font-size: 11.5px;
+      color: var(--muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .walk-mini-actions {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+
+    .walk-mini-btn {
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      border: 1px solid var(--border);
+      background: var(--subtle);
+      color: var(--text);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      padding: 0;
+      transition: transform 0.1s ease, background 0.15s ease;
+    }
+
+    .walk-mini-btn:active {
+      transform: scale(0.92);
+    }
+
+    .walk-mini-btn.primary {
+      background: #0f172a;
+      border-color: transparent;
+      color: #ffffff;
+    }
+
+    :root[data-theme="dark"] .walk-mini-btn.primary {
+      background: #3b82f6;
+    }
+
+    .walk-mini-btn.primary.phase-listening {
+      background: #ef4444;
+    }
+
+    .walk-mini-btn.primary.phase-speaking {
+      background: #10b981;
+    }
+
+    .walk-mini-btn.end {
+      width: 30px;
+      height: 30px;
+      color: var(--muted);
+    }
+
+    body.walk-minibar-active .main-viewport {
+      padding-bottom: 76px;
+    }
+
     .walk-circle-nav-btn {
       width: 38px;
       height: 38px;
@@ -5896,6 +6172,10 @@
 
     .walk-pref-tile:active {
       transform: scale(0.97);
+    }
+
+    .walk-pref-tile.full-span {
+      grid-column: 1 / -1;
     }
 
     .walk-pref-tile.on {

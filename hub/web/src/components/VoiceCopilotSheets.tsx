@@ -7,6 +7,7 @@ import {
   WalkWakeLockManager,
   bindWalkMediaSession,
   canNativeAutoListenNow,
+  claimNativeBackgroundWakeForCloudTts,
   isNativeIosShell,
   notifyNativeBackgroundWakeDone,
   playEarcon,
@@ -48,6 +49,7 @@ const DEFAULT_CONFIG: VoiceConfigState = {
     activeProfileId: 'native',
     l2Policy: 'pin',
     proactiveBriefing: 'approvals',
+    briefingDetail: 'detailed',
     autoVad: true,
     vadSilenceMs: 850,
     autoListenAfterBriefing: true,
@@ -132,7 +134,9 @@ function summarizeHubState(state: any) {
 }
 
 export function VoiceCopilotSheets() {
-  const [walkOpen, setWalkOpen] = useState(false);
+  const [walkOpen, setWalkOpen] = useState(false); // Mode active (engine + background audio + briefings)
+  const [walkExpanded, setWalkExpanded] = useState(false); // Full-screen canvas vs minimized Apple Music-style Mini Bar
+  const [chatScreenOpen, setChatScreenOpen] = useState(false);
   const [labOpen, setLabOpen] = useState(false);
   const [labInitialView, setLabInitialView] = useState<'list' | 'add' | 'bench'>('list');
   const [config, setConfig] = useState<VoiceConfigState>(DEFAULT_CONFIG);
@@ -185,12 +189,41 @@ export function VoiceCopilotSheets() {
     return () => window.removeEventListener('dsh:lang-change', onLang);
   }, []);
 
-  // Re-apply English DOM translation after every Preact commit while Walk Mode overlay is open
+  // Re-apply English DOM translation after every Preact commit while Walk Mode (full or mini bar) is visible
   useEffect(() => {
     if (!walkOpen) return;
-    const el = document.getElementById('walkModeOverlay');
-    if (el) applyLangToDom(el, getLangPref());
+    const overlayEl = document.getElementById('walkModeOverlay');
+    if (overlayEl) applyLangToDom(overlayEl, getLangPref());
+    const miniEl = document.getElementById('walkMiniBar');
+    if (miniEl) applyLangToDom(miniEl, getLangPref());
   });
+
+  // Track whether mobile fullscreen chat view is open so the minimized Mini Bar moves cleanly below chat navbar
+  useEffect(() => {
+    const syncChatOpen = () => {
+      const chatEl = document.getElementById('chatFullscreen');
+      setChatScreenOpen(Boolean(chatEl && chatEl.classList.contains('open')));
+    };
+    syncChatOpen();
+    const chatEl = document.getElementById('chatFullscreen');
+    if (!chatEl || typeof MutationObserver === 'undefined') return;
+    const mo = new MutationObserver(syncChatOpen);
+    mo.observe(chatEl, { attributes: true, attributeFilter: ['class'] });
+    return () => mo.disconnect();
+  }, []);
+
+  // Broadcast Walk Mode live state so TopBar headphone icon reflects active / speaking / listening status
+  useEffect(() => {
+    document.body.classList.toggle('walk-minibar-active', Boolean(walkOpen && !walkExpanded));
+    window.dispatchEvent(
+      new CustomEvent('dsh:walk-state', {
+        detail: { active: walkOpen, expanded: walkExpanded, phase: walkPhase },
+      }),
+    );
+    return () => {
+      document.body.classList.remove('walk-minibar-active');
+    };
+  }, [walkOpen, walkExpanded, walkPhase]);
 
   const recorderRef = useRef<WalkWavRecorder | null>(null);
   const playerRef = useRef<WalkSpeechPlayer | null>(null);
@@ -199,6 +232,7 @@ export function VoiceCopilotSheets() {
   const voiceSessionIdRef = useRef(`walk_${Math.random().toString(36).slice(2, 10)}`);
   const seenApprovalsRef = useRef<Set<string>>(new Set());
   const seenCompletedRef = useRef<Set<string>>(new Set());
+  const recentPushAgentsRef = useRef<Map<string, number>>(new Map());
   const focusedApprovalRef = useRef<{ hostId: string; code: string; slot?: number; announcedAt?: number } | null>(null);
   const focusedSessionRef = useRef<{ hostId: string; agentId: string; title?: string; announcedAt: number } | null>(null);
   const briefingQueueRef = useRef<Array<{ kind: 'approval' | 'completed'; key: string; hostId: string; hostName: string; code?: string; agentId?: string; title?: string }>>([]);
@@ -244,11 +278,18 @@ export function VoiceCopilotSheets() {
 
   // Expose global openers & chat BYOK helpers on window
   useEffect(() => {
-    (window as any).openWalkMode = () => {
+    (window as any).openWalkMode = (opts?: { minimized?: boolean }) => {
       setWalkOpen(true);
+      setWalkExpanded(!opts?.minimized);
       void refreshConfig(true);
     };
+    (window as any).minimizeWalkMode = () => {
+      setWalkPrefsOpen(false);
+      setWalkExpanded(false);
+    };
     (window as any).closeWalkMode = () => {
+      setWalkPrefsOpen(false);
+      setWalkExpanded(false);
       setWalkOpen(false);
     };
     (window as any).openVoiceLab = (tab?: 'simple' | 'profiles' | 'keys' | 'bench' | 'add' | 'list') => {
@@ -261,11 +302,70 @@ export function VoiceCopilotSheets() {
       setLabOpen(false);
     };
     (window as any).__dshRefreshVoiceConfig = () => refreshConfig(true);
-    (window as any).__dshOnBackgroundPushWake = (_payload?: any) => {
+    (window as any).__dshOnBackgroundPushWake = (payload?: any) => {
       if (!walkOpenRef.current) {
         notifyNativeBackgroundWakeDone();
         return false;
       }
+      // Immediately disarm native Siri 4.5s fallback when cloud TTS (Doubao / OpenAI / Gemini) is configured,
+      // so the real cloud voice ALWAYS plays instead of getting hijacked by Apple AVSpeechSynthesizer!
+      const ttsProv = configRef.current?.activeProfile?.tts?.provider || 'native';
+      if (ttsProv !== 'native') {
+        claimNativeBackgroundWakeForCloudTts();
+      }
+
+      const mode = configRef.current?.prefs?.proactiveBriefing || 'approvals';
+      const evType = String(payload?.type || '').trim();
+      const hostId = String(payload?.hostId || '').trim();
+      const agentId = String(payload?.agentId || '').trim();
+      const code = String(payload?.code || '').trim().toUpperCase();
+
+      // Fast-path: enqueue directly from APNs payload without waiting ~1.5s for full 390KB /api/state!
+      let directEnqueued = false;
+      if (mode !== 'manual' && hostId) {
+        const snap = summarizeHubState((window as any).__dshLastHubState);
+        const matchedHost = (Array.isArray((window as any).__dshLastHubState?.hosts)
+          ? (window as any).__dshLastHubState.hosts.find((h: any) => h?.hostId === hostId)
+          : null);
+        const hostName = String(matchedHost?.hostName || hostId);
+        if (evType === 'approval' && code) {
+          const k = `${hostId}:${code}`;
+          if (!seenApprovalsRef.current.has(k)) {
+            seenApprovalsRef.current.add(k);
+            briefingQueueRef.current.push({
+              kind: 'approval',
+              key: k,
+              hostId,
+              hostName,
+              code,
+              agentId,
+              title: code,
+            });
+            directEnqueued = true;
+          }
+        } else if ((evType === 'completed' || evType === 'failed') && mode === 'all' && agentId) {
+          const agentKey = `${hostId}:${agentId}`;
+          const prevPushAt = recentPushAgentsRef.current.get(agentKey) || 0;
+          if (Date.now() - prevPushAt > 12_000) {
+            recentPushAgentsRef.current.set(agentKey, Date.now());
+            const matchedTask = snap.completedKeys.find(c => c.hostId === hostId && c.agentId === agentId);
+            briefingQueueRef.current.push({
+              kind: 'completed',
+              key: `push:${agentKey}:${Date.now()}`,
+              hostId,
+              hostName,
+              agentId,
+              title: matchedTask?.title || '',
+            });
+            directEnqueued = true;
+          }
+        }
+      }
+
+      if (directEnqueued && walkPhaseRef.current === 'idle') {
+        void drainBriefingQueue();
+      }
+
       const fetchFn = (window as any).fetchState;
       if (typeof fetchFn === 'function') {
         void Promise.resolve(fetchFn({ silent: true, forceFresh: true }))
@@ -279,12 +379,14 @@ export function VoiceCopilotSheets() {
               ) {
                 notifyNativeBackgroundWakeDone();
               }
-            }, 900);
+            }, 1400);
           });
         return true;
       }
-      notifyNativeBackgroundWakeDone();
-      return false;
+      if (!directEnqueued) {
+        notifyNativeBackgroundWakeDone();
+      }
+      return directEnqueued;
     };
     (window as any).__dshWalkStartReplyForPush = (payload?: any) => {
       if (!walkOpenRef.current) return false;
@@ -524,6 +626,7 @@ export function VoiceCopilotSheets() {
           agentId: nextItem.agentId || '',
           profileId: cfg.activeProfile.id,
           voiceSessionId: voiceSessionIdRef.current,
+          detailLevel: cfg.prefs.briefingDetail || 'detailed',
         }),
       });
       const data = await res.json().catch(() => null);
@@ -623,9 +726,13 @@ export function VoiceCopilotSheets() {
       }
 
       if (mode === 'all') {
+        const nowTs = Date.now();
         for (const c of snap.completedKeys) {
           if (seenCompletedRef.current.has(c.key)) continue;
           seenCompletedRef.current.add(c.key);
+          // Avoid duplicate briefing if APNs fast-path just enqueued this exact task seconds ago
+          const pushedAt = recentPushAgentsRef.current.get(`${c.hostId}:${c.agentId}`) || 0;
+          if (nowTs - pushedAt < 18_000) continue;
           briefingQueueRef.current.push({
             kind: 'completed',
             key: c.key,
@@ -1222,11 +1329,30 @@ export function VoiceCopilotSheets() {
       : config.prefs.proactiveBriefing === 'all'
         ? '审批与完成播报'
         : '手动播报';
-  const prefsSummaryParts: string[] = [briefingLabel];
+  const detailMode = config.prefs.briefingDetail || 'detailed';
+  const detailLabel =
+    detailMode === 'verbatim'
+      ? '原文精读'
+      : detailMode === 'concise'
+        ? '极简一句'
+        : '详细要点';
+  const prefsSummaryParts: string[] = [briefingLabel, detailLabel];
   if (config.prefs.autoListenAfterBriefing) prefsSummaryParts.push('自动开麦');
   if (config.prefs.duckMusicMode) prefsSummaryParts.push('听歌混音');
-  if (config.prefs.autoVad) prefsSummaryParts.push('自动停顿');
   const prefsSummaryText = prefsSummaryParts.slice(0, 3).join(' · ');
+
+  const miniBarTitle =
+    walkPhase === 'speaking'
+      ? '边走边听 · 正在播报'
+      : walkPhase === 'listening'
+        ? '边走边听 · 正在聆听…'
+        : walkPhase === 'thinking' || walkPhase === 'transcribing'
+          ? '边走边听 · 处理中…'
+          : '边走边听 · 待命';
+  const miniBarPreview =
+    walkPhase === 'listening'
+      ? (lastUserText || '说完自动发送 · 点右侧方块停止')
+      : (lastReplyText || '轻点展开语音台');
 
   const statusMetaParts: string[] = [];
   if (walkPhase === 'idle') {
@@ -1247,8 +1373,8 @@ export function VoiceCopilotSheets() {
 
   return (
     <Fragment>
-      {/* 1. 全屏极简留白随行语音台（自动跟随设置里的 浅色 / 深色 / 跟随系统 主题） */}
-      {walkOpen && (
+      {/* 1. 全屏极简留白随行语音台（展开态；点左上角收起成悬浮迷你条，点右上角关闭才真正退出模式） */}
+      {walkOpen && walkExpanded && (
         <div
           id="walkModeOverlay"
           class={`walk-mode-overlay walk-phase-${walkPhase}`}
@@ -1258,21 +1384,22 @@ export function VoiceCopilotSheets() {
             if (walkPrefsOpen) setWalkPrefsOpen(false);
           }}
         >
-          {/* 顶部极简导航：左关闭 · 中配置标题与状态 · 右配置按钮 */}
+          {/* 顶部极简导航：左收起 · 中配置标题与状态 · 右配置+结束 */}
           <div class="walk-top-bar" onClick={e => e.stopPropagation()}>
             <button
               type="button"
               class="walk-circle-nav-btn"
-              id="walkExitBtn"
-              aria-label="退出"
-              title="退出边走边听"
+              id="walkMinimizeBtn"
+              aria-label="收起"
+              title="收起至悬浮条（后台继续播报）"
               onClick={() => {
                 setWalkPrefsOpen(false);
-                setWalkOpen(false);
+                setWalkExpanded(false);
+                toast('🎧 已收起至悬浮条，后台播报继续运行');
               }}
             >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
-                <path d="M18 6L6 18M6 6l12 12" />
+              <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M6 9l6 6 6-6" />
               </svg>
             </button>
 
@@ -1294,18 +1421,37 @@ export function VoiceCopilotSheets() {
               </span>
             </button>
 
-            <button
-              type="button"
-              class="walk-circle-nav-btn"
-              id="walkOpenLabBtn"
-              aria-label="语音配置"
-              title="语音配置"
-              onClick={openLabFromWalk}
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round">
-                <path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6" />
-              </svg>
-            </button>
+            <div class="walk-top-right-group">
+              <button
+                type="button"
+                class="walk-circle-nav-btn"
+                id="walkOpenLabBtn"
+                aria-label="语音配置"
+                title="语音配置"
+                onClick={openLabFromWalk}
+              >
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round">
+                  <path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                class="walk-circle-nav-btn danger"
+                id="walkExitBtn"
+                aria-label="结束边走边听"
+                title="结束边走边听"
+                onClick={() => {
+                  setWalkPrefsOpen(false);
+                  setWalkExpanded(false);
+                  setWalkOpen(false);
+                }}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M18.36 6.64a9 9 0 1 1-12.73 0" />
+                  <line x1="12" y1="2" x2="12" y2="12" />
+                </svg>
+              </button>
+            </div>
           </div>
 
           {/* 中央大留白无框字幕区（播报时轻点静音） */}
@@ -1494,6 +1640,36 @@ export function VoiceCopilotSheets() {
                 <div class="walk-prefs-drawer" role="region" aria-label="随行偏好设置">
                   <button
                     type="button"
+                    id="walkBriefingDetailTile"
+                    class={`walk-pref-tile full-span ${detailMode !== 'concise' ? 'on' : ''}`}
+                    onClick={() => {
+                      const order: Array<'detailed' | 'verbatim' | 'concise'> = ['detailed', 'verbatim', 'concise'];
+                      const cur = (config.prefs.briefingDetail || 'detailed') as 'detailed' | 'verbatim' | 'concise';
+                      const next = order[(order.indexOf(cur) + 1) % order.length];
+                      void updatePrefPatch({ briefingDetail: next });
+                    }}
+                  >
+                    <span class="walk-pref-ico">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
+                        <line x1="4" y1="6" x2="20" y2="6" />
+                        <line x1="4" y1="12" x2="18" y2="12" />
+                        <line x1="4" y1="18" x2="14" y2="18" />
+                      </svg>
+                    </span>
+                    <span class="walk-pref-copy">
+                      <span class="walk-pref-t1">播报详略（点击切换）</span>
+                      <span class="walk-pref-t2">
+                        {detailMode === 'verbatim'
+                          ? '原文精读 · 几乎不压缩，保留原话直读（最快）'
+                          : detailMode === 'concise'
+                            ? '极简一句 · 约 60–80 字快速摘要'
+                            : '详细要点 · 约 140–280 字讲清结论与选项'}
+                      </span>
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
                     class={`walk-pref-tile ${config.prefs.proactiveBriefing !== 'manual' ? 'on' : ''}`}
                     onClick={() => {
                       const order: Array<'approvals' | 'all' | 'manual'> = ['approvals', 'all', 'manual'];
@@ -1601,6 +1777,95 @@ export function VoiceCopilotSheets() {
                 </svg>
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* 1b. 收起态：Apple Music 式迷你悬浮语音条（边看对话/文件边听播报，点空白展开，右侧一键插话或关闭） */}
+      {walkOpen && !walkExpanded && (
+        <div
+          id="walkMiniBar"
+          class={`walk-mini-bar phase-${walkPhase} ${chatScreenOpen ? 'in-chat' : ''}`}
+          role="region"
+          aria-label="边走边听悬浮条"
+        >
+          <button
+            type="button"
+            class="walk-mini-main"
+            id="walkMiniExpandBtn"
+            onClick={() => setWalkExpanded(true)}
+            title="点击展开全屏语音台"
+          >
+            <span class={`walk-mini-orb phase-${walkPhase}`} aria-hidden="true">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 18v-6a9 9 0 0 1 18 0v6" />
+                <path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z" />
+              </svg>
+            </span>
+            <span class="walk-mini-copy">
+              <span class="walk-mini-title-row">
+                <span class="walk-mini-title">{miniBarTitle}</span>
+                {hubSummary.approvals.length > 0 && (
+                  <span class="walk-mini-badge">{`${hubSummary.approvals.length} 待审批`}</span>
+                )}
+              </span>
+              <span class="walk-mini-sub">{miniBarPreview}</span>
+            </span>
+          </button>
+
+          <div class="walk-mini-actions">
+            <button
+              type="button"
+              id="walkMiniMicBtn"
+              class={`walk-mini-btn primary phase-${walkPhase}`}
+              aria-label={walkPhase === 'speaking' ? '跳过播报' : walkPhase === 'listening' ? '停止说话并发送' : '开始说话'}
+              title={walkPhase === 'speaking' ? '跳过当前播报' : walkPhase === 'listening' ? '停止并发送' : '直接说话'}
+              onClick={e => {
+                e.stopPropagation();
+                if (walkPhase === 'speaking') {
+                  playerRef.current?.stop();
+                  setWalkPhase('idle');
+                  toast('🔇 已跳过当前播报');
+                } else {
+                  void toggleWalkMic();
+                }
+              }}
+            >
+              {walkPhase === 'listening' ? (
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+                  <rect x="6" y="6" width="12" height="12" rx="3" />
+                </svg>
+              ) : walkPhase === 'speaking' ? (
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                  <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                  <line x1="23" y1="9" x2="17" y2="15" />
+                  <line x1="17" y1="9" x2="23" y2="15" />
+                </svg>
+              ) : (
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="9" y="2" width="6" height="12" rx="3" />
+                  <path d="M5 10a7 7 0 0 0 14 0" />
+                  <path d="M12 17v5" />
+                </svg>
+              )}
+            </button>
+            <button
+              type="button"
+              id="walkMiniEndBtn"
+              class="walk-mini-btn end"
+              aria-label="结束边走边听"
+              title="结束边走边听"
+              onClick={e => {
+                e.stopPropagation();
+                setWalkPrefsOpen(false);
+                setWalkExpanded(false);
+                setWalkOpen(false);
+              }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round">
+                <path d="M18 6L6 18M6 6l12 12" />
+              </svg>
+            </button>
           </div>
         </div>
       )}

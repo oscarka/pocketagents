@@ -54,6 +54,7 @@ export interface VoicePrefs {
   activeProfileId: string;
   l2Policy: 'pin' | 'screen_only';
   proactiveBriefing: 'approvals' | 'all' | 'manual';
+  briefingDetail?: 'detailed' | 'verbatim' | 'concise';
   autoVad: boolean;
   vadSilenceMs: number;
   autoListenAfterBriefing: boolean;

@@ -13,6 +13,7 @@ export interface NativeAudioBridgeApi {
     proactiveBriefing?: string,
   ) => Promise<boolean>;
   canAutoListenNow?: () => Promise<boolean>;
+  claimBackgroundWakeForCloudTts?: () => Promise<boolean>;
   notifyBackgroundWakeDone?: () => Promise<boolean>;
   playBase64Audio?: (
     base64: string,
@@ -97,6 +98,25 @@ export function notifyNativeBackgroundWakeDone(): void {
     const bridge = getNativeAudioBridge();
     if (bridge?.notifyBackgroundWakeDone) {
       void bridge.notifyBackgroundWakeDone().catch(() => {});
+    }
+  } catch {
+    // ignore
+  }
+}
+
+/**
+ * Tell the native iOS shell that WKWebView is awake and actively generating cloud TTS
+ * (e.g. Doubao / Volcengine Seed-TTS), cancelling the premature native Siri fallback timer.
+ * Backward-compatible with PocketAgentsShell v1.1.1 via empty playBase64Audio disarm!
+ */
+export function claimNativeBackgroundWakeForCloudTts(): void {
+  try {
+    const bridge = getNativeAudioBridge();
+    if (!bridge) return;
+    if (bridge.claimBackgroundWakeForCloudTts) {
+      void bridge.claimBackgroundWakeForCloudTts().catch(() => {});
+    } else if (bridge.playBase64Audio) {
+      void bridge.playBase64Audio('', 'audio/mpeg', { duckMusic: false, keepSessionAfter: false }).catch(() => {});
     }
   } catch {
     // ignore

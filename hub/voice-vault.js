@@ -116,6 +116,7 @@ export const DEFAULT_VOICE_PREFS = Object.freeze({
   activeProfileId: 'native',
   l2Policy: 'pin', // 'pin' | 'screen_only'
   proactiveBriefing: 'approvals', // 'approvals' | 'all' | 'manual'
+  briefingDetail: 'detailed', // 'detailed' | 'verbatim' | 'concise'
   autoVad: true,
   vadSilenceMs: 850,
   autoListenAfterBriefing: true,
@@ -131,6 +132,7 @@ const ALLOWED_STAGE_PROVIDERS = new Set(['native', ...ALLOWED_PROVIDERS])
 const ALLOWED_THINKING = new Set(['off', 'low', 'medium', 'high', 'default'])
 const ALLOWED_L2_POLICIES = new Set(['pin', 'screen_only'])
 const ALLOWED_BRIEFING = new Set(['approvals', 'all', 'manual'])
+const ALLOWED_BRIEFING_DETAIL = new Set(['detailed', 'verbatim', 'concise'])
 
 export function maskSecret(value = '') {
   const s = String(value ?? '').trim()
@@ -340,6 +342,9 @@ function normalizePrefs(input = {}) {
     proactiveBriefing: ALLOWED_BRIEFING.has(String(input?.proactiveBriefing || ''))
       ? String(input.proactiveBriefing)
       : 'approvals',
+    briefingDetail: ALLOWED_BRIEFING_DETAIL.has(String(input?.briefingDetail || ''))
+      ? String(input.briefingDetail)
+      : 'detailed',
     autoVad: input?.autoVad !== undefined ? Boolean(input.autoVad) : true,
     vadSilenceMs: Number.isFinite(vadMs) && vadMs >= 350 && vadMs <= 3000 ? Math.round(vadMs) : 850,
     autoListenAfterBriefing: input?.autoListenAfterBriefing !== undefined ? Boolean(input.autoListenAfterBriefing) : true,

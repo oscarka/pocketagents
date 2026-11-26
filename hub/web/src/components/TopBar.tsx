@@ -1,6 +1,24 @@
 import { h, Fragment } from 'preact';
+import { useEffect, useState } from 'preact/hooks';
 
 export function TopBar() {
+  const [walkState, setWalkState] = useState<{ active: boolean; phase: string }>({
+    active: Boolean((window as any).__dshWalkModeOpen),
+    phase: 'idle',
+  });
+
+  useEffect(() => {
+    const onWalkState = (ev: any) => {
+      const detail = ev?.detail || {};
+      setWalkState({
+        active: Boolean(detail.active),
+        phase: String(detail.phase || 'idle'),
+      });
+    };
+    window.addEventListener('dsh:walk-state', onWalkState);
+    return () => window.removeEventListener('dsh:walk-state', onWalkState);
+  }, []);
+
   return (
     <Fragment>
       {/* 1. 唯一极简顶栏 */}
@@ -26,12 +44,26 @@ export function TopBar() {
             ⚡ 极速
           </button>
         </div>
-        <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
+        <div style="display:flex;align-items:center;gap:5px;flex-shrink:0;">
+          <button
+            type="button"
+            id="topWalkModeBtn"
+            class={`top-walk-btn ${walkState.active ? `active phase-${walkState.phase}` : ''}`}
+            aria-label="边走边听"
+            title={walkState.active ? '边走边听运行中 · 点击展开' : '开启边走边听'}
+            onClick={() => (window as any).openWalkMode?.()}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 18v-6a9 9 0 0 1 18 0v6" />
+              <path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z" />
+            </svg>
+            {walkState.active && <span class="top-walk-live-dot" />}
+          </button>
           <button
             type="button"
             data-lang-toggle="1"
             onClick={() => (window as any).toggleLangPreference?.()}
-            style="border:1px solid var(--border);background:var(--subtle);color:var(--text-secondary);border-radius:999px;padding:4px 8px;font-size:11.5px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0;"
+            style="border:1px solid var(--border);background:var(--subtle);color:var(--text-secondary);border-radius:999px;padding:4px 7px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0;"
           >
             🌐 EN
           </button>

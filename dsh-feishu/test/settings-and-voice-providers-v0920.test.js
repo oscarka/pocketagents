@@ -874,3 +874,88 @@ test('v0.9.37 Walk Mode Option A follows Light/Dark/System theme variables and t
     assert.doesNotMatch(en, /[\u4e00-\u9fa5]/, `leftover Chinese in "${zh}" -> "${en}"`);
   }
 });
+
+test('v0.9.40 Walk Mode Mini Bar, TopBar shortcut, Doubao TTS wake priority, and briefingDetail modes', async () => {
+  const fs = await import('node:fs');
+  const { VoiceVault } = await import('../../hub/voice-vault.js');
+  const { VoiceCopilotEngine } = await import('../../hub/voice-copilot.js');
+  const { translateZhStringToEn } = await import('../../hub/web/src/utils/i18n.js');
+
+  const vault = new VoiceVault();
+  await vault.init();
+  assert.equal(vault.state.prefs.briefingDetail, 'detailed');
+  await vault.updatePrefs({ briefingDetail: 'verbatim' });
+  assert.equal(vault.state.prefs.briefingDetail, 'verbatim');
+
+  // Build a long >600-char conclusion to ensure buildDynamicVoiceContext doesn't truncate at 420 chars
+  const longText = '第一阶段已完成重构并修复了后台音频打断后未释放麦克风引擎的问题。'.repeat(12)
+    + '最终结论：已通过全部回归测试，下一步请选择方案A继续推进或方案B回滚。';
+  const mockHub = {
+    getFullState: () => ({
+      activeHostId: 'mac-mini',
+      hosts: [{
+        hostId: 'mac-mini',
+        hostName: 'Mac mini',
+        online: true,
+        bridgeState: {
+          approvals: [],
+          tasks: [{
+            id: 'agy-ide:test-1',
+            title: '重构语音播报',
+            status: 'idle',
+            updatedAt: Date.now(),
+            lastOutput: longText,
+          }],
+        },
+      }],
+    }),
+  };
+
+  let llmCalled = 0;
+  const copilot = new VoiceCopilotEngine({ hub: mockHub, vault });
+  copilot._callBrainModel = async () => {
+    llmCalled += 1;
+    return { ok: true, rawText: '详细版摘要：完成了音频打断释放修复，所有测试已通过，你可以选择方案A继续推进或方案B回滚。' };
+  };
+
+  // verbatim skips LLM completely and preserves >300 chars directly
+  const verbRes = await copilot.buildProactiveBriefing({
+    kind: 'completed',
+    hostId: 'mac-mini',
+    agentId: 'agy-ide:test-1',
+    detailLevel: 'verbatim',
+  });
+  assert.equal(verbRes.ok, true);
+  assert.equal(verbRes.detailLevel, 'verbatim');
+  assert.equal(llmCalled, 0);
+  assert.ok(verbRes.spokenReply.length > 300, `expected verbatim > 300 chars, got ${verbRes.spokenReply.length}`);
+
+  const voiceSheetsSrc = fs.readFileSync(new URL('../../hub/web/src/components/VoiceCopilotSheets.tsx', import.meta.url), 'utf8');
+  const topBarSrc = fs.readFileSync(new URL('../../hub/web/src/components/TopBar.tsx', import.meta.url), 'utf8');
+  assert.match(voiceSheetsSrc, /id="walkMinimizeBtn"/);
+  assert.match(voiceSheetsSrc, /id="walkMiniBar"/);
+  assert.match(voiceSheetsSrc, /id="walkMiniMicBtn"/);
+  assert.match(voiceSheetsSrc, /id="walkMiniEndBtn"/);
+  assert.match(voiceSheetsSrc, /id="walkBriefingDetailTile"/);
+  assert.match(voiceSheetsSrc, /claimNativeBackgroundWakeForCloudTts/);
+  assert.match(topBarSrc, /id="topWalkModeBtn"/);
+
+  const v0940EnSamples = [
+    '收起',
+    '结束边走边听',
+    '播报详略（点击切换）',
+    '详细要点 · 约 140–280 字讲清结论与选项',
+    '原文精读 · 几乎不压缩，保留原话直读（最快）',
+    '极简一句 · 约 60–80 字快速摘要',
+    '边走边听 · 待命',
+    '边走边听 · 正在播报',
+    '边走边听 · 正在聆听…',
+    '轻点展开语音台',
+    '跳过播报',
+  ];
+  for (const zh of v0940EnSamples) {
+    const en = translateZhStringToEn(zh);
+    assert.notEqual(en, zh, `expected English translation for: ${zh}`);
+    assert.doesNotMatch(en, /[\u4e00-\u9fa5]/, `leftover Chinese in "${zh}" -> "${en}"`);
+  }
+});

@@ -688,6 +688,7 @@ export function buildDynamicVoiceContext(hub, { activeHostId = '', activeSession
         status: String(t.status || 'idle'),
         updatedAt: Number(t.updatedAt || t.lastActivity || 0),
         lastOutput: fullConclusionText.replace(/\s+/g, ' ').slice(0, 420),
+        fullOutput: fullConclusionText.slice(0, 3200),
         hasPendingApproval: Boolean(t.pendingApproval),
       })
     }
@@ -2098,6 +2099,7 @@ export class VoiceCopilotEngine {
     agentId = '',
     profileId = '',
     voiceSessionId = 'default',
+    detailLevel = '',
   } = {}) {
     const t0 = this.now()
     const ctx = buildDynamicVoiceContext(this.hub, { activeHostId: hostId, activeSessionId: agentId })
@@ -2141,29 +2143,51 @@ export class VoiceCopilotEngine {
       if (!task) {
         return { ok: false, error: '未找到对应的已完成任务', latencyMs: this.now() - t0 }
       }
-      const rawConclusion = String(task.lastOutput || '').trim()
-      const fallbackClean = sanitizeTextForVoiceBriefing(rawConclusion, 95)
+      const effectiveDetail = ['detailed', 'verbatim', 'concise'].includes(String(detailLevel || ''))
+        ? String(detailLevel)
+        : (this.vault.state.prefs?.briefingDetail || 'detailed')
+      const rawConclusion = String(task.fullOutput || task.lastOutput || '').trim()
+      const maxFallbackChars = effectiveDetail === 'verbatim' ? 620 : effectiveDetail === 'concise' ? 110 : 360
+      const fallbackClean = sanitizeTextForVoiceBriefing(rawConclusion, maxFallbackChars)
       let summaryText = fallbackClean
       let summarizedByBrain = false
 
       const profile = this._resolveEffectiveProfile(profileId)
-      if (rawConclusion.length > 50 && profile.brain?.provider && profile.brain.provider !== 'native') {
+      const shouldUseBrain =
+        effectiveDetail !== 'verbatim'
+        && rawConclusion.length > (effectiveDetail === 'concise' ? 50 : 120)
+        && Boolean(profile.brain?.provider && profile.brain.provider !== 'native')
+
+      if (shouldUseBrain) {
         try {
-          const sumSystemPrompt = [
-            '你是 PocketAgents 语音播报编辑。请把 AI 刚完成的工作结论，压缩成 1 到 2 句给耳朵听的自然口语中文摘要（总字数不超过 75 字）。',
-            '要求：说清完成了什么、结果成没成；如果 AI 最后给出了选项或需要用户拍板，简短说出选项要点。',
-            '严禁输出 JSON、Markdown、文件路径、代码、哈希或括号备注，只输出最终要念出来的纯中文句子。',
-          ].join('\n')
+          const isConcise = effectiveDetail === 'concise'
+          const sumSystemPrompt = isConcise
+            ? [
+                '你是 PocketAgents 语音播报编辑。请把 AI 刚完成的工作结论，压缩成 1 到 2 句给耳朵听的自然口语中文摘要（总字数不超过 80 字）。',
+                '要求：说清完成了什么、结果成没成；如果 AI 最后给出了选项或需要用户拍板，简短说出选项要点。',
+                '严禁输出 JSON、Markdown、文件路径、代码、哈希或括号备注，只输出最终要念出来的纯中文句子。',
+              ].join('\n')
+            : [
+                '你是 PocketAgents 语音播报助手。请把 AI 刚完成的回复整理成自然流畅、适合耳朵听的中文口语播报（约 140 到 280 字）。',
+                '要求：',
+                '1. 不要过度压缩成一句空话，务必讲清具体完成了哪些事、查出的关键原因/数据/改动点；',
+                '2. 如果 AI 给出了多个方案、对比结论或需要用户拍板/下一步指令，完整讲清核心要点和选项；',
+                '3. 去掉 Markdown 符号、代码块、长文件路径、哈希和网址，只输出直接朗读的纯中文口语段落。',
+              ].join('\n')
+          // Preserve both beginning and tail of long replies so final conclusions & options are never lost
+          const brainInput = rawConclusion.length > 2400
+            ? `${rawConclusion.slice(0, 1450)}\n……\n${rawConclusion.slice(-900)}`
+            : rawConclusion
           const llmRes = await this._callBrainModel(
-            { ...profile.brain, thinkingLevel: 'off', maxTokens: 160 },
+            { ...profile.brain, thinkingLevel: 'off', maxTokens: isConcise ? 160 : 480 },
             {
               systemPrompt: sumSystemPrompt,
               history: [],
-              userText: `电脑：${task.hostName}\n会话：${task.title}\n最新回复：\n${rawConclusion.slice(0, 1200)}`,
+              userText: `电脑：${task.hostName}\n会话：${task.title}\n最新回复：\n${brainInput}`,
             },
           )
           if (llmRes.ok && llmRes.rawText) {
-            const cleaned = sanitizeTextForVoiceBriefing(llmRes.rawText, 110)
+            const cleaned = sanitizeTextForVoiceBriefing(llmRes.rawText, isConcise ? 120 : 380)
             if (cleaned) {
               summaryText = cleaned
               summarizedByBrain = true
@@ -2177,10 +2201,11 @@ export class VoiceCopilotEngine {
       const spokenReply = summaryText
         ? `${task.hostName}的「${task.title}」已完成：${summaryText}`
         : `${task.hostName}的「${task.title}」已完成。`
-      const expectsDecision = /[？?]|要不要|是否需要|需要我|请选择|方案\s*[12一二AB]/i.test(summaryText)
+      const expectsDecision = /[？?]|要不要|是否需要|需要我|请选择|方案\s*[12一二AB]|回复|告诉我/i.test(summaryText)
       return {
         ok: true,
         kind: 'completed',
+        detailLevel: effectiveDetail,
         summarizedByBrain,
         latencyMs: this.now() - t0,
         spokenReply,
