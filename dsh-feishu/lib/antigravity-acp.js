@@ -975,6 +975,41 @@ export async function detectAntigravityHostStatus({
  * Trigger official Google Antigravity CLI (`agy`) installation on the host machine.
  * Uses strictly the official installer documented at https://antigravity.google/docs/getting-started.md.
  */
+async function detectMacSystemProxyEnv(execImpl = execFileAsync) {
+  if (process.platform !== 'darwin' || typeof execImpl !== 'function') return {}
+  if (process.env.HTTPS_PROXY || process.env.https_proxy || process.env.ALL_PROXY || process.env.all_proxy) {
+    return {}
+  }
+  try {
+    const { stdout } = await execImpl('/usr/sbin/scutil', ['--proxy'], { timeout: 2500 })
+    const txt = String(stdout || '')
+    const httpsEnable = /HTTPSEnable\s*:\s*1/.test(txt)
+    const httpsHost = txt.match(/HTTPSProxy\s*:\s*([^\s]+)/)?.[1] || ''
+    const httpsPort = txt.match(/HTTPSPort\s*:\s*(\d+)/)?.[1] || ''
+    if (httpsEnable && httpsHost && httpsPort) {
+      const url = `http://${httpsHost}:${httpsPort}`
+      return { HTTPS_PROXY: url, https_proxy: url, HTTP_PROXY: url, http_proxy: url }
+    }
+    const httpEnable = /HTTPEnable\s*:\s*1/.test(txt)
+    const httpHost = txt.match(/HTTPProxy\s*:\s*([^\s]+)/)?.[1] || ''
+    const httpPort = txt.match(/HTTPPort\s*:\s*(\d+)/)?.[1] || ''
+    if (httpEnable && httpHost && httpPort) {
+      const url = `http://${httpHost}:${httpPort}`
+      return { HTTPS_PROXY: url, https_proxy: url, HTTP_PROXY: url, http_proxy: url }
+    }
+    const socksEnable = /SOCKSEnable\s*:\s*1/.test(txt)
+    const socksHost = txt.match(/SOCKSProxy\s*:\s*([^\s]+)/)?.[1] || ''
+    const socksPort = txt.match(/SOCKSPort\s*:\s*(\d+)/)?.[1] || ''
+    if (socksEnable && socksHost && socksPort) {
+      const url = `socks5h://${socksHost}:${socksPort}`
+      return { ALL_PROXY: url, all_proxy: url, HTTPS_PROXY: url, https_proxy: url }
+    }
+  } catch {
+    // system proxy optional
+  }
+  return {}
+}
+
 export async function installAntigravityCli({
   acpClient = null,
   home = homedir(),
@@ -983,7 +1018,8 @@ export async function installAntigravityCli({
   accessImpl = access,
   spawnImpl = spawn,
 } = {}) {
-  const env = withCliEnv()
+  const proxyEnv = platform === 'darwin' ? await detectMacSystemProxyEnv(execImpl) : {}
+  const env = withCliEnv(proxyEnv)
   try {
     if (platform === 'win32') {
       await execImpl(

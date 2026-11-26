@@ -410,7 +410,7 @@ export function initHubController() {
   }
 
   // ==================== 2. 全局状态与持久化偏好 ====================
-  let hubState = { hosts: [], activeHostId: '', migrations: [], shares: [], pushSubscriptions: [] };
+  let hubState = { hosts: [], activeHostId: '', migrations: [], shares: [], pushSubscriptions: [], apnsDevices: [], apnsConfig: null };
   let currentHostId = 'ALL_HOSTS';
   let currentProject = 'ALL';
   let currentTab = 'chats';
@@ -8618,6 +8618,32 @@ export function initHubController() {
     }
   }
 
+  function isNativeIosApnsBridge() {
+    return Boolean(typeof window !== 'undefined' && window.__dshNativePush && window.__dshNativePush.supported);
+  }
+
+  async function syncNativeApnsTokenToHub(info = null) {
+    if (!isNativeIosApnsBridge()) return null;
+    try {
+      const st = info || await window.__dshNativePush.getStatus();
+      const token = String(st?.deviceToken || '').trim();
+      if (!token || st?.authorizationStatus !== 'authorized') return null;
+      const res = await apiFetch('/api/push/apns/subscribe', {
+        method: 'POST',
+        body: JSON.stringify({
+          deviceToken: token,
+          deviceName: st?.deviceName || 'iPhone 原生 App (PocketAgents)',
+          apnsEnv: st?.apnsEnv || 'sandbox',
+          bundleId: st?.bundleId || 'vip.agentrun.pocketagents.shell',
+          appVersion: st?.appVersion || '1.1.0',
+        }),
+      });
+      return await res.json().catch(() => null);
+    } catch {
+      return null;
+    }
+  }
+
   let lastPushStatusAt = 0;
   async function refreshPushStatus(manual = false) {
     const statusEl = document.getElementById('pushLocalStatus');
@@ -8625,17 +8651,21 @@ export function initHubController() {
     const summaryBadgeEl = document.getElementById('settingsPushSummaryBadge');
     if (!statusEl && !summaryBadgeEl) return;
     const subs = hubState.pushSubscriptions || [];
+    const apnsDevs = hubState.apnsDevices || [];
     if (listEl) {
-      if (!subs.length) {
+      if (!subs.length && !apnsDevs.length) {
         cachedPushDeviceListText = '还没有设备登记推送';
       } else {
-        const devices = subs.slice(0, 5).map(sub => {
-          const name = sub.deviceName || '未知设备';
-          const host = sub.endpointHost ? ` · ${sub.endpointHost}` : '';
-          return `${name}${host}`;
-        });
-        const more = subs.length > 5 ? ` 等 ${subs.length} 台` : '';
-        cachedPushDeviceListText = `已在服务端登记 ${subs.length} 台设备：${devices.join('；')}${more}`;
+        const parts = [];
+        if (subs.length) {
+          const webList = subs.slice(0, 3).map(sub => sub.deviceName || '网页设备').join('、');
+          parts.push(`网页推送 ${subs.length} 台（${webList}${subs.length > 3 ? ' 等' : ''}）`);
+        }
+        if (apnsDevs.length) {
+          const apnsList = apnsDevs.slice(0, 3).map(d => `${d.deviceName || 'iPhone 原生 App'} [${d.apnsEnv === 'production' ? 'Prod' : 'Dev'}]`).join('、');
+          parts.push(`iOS 原生 APNs ${apnsDevs.length} 台（${apnsList}${apnsDevs.length > 3 ? ' 等' : ''}）`);
+        }
+        cachedPushDeviceListText = parts.join(' · ');
       }
       listEl.textContent = cachedPushDeviceListText;
     }
@@ -8647,12 +8677,53 @@ export function initHubController() {
       settingsPanel.syncPushSummaryBadge(cachedPushStatusText);
       if (langPref === 'en') applyLangToDom(document.body, langPref);
     };
-    // 已经有缓存状态时，10 秒内不重复轮询 Service Worker，直接沿用缓存，彻底消除状态闪烁
+    // 已经有缓存状态时，10 秒内不重复轮询，彻底消除状态闪烁
     if (!manual && cachedPushStatusText && Date.now() - lastPushStatusAt < 10000) {
       applyPushUi();
       return;
     }
     lastPushStatusAt = Date.now();
+
+    // 原生 iOS App 独立 APNs 通道（绝不触碰 Safari Web Push 逻辑）
+    if (isNativeIosApnsBridge()) {
+      try {
+        const st = await window.__dshNativePush.getStatus();
+        const auth = String(st?.authorizationStatus || 'notDetermined');
+        const token = String(st?.deviceToken || '').trim();
+        const apnsConfigured = Boolean(hubState.apnsConfig?.configured);
+        if (auth === 'authorized' && token) {
+          const alreadyRegistered = apnsDevs.some(d => d.tokenPreview && token.startsWith(d.tokenPreview.slice(0, 8)));
+          if ((!alreadyRegistered || manual) && Date.now() - lastAutoPushSyncAt > 15000) {
+            lastAutoPushSyncAt = Date.now();
+            await syncNativeApnsTokenToHub(st);
+          }
+          if (apnsConfigured) {
+            cachedPushStatusText = '本机 (iOS 原生 App)：✅ 已开启 APNs 锁屏推送';
+            cachedPushStatusColor = '#059669';
+          } else {
+            cachedPushStatusText = '本机 (iOS 原生 App)：🟡 已登记设备令牌（云端待配置 .p8 密钥）';
+            cachedPushStatusColor = '#d97706';
+          }
+        } else if (auth === 'authorized' && !token) {
+          cachedPushStatusText = '本机 (iOS 原生 App)：⏳ 已授权通知，点下方「开启推送」刷新 Apple 令牌';
+          cachedPushStatusColor = '#d97706';
+        } else if (auth === 'denied') {
+          cachedPushStatusText = '本机 (iOS 原生 App)：通知权限被拒绝，请到 iPhone「设置 → 通知 → PocketAgents」中允许';
+          cachedPushStatusColor = '#dc2626';
+        } else {
+          cachedPushStatusText = '本机 (iOS 原生 App)：未开启（点下方「开启推送」）';
+          cachedPushStatusColor = '#d97706';
+        }
+        applyPushUi();
+        if (manual) showToast('已刷新原生 APNs 推送状态');
+      } catch (err) {
+        cachedPushStatusText = '本机：状态读取失败（' + ((err && err.message) || err) + '）';
+        cachedPushStatusColor = '#dc2626';
+        applyPushUi();
+      }
+      return;
+    }
+
     if (!('serviceWorker' in navigator) || !('PushManager' in window) || typeof Notification === 'undefined') {
       cachedPushStatusText = '本机：当前浏览器不支持锁屏推送（iPhone 需从主屏幕 App 打开）';
       cachedPushStatusColor = '#d97706';
@@ -8696,6 +8767,25 @@ export function initHubController() {
   }
 
   async function disableIphonePush() {
+    if (isNativeIosApnsBridge()) {
+      try {
+        const st = await window.__dshNativePush.getStatus();
+        const token = String(st?.deviceToken || '').trim();
+        await window.__dshNativePush.unregister().catch(() => { });
+        if (token) {
+          await apiFetch('/api/push/apns/unsubscribe', {
+            method: 'POST',
+            body: JSON.stringify({ deviceToken: token }),
+          }).catch(() => { });
+        }
+        showToast('🔕 已关闭本机原生 App 推送（不影响 Safari 网页推送）');
+        setTimeout(fetchState, 300);
+        void refreshPushStatus(true);
+      } catch (err) {
+        showToast('❌ 关闭失败：' + ((err && err.message) || err));
+      }
+      return;
+    }
     try {
       const reg = await navigator.serviceWorker.getRegistration();
       const sub = reg ? await reg.pushManager.getSubscription() : null;
@@ -8836,8 +8926,47 @@ export function initHubController() {
     setTimeout(fetchState, 1000);
   }
 
-  // ==================== 13. iOS Web Push 锁屏推送 ====================
+  // ==================== 13. iOS 推送（原生 App APNs / Safari Web Push 双通道隔离） ====================
   async function subscribeIphonePush() {
+    if (isNativeIosApnsBridge()) {
+      try {
+        showToast('📲 正在向 Apple 申请原生推送令牌...');
+        const regRes = await window.__dshNativePush.register();
+        if (!regRes || !regRes.ok) {
+          const reason = regRes?.error || (regRes?.authorizationStatus === 'denied'
+            ? '通知权限已被拒绝：请到 iPhone「设置 → 通知 → PocketAgents」中允许'
+            : '未能获取 Apple 推送令牌，请重试');
+          showToast('❌ ' + reason);
+          void refreshPushStatus(true);
+          return;
+        }
+        const res = await apiFetch('/api/push/apns/subscribe', {
+          method: 'POST',
+          body: JSON.stringify({
+            deviceToken: regRes.deviceToken,
+            deviceName: regRes.deviceName || 'iPhone 原生 App (PocketAgents)',
+            apnsEnv: regRes.apnsEnv || 'sandbox',
+            bundleId: regRes.bundleId || 'vip.agentrun.pocketagents.shell',
+            appVersion: regRes.appVersion || '1.1.0',
+          }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.ok === false) {
+          throw new Error(data.error || ('APNs 令牌上报失败 (HTTP ' + res.status + ')'));
+        }
+        const configured = Boolean(data?.apnsConfig?.configured);
+        showToast(
+          configured
+            ? '📲 已成功开启 iPhone 原生 APNs 锁屏推送！'
+            : '✅ 已拿到并登记 iPhone 推送令牌！在云端配置 Apple .p8 密钥后即可发锁屏推送'
+        );
+        await fetchState({ silent: true, forceFresh: true });
+        void refreshPushStatus(true);
+      } catch (err) {
+        showToast('❌ 开启原生推送失败: ' + ((err && err.message) || err));
+      }
+      return;
+    }
     if (!('Notification' in window) || !('serviceWorker' in navigator) || !('PushManager' in window)) {
       showToast('当前浏览器不支持 Web Push：iPhone 请用 Safari「添加到主屏幕」后从桌面图标打开');
       return;
@@ -8899,6 +9028,33 @@ export function initHubController() {
   }
 
   async function sendTestPush() {
+    if (isNativeIosApnsBridge()) {
+      try {
+        await syncNativeApnsTokenToHub();
+        const res = await apiFetch('/api/push/apns/test', { method: 'POST', body: JSON.stringify({}) });
+        const data = await res.json().catch(() => ({}));
+        if (data.configured === false) {
+          showToast('🟡 设备令牌已就绪，但云端 Hub 尚未配置 Apple .p8 推送密钥');
+          return;
+        }
+        const total = Number(data.totalDevices || 0);
+        const sent = Number(data.sentCount || 0);
+        if (!total) {
+          showToast('⚠️ 还没有登记原生 App 设备，请先点「开启推送」');
+          return;
+        }
+        if (!sent) {
+          const failed = (data.results || []).find(r => r && r.ok === false);
+          showToast('⚠️ APNs 测试推送未送达：' + ((failed && (failed.error || failed.reason)) || 'Apple APNs 返回失败'));
+          return;
+        }
+        showToast(`🔔 已发送 Apple 原生 APNs 锁屏通知（${sent}/${total} 台设备）`);
+        setTimeout(fetchState, 300);
+      } catch (err) {
+        showToast('❌ APNs 测试发送失败: ' + ((err && err.message) || err));
+      }
+      return;
+    }
     try {
       // 先确保本机订阅与当前服务端 VAPID 公钥保持同步
       await ensureLocalPushSubscriptionSynced();
@@ -9207,15 +9363,36 @@ export function initHubController() {
     lastRenderedSettingsKey = '';
     if (currentTab === 'settings') renderSettingsTab();
     if (activeSessionId) renderChatStage();
-    showToast(`⚡ 正在为「${label}」安装官方 agy CLI（约 15-40 秒）...`);
+    showToast(`⚡ 正在向「${label}」下发官方 agy CLI 安装指令...`);
+    let dispatchOk = false;
     try {
-      await dispatchHostCommand(hostId, { type: 'install_agy_cli' });
-    } catch { }
+      const cmdRes = await dispatchHostCommand(hostId, { type: 'install_agy_cli' });
+      if (cmdRes && cmdRes.ok === false) {
+        delete installingAgyCliMap[hostId];
+        lastRenderedSettingsKey = '';
+        if (currentTab === 'settings') renderSettingsTab();
+        if (activeSessionId) renderChatStage();
+        showToast(`⚠️ 下发安装指令失败：${cmdRes.error || '请刷新重试'}`);
+        return;
+      }
+      dispatchOk = true;
+    } catch (err) {
+      delete installingAgyCliMap[hostId];
+      lastRenderedSettingsKey = '';
+      if (currentTab === 'settings') renderSettingsTab();
+      if (activeSessionId) renderChatStage();
+      showToast(`⚠️ 下发安装指令异常：${(err && err.message) || '网络异常，请重试'}`);
+      return;
+    }
+    if (!dispatchOk) return;
     const startWait = Date.now();
     const pollInstall = async () => {
       await fetchState({ silent: true, forceFresh: true });
       const updatedHost = (hubState.hosts || []).find(h => h.hostId === hostId);
       const st = updatedHost?.bridgeState?.antigravityStatus;
+      const doneResult = (updatedHost?.recentResults || []).find(
+        r => (r.type === 'install_agy_cli' || r.type === 'install_agy_cli_done') && Number(r.at || 0) >= startWait - 5000
+      );
       if (st && !st.installing) {
         if (st.hasCli) {
           delete installingAgyCliMap[hostId];
@@ -9229,22 +9406,23 @@ export function initHubController() {
           );
           return;
         }
-        if (st.installError) {
+        if (st.installError || (doneResult && doneResult.ok === false)) {
           delete installingAgyCliMap[hostId];
           lastRenderedSettingsKey = '';
           if (currentTab === 'settings') renderSettingsTab();
           if (activeSessionId) renderChatStage();
-          showToast(`⚠️ 「${label}」安装失败：${st.installError}`);
+          showToast(`⚠️ 「${label}」安装失败：${st.installError || doneResult?.error || '请检查网络或代理'}`);
           return;
         }
       }
-      if (Date.now() - startWait < 160000) {
+      if (Date.now() - startWait < 180000) {
         setTimeout(pollInstall, 2500);
       } else {
         delete installingAgyCliMap[hostId];
         lastRenderedSettingsKey = '';
         if (currentTab === 'settings') renderSettingsTab();
         if (activeSessionId) renderChatStage();
+        showToast(`⏳ 「${label}」后台安装耗时较长，请稍后刷新查看结果`);
       }
     };
     setTimeout(pollInstall, 3000);
@@ -11415,6 +11593,16 @@ export function initHubController() {
     isStandaloneApp,
     subscribeIphonePush,
     sendTestPush,
+    __dshHandleNativePushTap: (payload = {}) => {
+      try {
+        const targetAgentId = String(payload?.agentId || '').trim();
+        if (targetAgentId) {
+          openChat(targetAgentId);
+        } else {
+          fetchState({ silent: true, forceFresh: true });
+        }
+      } catch { }
+    },
     getDshQuestionDraft,
     toggleDshQuestionOption,
     onDshQuestionCustomInput,

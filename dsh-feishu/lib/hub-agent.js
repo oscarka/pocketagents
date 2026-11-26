@@ -1020,7 +1020,11 @@ export class HubAgent {
     const pluginsSig = Array.isArray(bridgeState.antigravityPlugins)
       ? bridgeState.antigravityPlugins.map(p => `${p.dir}:${p.enabled ? 1 : 0}:${p.version || ''}`).join('|')
       : ''
-    return `${bridgeState.agentVersion || ''}:${Boolean(bridgeState.remoteActive)}:${Boolean(bridgeState.feishuConnected)}:${wsCount}:${tasksSig}#${appSig}#${pluginsSig}`
+    const agySt = bridgeState.antigravityStatus
+    const agyStatusSig = agySt
+      ? `${agySt.mode || ''}:${agySt.hasCli ? 1 : 0}:${agySt.cliAuthenticated === true ? 1 : agySt.cliAuthenticated === false ? 0 : -1}:${agySt.installing ? 1 : 0}:${agySt.installError || ''}`
+      : ''
+    return `${bridgeState.agentVersion || ''}:${Boolean(bridgeState.remoteActive)}:${Boolean(bridgeState.feishuConnected)}:${wsCount}:${tasksSig}#${appSig}#${pluginsSig}#${agyStatusSig}`
   }
 
   async tick() {
@@ -2460,27 +2464,57 @@ export class HubAgent {
           return { ok: false, error: '未找到该会话的完整历史记录' }
         }
         case 'install_agy_cli': {
+          if (this.agyCliInstalling) {
+            return {
+              ok: true,
+              started: true,
+              alreadyRunning: true,
+              message: '⏳ 电脑端已在后台安装官方 agy CLI，请稍候约 20-60 秒...',
+            }
+          }
           this.agyCliInstalling = true
           this.agyCliInstallError = ''
           this.lastAgyHostStatusAt = 0
-          this.scheduleFollowUpTick?.(150)
-          try {
-            const installRes = await installAntigravityCli({
-              acpClient: this.execImpl ? null : this.agyAcpClient,
-              execImpl: this.execImpl,
-            })
-            if (!installRes.ok) {
-              this.agyCliInstallError = installRes.error || '安装失败'
+          const runInstallTask = async () => {
+            try {
+              const installRes = await installAntigravityCli({
+                acpClient: this.execImpl ? null : this.agyAcpClient,
+                execImpl: this.execImpl,
+              })
+              if (!installRes.ok) {
+                this.agyCliInstallError = installRes.error || '安装失败'
+              }
+              invalidateAntigravityModelCatalogCache()
+              invalidateAntigravityPluginsCache()
+              return installRes
+            } catch (err) {
+              this.agyCliInstallError = safeError(err) || '安装异常'
+              return { ok: false, error: this.agyCliInstallError }
+            } finally {
+              this.agyCliInstalling = false
+              this.lastAgyHostStatusAt = 0
+              this.scheduleFollowUpTick?.(200)
             }
-            invalidateAntigravityModelCatalogCache()
-            invalidateAntigravityPluginsCache()
-            this.lastAgyHostStatusAt = 0
-            this.scheduleFollowUpTick?.(200)
-            return installRes
-          } finally {
-            this.agyCliInstalling = false
-            this.lastAgyHostStatusAt = 0
           }
+          // In live daemon mode (`this.timer`), run asynchronously so 220MB download NEVER blocks heartbeats!
+          if (this.timer && !this.execImpl) {
+            this.scheduleFollowUpTick?.(120)
+            void runInstallTask().then(res => {
+              this.pendingResults.push({
+                id: `${cmd.id || 'install-agy'}-done`,
+                type: 'install_agy_cli_done',
+                at: Date.now(),
+                ...res,
+              })
+              this.scheduleFollowUpTick?.(150)
+            })
+            return {
+              ok: true,
+              started: true,
+              message: '⚡ 已在电脑后台启动官方 agy CLI 安装（自动继承系统代理，完成后手机自动刷新）',
+            }
+          }
+          return await runInstallTask()
         }
         case 'login_agy_cli': {
           const loginRes = await triggerAntigravityCliLogin({

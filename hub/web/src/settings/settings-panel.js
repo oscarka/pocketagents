@@ -181,7 +181,8 @@ export function createSettingsPanel(deps) {
       tokenTail,
       enrollmentCode: hubState.enrollment?.code || '',
       joinedCount: hubState.enrollment?.joinedCount || 0,
-      pushCount: (hubState.pushSubscriptions || []).length,
+      pushCount: (hubState.pushSubscriptions || []).length + (hubState.apnsDevices || []).length,
+      apnsConfigured: Boolean(hubState.apnsConfig?.configured),
       secSig: `${secSum.total24h}:${secSum.high24h}:${(secSum.recentEvents || []).length}:${secSum.recentEvents?.[0]?.id || ''}`,
       acSig: `${ac.deviceApprovalEnabled ? 1 : 0}:${(ac.trustedDevices || []).length}:${(ac.pendingDeviceLogins || []).map(x => x.id).join(',')}:${(ac.pendingHosts || []).map(x => x.hostId).join(',')}`,
       build: buildInfo.uiBuild || buildInfo.version || '',
@@ -807,7 +808,9 @@ export function createSettingsPanel(deps) {
               <button type="button" class="pill-action-btn" style="color:var(--red);" onclick="disableIphonePush()">关闭本机推送</button>
             </div>
             <div class="settings-item-desc" style="margin-top:10px;">
-              iPhone 需先在 Safari 点击「分享 → 添加到主屏幕」，再从桌面图标打开本页并开启推送，才能收到锁屏通知。
+              ${typeof window !== 'undefined' && window.__dshNativePush?.supported
+                ? '当前运行在 PocketAgents iOS 原生 App 中，使用独立 Apple APNs 通道，与 Safari 网页推送完全隔离互不影响。'
+                : 'iPhone 需先在 Safari 点击「分享 → 添加到主屏幕」，再从桌面图标打开本页并开启推送，才能收到锁屏通知。'}
             </div>
           </div>
         </div>

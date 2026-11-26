@@ -2,6 +2,7 @@ import { createHmac, randomBytes, randomInt, timingSafeEqual } from 'node:crypto
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { generateOrLoadVapidKeys, sendWebPushNotification } from './web-push.js'
+import { getApnsPublicStatus, sendApnsNotification } from './apns-push.js'
 import { formatWebPushNotification, shouldSuppressTaskPush } from './push-formatter.js'
 
 const ONLINE_TTL_MS = 60_000
@@ -22,6 +23,8 @@ export class HubCore {
     stateFile = '',
     now = () => Date.now(),
     pushFetch = globalThis.fetch,
+    apnsSender = sendApnsNotification,
+    apnsConfig = null,
     buildInfo = null,
     tokenSecret = '',
     deviceApprovalEnabled = false,
@@ -29,6 +32,8 @@ export class HubCore {
     this.stateFile = stateFile
     this.now = now
     this.pushFetch = pushFetch
+    this.apnsSender = apnsSender
+    this.apnsConfig = apnsConfig
     this.buildInfo = buildInfo
     this.tokenSecret = String(tokenSecret ?? '').trim()
     this.mediaSeed = randomBytes(32).toString('hex')
@@ -48,6 +53,7 @@ export class HubCore {
     this.totalCommandsExecuted = 0
     this.vapidKeys = generateOrLoadVapidKeys()
     this.pushSubscriptions = new Map()
+    this.apnsDevices = new Map()
     this.unsubscribedEndpoints = new Set()
     this.pushedApprovalCodes = new Set()
     this.pendingApprovalPushTimers = new Map()
@@ -677,6 +683,13 @@ export class HubCore {
           }
         }
       }
+      if (Array.isArray(data.apnsDevices)) {
+        for (const dev of data.apnsDevices) {
+          if (dev?.deviceToken && typeof dev.deviceToken === 'string') {
+            this.apnsDevices.set(dev.deviceToken, dev)
+          }
+        }
+      }
       if (Array.isArray(data.hosts)) {
         for (const h of data.hosts) {
           if (h?.hostId) {
@@ -1056,6 +1069,7 @@ export class HubCore {
             mediaSeed: this.mediaSeed,
             vapidKeys: this.vapidKeys,
             pushSubscriptions: [...this.pushSubscriptions.values()],
+            apnsDevices: [...this.apnsDevices.values()],
             hosts: [...this.hosts.values()].map(h => ({
               ...h,
               lastFilePreview: h.lastFilePreview ? this.sanitizeFilePreviewForState(h.hostId, h.lastFilePreview) : null,
@@ -1731,6 +1745,8 @@ export class HubCore {
       mediaTicket: this.issueMediaTicket(now),
       vapidPublicKey: this.vapidKeys.publicKey,
       pushSubscriptions: this.listPushSubscriptions(),
+      apnsDevices: this.listApnsDevices(),
+      apnsConfig: getApnsPublicStatus(this.apnsConfig),
       pushHistory: this.pushHistory.slice(-10).reverse(),
       securitySummary: this.getSecuritySummary(now),
       accessControl: this.getAccessControlState(),
@@ -1902,8 +1918,140 @@ export class HubCore {
     }))
   }
 
+  addApnsDevice({
+    deviceToken = '',
+    deviceName = 'iPhone 原生 App',
+    apnsEnv = 'sandbox',
+    bundleId = '',
+    appVersion = '',
+    userAgent = '',
+  } = {}) {
+    const cleanToken = String(deviceToken ?? '').replace(/[^0-9a-fA-F]/g, '').toLowerCase()
+    if (cleanToken.length < 32 || cleanToken.length > 512) {
+      return { ok: false, error: '无效的 Apple APNs 设备令牌 (deviceToken)' }
+    }
+    const normEnv = String(apnsEnv || '').trim().toLowerCase() === 'production' ? 'production' : 'sandbox'
+    const existing = this.apnsDevices.get(cleanToken)
+    const now = this.now()
+    const record = {
+      id: existing?.id || `apns-${randomBytes(4).toString('hex')}`,
+      deviceToken: cleanToken,
+      tokenPreview: `${cleanToken.slice(0, 8)}…${cleanToken.slice(-6)}`,
+      deviceName: String(deviceName || 'iPhone 原生 App').slice(0, 64),
+      apnsEnv: normEnv,
+      bundleId: String(bundleId || 'vip.agentrun.pocketagents.shell').slice(0, 128),
+      appVersion: String(appVersion || '').slice(0, 32),
+      userAgent: String(userAgent || '').slice(0, 160),
+      createdAt: existing?.createdAt || now,
+      updatedAt: now,
+      lastSentAt: existing?.lastSentAt || 0,
+    }
+    this.apnsDevices.set(cleanToken, record)
+    void this.persist()
+    this.emitStateChange('apns_subscribed')
+    return {
+      ok: true,
+      apnsConfig: getApnsPublicStatus(this.apnsConfig),
+      device: {
+        id: record.id,
+        deviceName: record.deviceName,
+        tokenPreview: record.tokenPreview,
+        apnsEnv: record.apnsEnv,
+        bundleId: record.bundleId,
+        createdAt: record.createdAt,
+      },
+    }
+  }
+
+  removeApnsDevice(idOrToken) {
+    const raw = String(idOrToken ?? '').trim()
+    if (!raw) return { ok: false }
+    const cleanToken = raw.replace(/[^0-9a-fA-F]/g, '').toLowerCase()
+    if (cleanToken && this.apnsDevices.has(cleanToken)) {
+      this.apnsDevices.delete(cleanToken)
+      void this.persist()
+      this.emitStateChange('apns_unsubscribed')
+      return { ok: true }
+    }
+    for (const [tok, dev] of this.apnsDevices) {
+      if (dev.id === raw) {
+        this.apnsDevices.delete(tok)
+        void this.persist()
+        this.emitStateChange('apns_unsubscribed')
+        return { ok: true }
+      }
+    }
+    return { ok: false }
+  }
+
+  listApnsDevices() {
+    return [...this.apnsDevices.values()].map(dev => ({
+      id: dev.id,
+      deviceName: dev.deviceName,
+      tokenPreview: dev.tokenPreview || `${dev.deviceToken.slice(0, 8)}…${dev.deviceToken.slice(-6)}`,
+      apnsEnv: dev.apnsEnv || 'sandbox',
+      bundleId: dev.bundleId || '',
+      appVersion: dev.appVersion || '',
+      createdAt: dev.createdAt,
+      lastSentAt: dev.lastSentAt || 0,
+    }))
+  }
+
+  async broadcastApnsPush(payloadObj = {}) {
+    const devices = [...this.apnsDevices.values()]
+    const apnsStatus = getApnsPublicStatus(this.apnsConfig)
+    if (devices.length === 0) {
+      return {
+        ok: true,
+        configured: apnsStatus.configured,
+        sentCount: 0,
+        totalDevices: 0,
+        results: [],
+      }
+    }
+    const results = []
+    let sentCount = 0
+    for (const dev of devices) {
+      try {
+        const res = await this.apnsSender(dev, payloadObj, {
+          apnsConfig: this.apnsConfig,
+        })
+        if (res?.ok) {
+          dev.lastSentAt = this.now()
+          sentCount += 1
+        } else if (res?.expired) {
+          this.apnsDevices.delete(dev.deviceToken)
+        }
+        results.push({
+          id: dev.id,
+          channel: 'apns',
+          deviceName: dev.deviceName,
+          apnsEnv: dev.apnsEnv,
+          ...res,
+        })
+      } catch (error) {
+        results.push({
+          id: dev.id,
+          channel: 'apns',
+          deviceName: dev.deviceName,
+          ok: false,
+          error: error?.message || 'apns failed',
+        })
+      }
+    }
+    void this.persist()
+    return {
+      ok: true,
+      configured: apnsStatus.configured,
+      sentCount,
+      totalDevices: devices.length,
+      results,
+    }
+  }
+
   async broadcastWebPush(payloadObj = {}) {
     const subs = [...this.pushSubscriptions.values()]
+    const apnsCount = this.apnsDevices.size
     const record = {
       id: `push-${randomBytes(4).toString('hex')}`,
       at: this.now(),
@@ -1912,16 +2060,27 @@ export class HubCore {
       tag: payloadObj.tag || 'dsh-notify',
       data: payloadObj.data || {},
       sentCount: 0,
-      totalSubscriptions: subs.length,
+      totalSubscriptions: subs.length + apnsCount,
     }
     this.pushHistory.push(record)
     if (this.pushHistory.length > 30) this.pushHistory.shift()
 
-    if (subs.length === 0) {
-      return { ok: true, sentCount: 0, totalSubscriptions: 0, results: [] }
+    if (subs.length === 0 && apnsCount === 0) {
+      return {
+        ok: true,
+        sentCount: 0,
+        totalSubscriptions: 0,
+        webPushSent: 0,
+        webPushTotal: 0,
+        apnsSent: 0,
+        apnsTotal: 0,
+        results: [],
+      }
     }
 
+    // Channel 1: W3C Web Push (Safari PWA / Desktop Browser) — completely untouched & isolated
     const results = []
+    let webPushSent = 0
     for (const sub of subs) {
       try {
         const res = await sendWebPushNotification(sub, payloadObj, this.vapidKeys, {
@@ -1929,20 +2088,41 @@ export class HubCore {
         })
         if (res.ok) {
           sub.lastSentAt = this.now()
+          webPushSent += 1
           record.sentCount += 1
         } else if (res.expired) {
           this.pushSubscriptions.delete(sub.endpoint)
         }
-        results.push({ id: sub.id, deviceName: sub.deviceName, ...res })
+        results.push({ id: sub.id, channel: 'webpush', deviceName: sub.deviceName, ...res })
       } catch (error) {
-        results.push({ id: sub.id, deviceName: sub.deviceName, ok: false, error: error?.message || 'push failed' })
+        results.push({ id: sub.id, channel: 'webpush', deviceName: sub.deviceName, ok: false, error: error?.message || 'push failed' })
       }
     }
+
+    // Channel 2: Native iOS APNs (PocketAgents iOS App) — fully isolated so any APNs error never affects Web Push
+    let apnsSent = 0
+    let apnsTotal = 0
+    if (apnsCount > 0) {
+      try {
+        const apnsOut = await this.broadcastApnsPush(payloadObj)
+        apnsSent = apnsOut.sentCount || 0
+        apnsTotal = apnsOut.totalDevices || 0
+        record.sentCount += apnsSent
+        for (const r of apnsOut.results || []) results.push(r)
+      } catch {
+        // never propagate APNs failures into Web Push flow
+      }
+    }
+
     void this.persist()
     return {
       ok: true,
       sentCount: record.sentCount,
-      totalSubscriptions: subs.length,
+      totalSubscriptions: subs.length + apnsTotal,
+      webPushSent,
+      webPushTotal: subs.length,
+      apnsSent,
+      apnsTotal,
       results,
     }
   }

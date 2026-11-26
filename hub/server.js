@@ -1792,6 +1792,51 @@ export function createHubServer({
         return { status: 200, json: outcome }
       }
 
+      // Isolated Native iOS App APNs Endpoints (completely separate from Safari Web Push VAPID)
+      if (method === 'GET' && pathname === '/api/push/apns/status') {
+        const state = hub.getFullState({ lite: true })
+        return {
+          status: 200,
+          json: {
+            ok: true,
+            apnsConfig: state.apnsConfig,
+            devices: state.apnsDevices || [],
+          },
+        }
+      }
+
+      if (method === 'POST' && pathname === '/api/push/apns/subscribe') {
+        const outcome = hub.addApnsDevice({
+          deviceToken: body.deviceToken || body.token || '',
+          deviceName: body.deviceName || 'iPhone 原生 App',
+          apnsEnv: body.apnsEnv || body.env || 'sandbox',
+          bundleId: body.bundleId || '',
+          appVersion: body.appVersion || '',
+          userAgent: headers['user-agent'] || '',
+        })
+        return { status: outcome.ok ? 200 : 400, json: outcome }
+      }
+
+      if (method === 'POST' && pathname === '/api/push/apns/unsubscribe') {
+        const outcome = hub.removeApnsDevice(body.deviceToken || body.token || body.id)
+        return { status: 200, json: outcome }
+      }
+
+      if (method === 'POST' && pathname === '/api/push/apns/test') {
+        const outcome = await hub.broadcastApnsPush({
+          title: body.title || '🔔 PocketAgents 原生 App 推送已激活！',
+          body: body.body || '当任意电脑有工具待审批、任务完成或异常时，你会立即收到 Apple 原生锁屏推送。',
+          tag: 'dsh-apns-test',
+          badgeCount: 1,
+          data: {
+            type: 'test',
+            hostId: hub.activeHostId || '',
+            url: '/',
+          },
+        })
+        return { status: 200, json: outcome }
+      }
+
       // BYOK Voice Copilot & Walking Headphones Mode APIs (strictly behind admin HUB_TOKEN)
       if (pathname.startsWith('/api/voice/')) {
         await voiceVault.init()

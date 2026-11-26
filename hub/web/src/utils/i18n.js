@@ -954,6 +954,19 @@ const EXACT_ZH_TO_EN = {
   '⏳ 安装中…': '⏳ Installing…',
   '🔑 去登录': '🔑 Sign In',
   '关闭提示': 'Dismiss notice',
+  // Native iOS APNs isolated channel (v0.9.35)
+  '当前运行在 PocketAgents iOS 原生 App 中，使用独立 Apple APNs 通道，与 Safari 网页推送完全隔离互不影响。': 'Running inside PocketAgents Native iOS App using a dedicated Apple APNs channel, completely isolated from Safari Web Push.',
+  '本机 (iOS 原生 App)：✅ 已开启 APNs 锁屏推送': 'This device (iOS Native App): ✅ APNs Lock-Screen Push Active',
+  '本机 (iOS 原生 App)：🟡 已登记设备令牌（云端待配置 .p8 密钥）': 'This device (iOS Native App): 🟡 Device token registered (configure Apple .p8 key on Hub)',
+  '本机 (iOS 原生 App)：⏳ 已授权通知，点下方「开启推送」刷新 Apple 令牌': 'This device (iOS Native App): ⏳ Authorized — tap Enable Push to refresh Apple token',
+  '本机 (iOS 原生 App)：通知权限被拒绝，请到 iPhone「设置 → 通知 → PocketAgents」中允许': 'This device (iOS Native App): Permission denied — enable in iPhone Settings → Notifications → PocketAgents',
+  '本机 (iOS 原生 App)：未开启（点下方「开启推送」）': 'This device (iOS Native App): Disabled (tap Enable Push below)',
+  '📲 正在向 Apple 申请原生推送令牌...': '📲 Requesting native push token from Apple...',
+  '📲 已成功开启 iPhone 原生 APNs 锁屏推送！': '📲 Native iOS APNs Lock-Screen Push enabled!',
+  '✅ 已拿到并登记 iPhone 推送令牌！在云端配置 Apple .p8 密钥后即可发锁屏推送': '✅ iPhone APNs token registered! Add Apple .p8 key on Hub to start sending',
+  '🟡 设备令牌已就绪，但云端 Hub 尚未配置 Apple .p8 推送密钥': '🟡 Device token ready, but Apple .p8 key is not configured on Hub yet',
+  '🔕 已关闭本机原生 App 推送（不影响 Safari 网页推送）': '🔕 Disabled Native App push (Safari Web Push untouched)',
+  '已刷新原生 APNs 推送状态': 'Native APNs push status refreshed',
 };
 
 const REGEX_ZH_TO_EN = [
