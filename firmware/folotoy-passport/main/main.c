@@ -91,6 +91,13 @@ static void on_portal_saved(void)
 {
     s_portal_manual_hold = false;
     s_portal_saved_at_ms = now_ms();
+    if (xSemaphoreTake(s_state_mux, pdMS_TO_TICKS(100)) == pdTRUE) {
+        if (s_state.demo_mode) {
+            memset(&s_state.digest, 0, sizeof(s_state.digest));
+            s_state.demo_mode = false;
+        }
+        xSemaphoreGive(s_state_mux);
+    }
     net_job_t job;
     memset(&job, 0, sizeof(job));
     job.dispatch.cmd = PA_CMD_FORCE_REFRESH;
@@ -160,7 +167,11 @@ static void console_worker_task(void *arg)
                 if (kind == 1) {
                     pa_net_save_hub_config(&s_cfg, a1, a2);
                     if (xSemaphoreTake(s_state_mux, pdMS_TO_TICKS(100)) == pdTRUE) {
-                        s_state.demo_mode = false;
+                        if (s_state.demo_mode) {
+                            memset(&s_state.digest, 0, sizeof(s_state.digest));
+                            s_state.demo_mode = false;
+                        }
+                        s_state.net_status = PA_NET_CONNECTING;
                         xSemaphoreGive(s_state_mux);
                     }
                     net_job_t job;
@@ -170,7 +181,11 @@ static void console_worker_task(void *arg)
                 } else if (kind == 2) {
                     pa_net_save_wifi_config(&s_cfg, a1, a2);
                     if (xSemaphoreTake(s_state_mux, pdMS_TO_TICKS(100)) == pdTRUE) {
-                        s_state.demo_mode = false;
+                        if (s_state.demo_mode) {
+                            memset(&s_state.digest, 0, sizeof(s_state.digest));
+                            s_state.demo_mode = false;
+                        }
+                        s_state.net_status = PA_NET_CONNECTING;
                         xSemaphoreGive(s_state_mux);
                     }
                     net_job_t job;
@@ -427,12 +442,14 @@ static void net_worker_task(void *arg)
 
         char cur_ip[20] = { 0 };
         pa_net_get_ip_str(cur_ip, sizeof(cur_ip));
+        bool already_online = false;
         if (xSemaphoreTake(s_state_mux, pdMS_TO_TICKS(50)) == pdTRUE) {
             snprintf(s_state.wifi_ip, sizeof(s_state.wifi_ip), "%s", cur_ip);
+            already_online = (s_state.net_status == PA_NET_ONLINE);
             xSemaphoreGive(s_state_mux);
         }
 
-        if (pa_is_pair_code(s_cfg.hub_token)) {
+        if (!already_online && pa_is_pair_code(s_cfg.hub_token)) {
             (void)pa_net_exchange_pair_code_if_needed(&s_cfg);
         }
 

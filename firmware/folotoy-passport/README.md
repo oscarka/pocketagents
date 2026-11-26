@@ -10,7 +10,7 @@ Turn your **FoloToy AI Passport** into a pocket remote control for Claude Code, 
 
 1. Boot the flashed device: if no Wi-Fi is saved (after ~4.5s), or anytime you **long-press `UP`**, AI Passport opens an open temporary hotspot **`PocketAgents-Setup`** and displays setup steps on screen.
 2. Connect your phone to **`PocketAgents-Setup`** and open **`http://192.168.4.1`** (usually auto-pops as a captive portal).
-3. Tap your **2.4 GHz Wi-Fi** from the live scan list, enter its password, and optionally enter your PocketAgents hub URL (e.g. `http://192.168.1.25:8788`) plus the **6-digit pairing code** shown in your terminal (automatically exchanged for a revocable `dev_` token!).
+3. Tap your **2.4 GHz Wi-Fi** from the live scan list, enter its password, and optionally enter your PocketAgents hub URL (e.g. `http://192.168.1.25:8788`) plus the **6-character pairing code** (e.g. `MF9AJP`) shown in your terminal (automatically exchanged for a revocable `dev_` token!).
 4. Don't have PocketAgents running on a computer yet? Press **`DOWN`** on the setup screen to try the **built-in interactive offline demo** immediately!
 
 ## Alternative: 3-Step Quick Start via Computer USB (`/device-setup`)

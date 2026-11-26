@@ -792,8 +792,11 @@ bool pa_is_pair_code(const char *token_or_code)
     if (!token_or_code) return false;
     size_t len = strlen(token_or_code);
     if (len != 6) return false;
+    if (strncmp(token_or_code, "dev_", 4) == 0 || strncmp(token_or_code, "hst_", 4) == 0) {
+        return false;
+    }
     for (size_t i = 0; i < len; i++) {
-        if (!isdigit((unsigned char)token_or_code[i])) return false;
+        if (!isalnum((unsigned char)token_or_code[i])) return false;
     }
     return true;
 }
@@ -801,6 +804,9 @@ bool pa_is_pair_code(const char *token_or_code)
 void pa_state_enter_setup(pa_state_t *st, const char *ap_ssid, uint32_t now_ms)
 {
     if (!st) return;
+    if (st->demo_mode) {
+        memset(&st->digest, 0, sizeof(st->digest));
+    }
     st->demo_mode = false;
     st->busy = false;
     st->setup_ap_active = true;

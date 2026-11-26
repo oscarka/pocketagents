@@ -13,6 +13,7 @@
 #include "nvs.h"
 #include "nvs_flash.h"
 
+#include <ctype.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -330,10 +331,16 @@ bool pa_net_exchange_pair_code_if_needed(pa_net_config_t *cfg)
     char url[224];
     snprintf(url, sizeof(url), "%s/api/pairing/exchange", cfg->hub_url);
 
-    char payload[180];
+    char code_up[8];
+    for (int i = 0; i < 6; i++) {
+        code_up[i] = (char)toupper((unsigned char)cfg->hub_token[i]);
+    }
+    code_up[6] = '\0';
+
+    char payload[220];
     int plen = snprintf(payload, sizeof(payload),
-                        "{\"code\":\"%s\",\"deviceName\":\"FoloToy AI Passport\"}",
-                        cfg->hub_token);
+                        "{\"code\":\"%s\",\"deviceId\":\"folotoy-passport\",\"deviceName\":\"FoloToy AI Passport\"}",
+                        code_up);
     if (plen <= 0) return false;
 
     int status = perform_http_json(cfg, url, HTTP_METHOD_POST, "application/json",
@@ -342,7 +349,7 @@ bool pa_net_exchange_pair_code_if_needed(pa_net_config_t *cfg)
     if (status == 200) {
         char exchanged[96];
         if (pa_parse_pair_exchange_json(s_resp_buf, exchanged, sizeof(exchanged))) {
-            ESP_LOGI(TAG, "[PA] 6-digit pair code exchanged for revocable device token!");
+            ESP_LOGI(TAG, "[PA] 6-char pair code exchanged for revocable device token!");
             return pa_net_save_hub_config(cfg, cfg->hub_url, exchanged);
         }
     }

@@ -423,6 +423,10 @@ static void render_dashboard(const pa_state_t *st)
         lv_obj_set_style_bg_color(s_dash_banner, lv_color_hex(0x0B2B22u), 0);
         lv_obj_set_style_text_color(s_dash_banner_lbl, lv_color_hex(COL_EMERALD), 0);
         lv_label_set_text(s_dash_banner_lbl, "演示模式 · 全部就绪");
+    } else if (st->net_status == PA_NET_AUTH_ERROR) {
+        lv_obj_set_style_bg_color(s_dash_banner, lv_color_hex(0x3B0E18u), 0);
+        lv_obj_set_style_text_color(s_dash_banner_lbl, lv_color_hex(COL_CRIMSON), 0);
+        lv_label_set_text(s_dash_banner_lbl, st->net_detail[0] ? st->net_detail : "认证失败 (401)");
     } else if (st->net_status != PA_NET_ONLINE) {
         if (st->wifi_ip[0] != '\0') {
             lv_obj_set_style_bg_color(s_dash_banner, lv_color_hex(0x0B2B22u), 0);

@@ -170,7 +170,12 @@ static void test_softap_form_pair_code_and_demo_mode(void)
     assert(pa_parse_form_field(form, "token", v, sizeof(v)));
     assert(strcmp(v, "482910") == 0);
     assert(pa_is_pair_code(v) == true);
+    assert(pa_is_pair_code("MF9AJP") == true);
+    assert(pa_is_pair_code("mf9ajp") == true);
     assert(pa_is_pair_code("dev_abcdef") == false);
+    assert(pa_is_pair_code("dev_12") == false);
+    assert(pa_is_pair_code("hst_99") == false);
+    assert(pa_is_pair_code("MF9AJ!") == false);
     assert(pa_is_pair_code("12345") == false);
 
     // 6-digit pairing exchange JSON response parser
