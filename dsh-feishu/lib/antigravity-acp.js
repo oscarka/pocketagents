@@ -251,11 +251,14 @@ export class AntigravityAcpClient {
         this.lastError = '未找到官方 agy CLI'
         return false
       }
+      const proxyEnv = process.platform === 'darwin' && this.spawnImpl === spawn
+        ? await detectMacSystemProxyEnv(this.execImpl)
+        : {}
       this.cleanupProcess('restart')
       const args = ['acp', '--stdio', `--app-data-dir=${this.appDataDir}`]
       const child = this.spawnImpl(bin, args, {
         stdio: ['pipe', 'pipe', 'pipe'],
-        env: withCliEnv(),
+        env: withCliEnv(proxyEnv),
       })
       this.proc = child
       this.stdoutBuffer = ''
@@ -284,14 +287,12 @@ export class AntigravityAcpClient {
           'initialize',
           {
             protocolVersion: 1,
-            clientCapabilities: {
-              fs: { readTextFile: true, writeTextFile: true },
-              terminal: true,
-              elicitation: { form: {}, url: {} },
-            },
+            // Advertise empty clientCapabilities so agy ACP uses its own built-in server-side
+            // file/terminal tools instead of delegating reverse RPCs that a headless bridge declines.
+            clientCapabilities: {},
             clientInfo: {
               name: 'PocketAgents',
-              version: '0.9.34',
+              version: '0.9.38',
             },
           },
           12_000,
@@ -677,8 +678,10 @@ export class AntigravityAcpClient {
     }
 
     const now = Date.now()
+    const turnToken = `${now}-${Math.random().toString(36).slice(2, 8)}`
     this.activeTurns.set(rawId, {
       sessionId: rawId,
+      turnToken,
       status: 'running',
       startedAt: now,
       updatedAt: now,
@@ -689,30 +692,41 @@ export class AntigravityAcpClient {
       model,
     })
 
+    const releaseLoadedSession = () => {
+      const latest = this.activeTurns.get(rawId)
+      if (latest && latest.turnToken !== turnToken) return
+      this.loadedSessions.delete(rawId)
+      if (this.isAlive()) {
+        this._sendRequest('session/close', { sessionId: rawId }, 4000).catch(() => {})
+      }
+    }
+
     // Dispatch `session/prompt` asynchronously (a full agent turn can run for minutes)
     this._sendRequest('session/prompt', { sessionId: rawId, prompt: promptBlocks }, 30 * 60_000)
       .then(() => {
         const cur = this.activeTurns.get(rawId)
-        if (cur) {
+        if (cur && cur.turnToken === turnToken) {
           cur.status = 'done'
           cur.updatedAt = Date.now()
         }
+        releaseLoadedSession()
         setTimeout(() => {
           const latest = this.activeTurns.get(rawId)
-          if (latest && latest.status === 'done') this.activeTurns.delete(rawId)
+          if (latest && latest.turnToken === turnToken && latest.status === 'done') this.activeTurns.delete(rawId)
         }, 4000).unref?.()
         this.onStateChange?.('turn_done', { sessionId: rawId })
       })
       .catch(err => {
         const cur = this.activeTurns.get(rawId)
-        if (cur) {
+        if (cur && cur.turnToken === turnToken) {
           cur.status = 'error'
           cur.error = err?.message || '执行中断'
           cur.updatedAt = Date.now()
         }
+        releaseLoadedSession()
         setTimeout(() => {
           const latest = this.activeTurns.get(rawId)
-          if (latest && latest.status === 'error') this.activeTurns.delete(rawId)
+          if (latest && latest.turnToken === turnToken && latest.status === 'error') this.activeTurns.delete(rawId)
         }, 6000).unref?.()
         this.onStateChange?.('turn_error', { sessionId: rawId, error: err?.message })
       })

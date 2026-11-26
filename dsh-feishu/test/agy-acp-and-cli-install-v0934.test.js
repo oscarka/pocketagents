@@ -146,6 +146,11 @@ test('v0.9.34 AntigravityAcpClient handles initialize, resume, model switch, pro
   assert.equal(sendRes.ok, true)
   assert.equal(sendRes.method, 'agy-acp')
 
+  // Verify initialize does NOT advertise unimplemented client fs/terminal capabilities (v0.9.38)
+  const initMsg = received.find(m => m.method === 'initialize')
+  assert.ok(initMsg)
+  assert.deepEqual(initMsg.params.clientCapabilities, {})
+
   // Verify model placeholder was translated to official slug before calling session/set_model
   const setModelMsg = received.find(m => m.method === 'session/set_model')
   assert.ok(setModelMsg)
