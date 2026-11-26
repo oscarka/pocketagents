@@ -2520,7 +2520,11 @@ export class HubCore {
     const pluginsSig = Array.isArray(b.antigravityPlugins)
       ? b.antigravityPlugins.map(p => `${p.dir}:${p.enabled ? 1 : 0}:${p.version || ''}`).join('|')
       : ''
-    return `${record?.hostName || ''}:${record?.trust?.status || ''}:${b.agentVersion || ''}:${Boolean(b.remoteActive)}:${Boolean(b.feishuConnected)}:${tasksSig}#${appSig}#${fsSig}#${pluginsSig}`
+    const agySt = b.antigravityStatus
+    const agyStatusSig = agySt
+      ? `${agySt.mode || ''}:${agySt.hasCli ? 1 : 0}:${agySt.cliAuthenticated === true ? 1 : agySt.cliAuthenticated === false ? 0 : -1}:${agySt.installing ? 1 : 0}:${agySt.installError || ''}`
+      : ''
+    return `${record?.hostName || ''}:${record?.trust?.status || ''}:${b.agentVersion || ''}:${Boolean(b.remoteActive)}:${Boolean(b.feishuConnected)}:${tasksSig}#${appSig}#${fsSig}#${pluginsSig}#${agyStatusSig}`
   }
 
   manageHostTrust(hostId, { action = 'pin' } = {}) {

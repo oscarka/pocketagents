@@ -2907,9 +2907,21 @@ export function resolveAntigravityModelLabel(rawModel = '') {
   return clean.startsWith('MODEL_PLACEHOLDER_') ? '' : clean
 }
 
+export function resolveAntigravityModelSlug(rawModel = '') {
+  const clean = String(rawModel || '').trim()
+  if (!clean) return ''
+  const lower = clean.toLowerCase()
+  const hit = DEFAULT_AGY_MODELS.find(
+    m => m.value === clean || m.label === clean || (m.alias && m.alias.toLowerCase() === lower),
+  )
+  if (hit?.alias) return hit.alias
+  return clean
+}
+
 export async function discoverAntigravityModelCatalog({
   execImpl = execFileAsync,
   fetchImpl = globalThis.fetch,
+  acpClient = null,
   agyBin = '',
   forceRefresh = false,
 } = {}) {
@@ -2972,7 +2984,24 @@ export async function discoverAntigravityModelCatalog({
       }
     } catch { }
   }
-  // Secondary official path: query `agy models` CLI when standalone Antigravity.app 2.0 does not expose a `--hub` RPC port.
+  // Secondary live source: ACP client already fetched live availableModels from `session/resume` or `session/new`.
+  if (acpClient?.liveModelCatalog?.models?.length > 0) {
+    const acpModels = acpClient.liveModelCatalog.models.map(m => {
+      const known = AGY_ALIAS_TO_DEFAULT.get(String(m.value || '').toLowerCase())
+      return { value: known ? known.value : m.value, label: m.label }
+    })
+    const result = {
+      defaultModel: acpModels[0].value,
+      defaultLabel: acpModels[0].label,
+      models: acpModels,
+    }
+    if (isDefaultRuntime) {
+      cachedAgyModelCatalog = result
+      cachedAgyModelCatalogAt = now
+    }
+    return result
+  }
+  // Tertiary official path: query `agy models` CLI when standalone Antigravity.app 2.0 does not expose a `--hub` RPC port.
   // Cooldown-protected (10 min) so hosts without `agy` CLI never spawn repeated subprocesses.
   if (typeof execImpl === 'function' && (!isDefaultRuntime || forceRefresh || now - cachedAgyCliModelProbeAt >= 600_000)) {
     if (isDefaultRuntime) {
@@ -2982,7 +3011,13 @@ export async function discoverAntigravityModelCatalog({
       let cli = agyBin
       if (!cli) {
         const home = homedir()
-        for (const cand of [process.env.ANTIGRAVITY_AGENTAPI_EXE, join(home, '.gemini', 'bin', 'agy'), join(home, '.local', 'bin', 'agy')].filter(Boolean)) {
+        for (const cand of [
+          process.env.ANTIGRAVITY_AGENTAPI_EXE,
+          join(home, '.local', 'bin', 'agy'),
+          join(home, '.gemini', 'bin', 'agy'),
+          '/opt/homebrew/bin/agy',
+          '/usr/local/bin/agy',
+        ].filter(Boolean)) {
           try {
             await access(cand)
             cli = cand
@@ -3195,6 +3230,7 @@ export async function executeAntigravityIdeAction(action, {
   home = homedir(),
   execImpl = execFileAsync,
   fetchImpl = globalThis.fetch,
+  acpClient = null,
 } = {}) {
   const type = String(action?.type ?? '').trim()
   const rawConvId = toRawConversationId(action?.agentId || action?.conversationId || '')
@@ -3212,6 +3248,14 @@ export async function executeAntigravityIdeAction(action, {
 
   if (type === 'approve' || type === 'deny') {
     const allow = type === 'approve'
+    if (acpClient && typeof acpClient.hasPendingPermission === 'function' && acpClient.hasPendingPermission(action?.code, rawConvId)) {
+      return acpClient.resolvePermission({
+        code: action?.code,
+        sessionId: rawConvId,
+        allow,
+        optionIndex,
+      })
+    }
     const explicitSubConvId = toRawConversationId(
       action?.pendingApproval?.targetConversationId || action?.pendingApproval?.subagentConversationId || '',
     )
@@ -3635,6 +3679,10 @@ export async function executeAntigravityIdeAction(action, {
   }
 
   if (type === 'stop') {
+    if (rawConvId && acpClient && typeof acpClient.isSessionRunning === 'function' && acpClient.isSessionRunning(rawConvId)) {
+      const cancelRes = await acpClient.cancelSession(rawConvId)
+      if (cancelRes?.ok) return cancelRes
+    }
     if (rawConvId && typeof fetchImpl === 'function') {
       const rawHubs = await discoverAntigravityHubInstances({ execImpl, preferredCwd })
       const hubs = rawHubs.length > 1
@@ -3793,6 +3841,24 @@ export async function executeAntigravityIdeAction(action, {
       }
     }
 
+    // Strategy 1A-ACP: Official persistent `agy acp --stdio --app-data-dir=antigravity` bridge
+    // Works headless/screen-locked with Antigravity 2.0, exact session targeting, 27-model switching & approvals.
+    if (rawConvId && acpClient && typeof acpClient.sendPrompt === 'function') {
+      try {
+        const acpRes = await acpClient.sendPrompt({
+          sessionId: rawConvId,
+          text,
+          cwd: preferredCwd,
+          model: action?.model,
+          imagePaths: action?.imagePaths,
+        })
+        if (acpRes?.ok) return acpRes
+        if (acpRes?.needsLogin) return acpRes
+      } catch {
+        // Fall through to legacy agentapi / AppleScript
+      }
+    }
+
     // Strategy 1B: Official `agentapi send-message <convId> <text>` with discovered LS address + CSRF token
     const agentApiCandidates = [
       ...hubs.map(h => h.binPath).filter(Boolean),
@@ -3927,6 +3993,23 @@ export async function executeAntigravityIdeAction(action, {
         } catch {
           // Try next hub or Strategy 1B
         }
+      }
+    }
+
+    // Strategy 1A-ACP: Official persistent `agy acp` `session/new` + `session/set_model` + `session/prompt`
+    if (acpClient && typeof acpClient.createSession === 'function') {
+      try {
+        const acpNewRes = await acpClient.createSession({
+          title,
+          prompt: promptText,
+          cwd: preferredCwd,
+          model: action?.model,
+          imagePaths: action?.imagePaths,
+        })
+        if (acpNewRes?.ok) return acpNewRes
+        if (acpNewRes?.needsLogin) return acpNewRes
+      } catch {
+        // Fall through to legacy agentapi / AppleScript
       }
     }
 
@@ -4249,8 +4332,10 @@ async function resolveOfficialAgyCliPath() {
   const home = homedir()
   const candidates = [
     process.env.ANTIGRAVITY_AGENTAPI_EXE,
-    join(home, '.gemini', 'bin', 'agy'),
     join(home, '.local', 'bin', 'agy'),
+    join(home, '.gemini', 'bin', 'agy'),
+    '/opt/homebrew/bin/agy',
+    '/usr/local/bin/agy',
   ].filter(Boolean)
   for (const bin of candidates) {
     try {

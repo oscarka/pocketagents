@@ -938,6 +938,22 @@ const EXACT_ZH_TO_EN = {
   '🔄 强制刷新前端版本（清缓存重载）': '🔄 Force Update App (Clear Cache)',
   '💡 提示：从屏幕左侧向右滑动即可返回会话列表': '💡 Tip: Swipe right from the left edge to return to sessions',
   '全文同步中…': 'Syncing full reply…',
+  // Antigravity CLI degraded-mode notice & 1-tap install (v0.9.34)
+  '缺 agy CLI': 'Missing agy CLI',
+  '待登 CLI': 'CLI Sign-In',
+  '装 CLI 中': 'Installing CLI',
+  '⚠️ 建议安装官方 agy CLI 以解锁完整遥控': '⚠️ Install Official agy CLI for Full Control',
+  '🔑 官方 agy CLI 尚未完成登录': '🔑 Official agy CLI Sign-In Needed',
+  '当前电脑已安装 agy CLI，但尚未登录 Google 账号。完成一次登录后即可解锁锁屏发消息、模型切换与手机审批。': 'agy CLI is installed on this computer but not signed in yet. Sign in once with Google to unlock lock-screen prompts, model switching, and mobile approvals.',
+  '当前仅检测到 Antigravity 桌面端，发消息只能依赖窗口模拟粘贴：锁屏或关窗口发不出、易串到当前桌面窗口、切模型不生效且无手机审批弹窗。装好官方 agy CLI 即可自动切回直连模式。': 'Only the Antigravity desktop app was detected (paste-fallback mode): fails when screen-locked or minimized, may paste into the wrong window, model switching is disabled, and mobile approvals are unavailable. Install the official agy CLI for direct ACP control.',
+  '🔑 在电脑打开登录授权': '🔑 Open Sign-In on Computer',
+  '⚡ 一键为此电脑安装 agy CLI': '⚡ Install agy CLI on This Computer',
+  '⏳ 正在电脑端安装 agy CLI…': '⏳ Installing agy CLI on computer…',
+  '✅ Antigravity 完整遥控已就绪': '✅ Antigravity Full Control Ready',
+  '⚡ 一键装 CLI': '⚡ Install CLI',
+  '⏳ 安装中…': '⏳ Installing…',
+  '🔑 去登录': '🔑 Sign In',
+  '关闭提示': 'Dismiss notice',
 };
 
 const REGEX_ZH_TO_EN = [
@@ -1112,6 +1128,23 @@ const REGEX_ZH_TO_EN = [
   [/^删除失败：(.+)$/, 'Delete failed: $1'],
   [/^⚠️ 大脑异常：(.+)$/, '⚠️ Brain error: $1'],
   [/^❌ 播报失败：(.+)$/, '❌ TTS failed: $1'],
+  // Antigravity CLI 1-tap install & degraded-mode dynamic strings (v0.9.34)
+  [/^Antigravity · RPC直连$/, 'Antigravity · RPC Direct'],
+  [/^Antigravity · ACP直连$/, 'Antigravity · ACP Direct'],
+  [/^Antigravity · 待登录CLI$/, 'Antigravity · Sign-In Needed'],
+  [/^Antigravity · 受限模式 \(缺CLI\)$/, 'Antigravity · Limited (No CLI)'],
+  [/^ · Connect-RPC 实时直连(.*)$/, ' · Connect-RPC Direct$1'],
+  [/^ · 官方 agy ACP 协议直连(.*)$/, ' · Official agy ACP Direct$1'],
+  [/^上次安装提示：(.+)$/, 'Last install error: $1'],
+  [/^🚀 先升级客户端 \(v(.+)\) 再一键装 CLI$/, '🚀 Update Host (v$1) Then Install CLI'],
+  [/^🚀 升 v(.+) 后装 CLI$/, '🚀 Update v$1 & Install CLI'],
+  [/^⚠️ (.+) 仅装了 Antigravity 桌面端：锁屏发不出、易串窗口且切模型不生效$/, '⚠️ $1 is in Desktop-only mode: fails when locked, may paste into wrong window, model switching disabled'],
+  [/^🔑 (.+) 已装 agy CLI 但未登录，登录后即可解锁锁屏发消息与切模型$/, '🔑 $1 has agy CLI installed — sign in once to unlock lock-screen prompts & model switching'],
+  [/^⚡ 正在为「(.+)」安装官方 agy CLI（约 15-40 秒）\.\.\.$/, '⚡ Installing official agy CLI on "$1" (~15-40s)...'],
+  [/^✅ 「(.+)」已装好 agy CLI！请在电脑浏览器点一次 Google 登录确认$/, '✅ Installed agy CLI on "$1"! Please confirm Google sign-in in its browser'],
+  [/^✅ 「(.+)」已安装官方 agy CLI，ACP 直连通道已启用！$/, '✅ Installed agy CLI on "$1" — ACP direct channel active!'],
+  [/^⚠️ 「(.+)」安装失败：(.+)$/, '⚠️ Install failed on "$1": $2'],
+  [/^🔑 正在「(.+)」打开官方 agy 登录授权页，请在电脑确认 Google 登录\.\.\.$/, '🔑 Opening official agy sign-in on "$1" — please confirm in its browser...'],
 ];
 
 export function getLangPref() {

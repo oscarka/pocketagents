@@ -10,14 +10,22 @@ import { promisify } from 'node:util'
 import { gzipSync } from 'node:zlib'
 import { checkAccessibilityPermission, getTurboNativeBinaryPath, TurboController } from '../../dsh-turbo/index.js'
 import {
+  AntigravityAcpClient,
+  detectAntigravityHostStatus,
+  installAntigravityCli,
+  triggerAntigravityCliLogin,
+} from './antigravity-acp.js'
+import {
   discoverAntigravityModelCatalog,
   discoverAntigravityPlugins,
   executeAntigravityIdeAction,
   getDefaultAntigravityBrainDirs,
+  invalidateAntigravityModelCatalogCache,
   invalidateAntigravityPluginsCache,
   isAntigravityIdeSessionId,
   loadAntigravityIdeSessions,
   resolveAntigravityModelLabel,
+  resolveAntigravityModelSlug,
   setAntigravityConversationPinned,
   setAntigravityConversationTitle,
   toggleAntigravityPlugin,
@@ -156,6 +164,20 @@ export class HubAgent {
     this.bootId = bootId
     this.bootEpochMs = bootEpochMs
     this.heartbeatSeq = 0
+    this.agyAcpClient = !this.execImpl
+      ? new AntigravityAcpClient({
+        execImpl: this.execImpl,
+        logger: this.logger,
+        modelSlugResolver: resolveAntigravityModelSlug,
+        onStateChange: () => {
+          this.scheduleFollowUpTick?.(250)
+        },
+      })
+      : null
+    this.cachedAgyHostStatus = null
+    this.lastAgyHostStatusAt = 0
+    this.agyCliInstalling = false
+    this.agyCliInstallError = ''
     this.harnessRouter = harnessRouter || new HarnessRouter()
     if (!harnessRouter && this.shouldLoadExternalHarnesses()) {
       const enabledSet = Array.isArray(this.config?.enabledHarnesses)
@@ -432,6 +454,9 @@ export class HubAgent {
     if (this.webrtcServer) {
       this.webrtcServer.closeAll()
       this.webrtcServer = null
+    }
+    if (this.agyAcpClient) {
+      this.agyAcpClient.shutdown()
     }
     stopAllHlsEncoders()
     for (const entry of this.inflightFsUploads.values()) {
@@ -1127,7 +1152,42 @@ export class HubAgent {
       if (Array.isArray(this.cachedAgySessions) && this.cachedAgySessions.length > 0) {
         if (!Array.isArray(bridgeState.approvals)) bridgeState.approvals = []
         const existingCodes = new Set(bridgeState.approvals.map(a => a.code))
+        const acpOverlays = this.agyAcpClient?.getActiveOverlays?.() || { runningByRawId: new Map(), approvals: [] }
+        const acpApprovalByRawId = new Map()
+        for (const acpApp of acpOverlays.approvals || []) {
+          if (acpApp.rawSessionId) acpApprovalByRawId.set(acpApp.rawSessionId, acpApp)
+          if (acpApp.code) {
+            this.recentAgyApprovals.set(acpApp.code.toUpperCase(), {
+              session: null,
+              approval: acpApp,
+            })
+            if (!existingCodes.has(acpApp.code) && !this.settledAgyApprovals.has(acpApp.code)) {
+              bridgeState.approvals.push(acpApp)
+              existingCodes.add(acpApp.code)
+            }
+          }
+        }
         for (const agySess of this.cachedAgySessions) {
+          const rawId = agySess.rawId || toRawConversationId(agySess.id)
+          const acpTurn = rawId ? acpOverlays.runningByRawId.get(rawId) : null
+          const acpApp = rawId ? acpApprovalByRawId.get(rawId) : null
+          if (acpApp && !this.settledAgyApprovals.has(acpApp.code)) {
+            agySess.pendingApproval = { ...acpApp, title: agySess.title, project: agySess.project }
+            agySess.status = 'approval'
+            agySess.turnState = 'approval'
+            agySess.statusLabel = '⏳ 待审批'
+            agySess.controlMode = 'managed'
+          } else if (acpTurn) {
+            agySess.status = 'running'
+            agySess.turnState = 'running'
+            agySess.statusLabel = '🟢 运行中'
+            agySess.controlMode = 'managed'
+            if (acpTurn.runningSummary) agySess.runningSummary = acpTurn.runningSummary
+            if (acpTurn.updatedAt > (agySess.lastActivity || 0)) {
+              agySess.lastActivity = acpTurn.updatedAt
+              agySess.updatedAt = acpTurn.updatedAt
+            }
+          }
           decorateTaskMetadata(agySess, { isLiveDsh: false, now: capturedAt })
           agySess.pinned = Boolean(agySess.pinned)
           if (!existingIds.has(agySess.id)) {
@@ -1206,6 +1266,7 @@ export class HubAgent {
         const agyCatalog = await discoverAntigravityModelCatalog({
           execImpl: this.execImpl,
           fetchImpl: this.fetch,
+          acpClient: this.agyAcpClient,
         })
         const codexCatalog = discoverCodexModels(this.config?.codexHome)
         const workbuddyCatalog = discoverWorkBuddyModels(this.config?.workbuddyHome)
@@ -1245,6 +1306,33 @@ export class HubAgent {
             execImpl: this.execImpl,
             fetchImpl: this.fetch,
           })
+          const hasLiveRpc = Boolean(
+            (this.cachedAgySessions || []).some(s => Boolean(s?.hasLiveSummary)),
+          )
+          const hasAgySessions = Boolean((this.cachedAgySessions || []).length > 0)
+          if (
+            !this.cachedAgyHostStatus
+            || this.agyCliInstalling
+            || capturedAt - this.lastAgyHostStatusAt >= 20_000
+            || this.cachedAgyHostStatus.hasLiveRpc !== hasLiveRpc
+          ) {
+            this.cachedAgyHostStatus = await detectAntigravityHostStatus({
+              hasLiveRpc,
+              hasAntigravitySessions: hasAgySessions,
+              acpClient: this.execImpl ? null : this.agyAcpClient,
+              installing: this.agyCliInstalling,
+              installError: this.agyCliInstallError,
+              execImpl: this.execImpl,
+            })
+            this.lastAgyHostStatusAt = capturedAt
+          } else {
+            this.cachedAgyHostStatus = {
+              ...this.cachedAgyHostStatus,
+              installing: this.agyCliInstalling,
+              installError: this.agyCliInstallError,
+            }
+          }
+          bridgeState.antigravityStatus = this.cachedAgyHostStatus
         }
       } catch { }
       bridgeState.turbo = this.turbo
@@ -1836,7 +1924,7 @@ export class HubAgent {
                 cwd: matchedSession?.cwd || cmd.cwd,
                 pendingApproval: matchedApproval,
               },
-              { execImpl: this.execImpl, fetchImpl: this.fetch },
+              { execImpl: this.execImpl, fetchImpl: this.fetch, acpClient: this.agyAcpClient },
             )
             if (res?.ok && code) {
               this.settledAgyApprovals.add(code)
@@ -2073,7 +2161,7 @@ export class HubAgent {
             const sess = (this.cachedAgySessions || []).find(s => s.id === targetId)
             const res = await executeAntigravityIdeAction(
               { type, agentId: targetId, text: effectiveText, cwd: sess?.cwd || cmd.cwd, model: requestedModel, imagePaths },
-              { execImpl: this.execImpl, fetchImpl: this.fetch },
+              { execImpl: this.execImpl, fetchImpl: this.fetch, acpClient: this.agyAcpClient },
             )
             if (res.ok && (type === 'prompt' || type === 'steer')) {
               const trimmedText = effectiveText
@@ -2259,7 +2347,7 @@ export class HubAgent {
                 model: requestedNewModel,
                 imagePaths,
               },
-              { execImpl: this.execImpl, fetchImpl: this.fetch },
+              { execImpl: this.execImpl, fetchImpl: this.fetch, acpClient: this.agyAcpClient },
             )
             if (agyRes?.agentId && requestedNewModel) {
               this.sessionModelOverrides.set(agyRes.agentId, requestedNewModel)
@@ -2370,6 +2458,41 @@ export class HubAgent {
             }
           }
           return { ok: false, error: '未找到该会话的完整历史记录' }
+        }
+        case 'install_agy_cli': {
+          this.agyCliInstalling = true
+          this.agyCliInstallError = ''
+          this.lastAgyHostStatusAt = 0
+          this.scheduleFollowUpTick?.(150)
+          try {
+            const installRes = await installAntigravityCli({
+              acpClient: this.execImpl ? null : this.agyAcpClient,
+              execImpl: this.execImpl,
+            })
+            if (!installRes.ok) {
+              this.agyCliInstallError = installRes.error || '安装失败'
+            }
+            invalidateAntigravityModelCatalogCache()
+            invalidateAntigravityPluginsCache()
+            this.lastAgyHostStatusAt = 0
+            this.scheduleFollowUpTick?.(200)
+            return installRes
+          } finally {
+            this.agyCliInstalling = false
+            this.lastAgyHostStatusAt = 0
+          }
+        }
+        case 'login_agy_cli': {
+          const loginRes = await triggerAntigravityCliLogin({
+            execImpl: this.execImpl,
+          })
+          if (this.agyAcpClient) {
+            this.agyAcpClient.authenticated = null
+            this.agyAcpClient.lastAuthCheckAt = 0
+          }
+          this.lastAgyHostStatusAt = 0
+          this.scheduleFollowUpTick?.(300)
+          return loginRes
         }
         case 'request_ax_permission': {
           const perm = await checkAccessibilityPermission({

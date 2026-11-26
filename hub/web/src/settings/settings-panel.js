@@ -117,6 +117,44 @@ export function createSettingsPanel(deps) {
     }
   }
 
+  function computeHostAgyCliMeta(h, installingAgyCliMap = {}) {
+    const st = h?.bridgeState?.antigravityStatus || null;
+    const localInstalling = Boolean(
+      installingAgyCliMap[h?.hostId] && Date.now() - installingAgyCliMap[h?.hostId] < 180_000
+    );
+    const hostVer = String(h?.bridgeState?.agentVersion || '').trim();
+    if (st && typeof st === 'object') {
+      return {
+        mode: String(st.mode || 'not-installed'),
+        hasCli: Boolean(st.hasCli),
+        hasLiveRpc: Boolean(st.hasLiveRpc),
+        hasDesktopApp: Boolean(st.hasDesktopApp),
+        cliVersion: String(st.cliVersion || '').trim(),
+        needsCliInstall: Boolean(st.needsCliInstall),
+        needsCliLogin: Boolean(st.needsCliLogin),
+        installing: Boolean(st.installing || localInstalling),
+        installError: String(st.installError || '').trim(),
+        needsAgentUpgradeFirst: false,
+      };
+    }
+    const agyTasks = (h?.bridgeState?.tasks || []).filter(t => t.harness === 'antigravity-ide');
+    const hasLiveAgy = agyTasks.some(t => Boolean(t.hasLiveSummary));
+    const hasPlugins = Array.isArray(h?.bridgeState?.antigravityPlugins) && h.bridgeState.antigravityPlugins.length > 0;
+    const isLegacyDegraded = agyTasks.length > 0 && !hasLiveAgy && !hasPlugins;
+    return {
+      mode: hasLiveAgy ? 'connect-rpc' : isLegacyDegraded ? 'desktop-only' : 'not-installed',
+      hasCli: hasPlugins,
+      hasLiveRpc: hasLiveAgy,
+      hasDesktopApp: agyTasks.length > 0,
+      cliVersion: '',
+      needsCliInstall: isLegacyDegraded,
+      needsCliLogin: false,
+      installing: localInstalling,
+      installError: '',
+      needsAgentUpgradeFirst: Boolean(isLegacyDegraded && (!hostVer || deps.compareSemver(hostVer, '0.9.34') < 0)),
+    };
+  }
+
   function buildSignature(state, voiceCompact) {
     const {
       hubState,
@@ -124,6 +162,7 @@ export function createSettingsPanel(deps) {
       langPref,
       cachedPushStatusText,
       upgradingHostMap,
+      installingAgyCliMap = {},
       tokenTail,
     } = state;
     const hosts = hubState.hosts || [];
@@ -161,6 +200,10 @@ export function createSettingsPanel(deps) {
           : 0,
         agentVersion: h.bridgeState?.agentVersion || '',
         upgrading: Boolean(upgradingHostMap[h.hostId] && Date.now() - upgradingHostMap[h.hostId] < 45000),
+        agyCli: (() => {
+          const m = computeHostAgyCliMeta(h, installingAgyCliMap);
+          return `${m.mode}:${m.needsCliInstall ? 1 : 0}:${m.needsCliLogin ? 1 : 0}:${m.installing ? 1 : 0}:${m.installError}`;
+        })(),
         turbo: h.bridgeState?.turbo?.engineLabel || '',
         power: h.bridgeState?.systemTelemetry?.power?.shortLabel || '',
         net: h.bridgeState?.systemTelemetry?.network?.kindLabel || '',
@@ -195,6 +238,7 @@ export function createSettingsPanel(deps) {
       langPref,
       cachedPushStatusText,
       upgradingHostMap,
+      installingAgyCliMap = {},
     } = state;
     const hosts = hubState.hosts || [];
     const shares = hubState.shares || [];
@@ -230,6 +274,7 @@ export function createSettingsPanel(deps) {
               const hostVer = String(h.bridgeState?.agentVersion || '');
               const isUpgrading = Boolean(upgradingHostMap[h.hostId] && Date.now() - upgradingHostMap[h.hostId] < 45000);
               const isOutdated = Boolean(isHostLive && !isRevoked && (!hostVer || deps.compareSemver(hostVer, hubVer) < 0));
+              const agyCliMeta = computeHostAgyCliMeta(h, installingAgyCliMap);
 
               const dotClass = isRevoked ? 'revoked' : isHostLive ? 'online' : 'offline';
               const metaParts = [];
@@ -241,6 +286,9 @@ export function createSettingsPanel(deps) {
                 if (h.isFeishuActive) metaParts.push('主控');
                 if (isUpgrading) metaParts.push('升级中');
                 else if (isOutdated) metaParts.push('可升级');
+                else if (agyCliMeta.installing) metaParts.push('装 CLI 中');
+                else if (agyCliMeta.needsCliInstall) metaParts.push('缺 agy CLI');
+                else if (agyCliMeta.needsCliLogin) metaParts.push('待登 CLI');
                 if (runCount > 0) metaParts.push(`${runCount} 运行中`);
                 else metaParts.push(`${sessCount} 会话`);
               }
@@ -256,7 +304,7 @@ export function createSettingsPanel(deps) {
                     <span class="ios-host-dot ${dotClass}"></span>
                     <span class="ios-host-name">${deps.esc(h.hostName)}</span>
                   </div>
-                  <div class="ios-host-meta ${isOutdated && !isUpgrading ? 'has-update' : ''}">${deps.esc(metaParts.slice(0, 2).join(' · '))}</div>
+                  <div class="ios-host-meta ${(isOutdated && !isUpgrading) || agyCliMeta.needsCliInstall || agyCliMeta.needsCliLogin ? 'has-update' : ''}">${deps.esc(metaParts.slice(0, 2).join(' · '))}</div>
                 </button>
               `;
             }).join('')}
@@ -451,7 +499,7 @@ export function createSettingsPanel(deps) {
   }
 
   function renderHostsListSubpageHtml(state) {
-    const { hubState, upgradingHostMap } = state;
+    const { hubState, upgradingHostMap, installingAgyCliMap = {} } = state;
     const hosts = hubState.hosts || [];
     const buildInfo = hubState.build || {};
     const hubVer = String(buildInfo.version || '0.9.21');
@@ -469,6 +517,7 @@ export function createSettingsPanel(deps) {
             const hostVer = String(h.bridgeState?.agentVersion || '');
             const isUpgrading = Boolean(upgradingHostMap[h.hostId] && Date.now() - upgradingHostMap[h.hostId] < 45000);
             const isOutdated = Boolean(isHostLive && !isRevoked && (!hostVer || deps.compareSemver(hostVer, hubVer) < 0));
+            const agyCliMeta = computeHostAgyCliMeta(h, installingAgyCliMap);
             const dotClass = isRevoked ? 'revoked' : isHostLive ? 'online' : 'offline';
             const sub = isHostLive
               ? `${tm.powerShort} · ${tm.netShort} · ${sessCount} 会话${runCount > 0 ? ` · ${runCount} 运行中` : ''}`
@@ -485,6 +534,8 @@ export function createSettingsPanel(deps) {
                     <span class="ios-host-list-name">${deps.esc(h.hostName)}</span>
                     ${h.isFeishuActive ? `<span class="settings-mini-tag tone-blue">主控</span>` : ''}
                     ${isRevoked ? `<span class="settings-mini-tag tone-red">已吊销</span>` : ''}
+                    ${isHostLive && !isRevoked && agyCliMeta.needsCliInstall ? `<span class="settings-mini-tag tone-amber">缺 agy CLI</span>` : ''}
+                    ${isHostLive && !isRevoked && agyCliMeta.needsCliLogin ? `<span class="settings-mini-tag tone-amber">待登 CLI</span>` : ''}
                   </div>
                   <div class="ios-host-list-sub">${deps.esc(sub)}</div>
                 </div>
@@ -520,7 +571,7 @@ export function createSettingsPanel(deps) {
   }
 
   function renderHostDetailSubpageHtml(state) {
-    const { hubState, upgradingHostMap } = state;
+    const { hubState, upgradingHostMap, installingAgyCliMap = {} } = state;
     const hosts = hubState.hosts || [];
     const buildInfo = hubState.build || {};
     const hubVer = String(buildInfo.version || '0.9.21');
@@ -546,6 +597,62 @@ export function createSettingsPanel(deps) {
     const hostVer = String(h.bridgeState?.agentVersion || '');
     const isUpgradingHost = Boolean(upgradingHostMap[h.hostId] && Date.now() - upgradingHostMap[h.hostId] < 45000);
     const isHostOutdated = Boolean(isHostLive && !isRevoked && (!hostVer || deps.compareSemver(hostVer, hubVer) < 0));
+    const agyCliMeta = computeHostAgyCliMeta(h, installingAgyCliMap);
+    const agyPillStatus = agyCliMeta.mode === 'connect-rpc'
+      ? 'RPC直连'
+      : agyCliMeta.mode === 'acp'
+        ? 'ACP直连'
+        : agyCliMeta.mode === 'acp-needs-login'
+          ? '待登录CLI'
+          : agyCliMeta.mode === 'desktop-only'
+            ? '受限模式 (缺CLI)'
+            : '远控+审批';
+    const agyCliCalloutHtml = (agyCliMeta.needsCliInstall || agyCliMeta.needsCliLogin)
+      ? `
+        <div class="ios-agy-cli-callout" data-agy-cli-card="${deps.esc(h.hostId)}">
+          <div style="font-weight:700;margin-bottom:4px;color:var(--amber);">
+            ${agyCliMeta.needsCliLogin ? '🔑 官方 agy CLI 尚未完成登录' : '⚠️ 建议安装官方 agy CLI 以解锁完整遥控'}
+          </div>
+          <div style="color:var(--text-secondary);margin-bottom:9px;">
+            ${agyCliMeta.needsCliLogin
+              ? '当前电脑已安装 agy CLI，但尚未登录 Google 账号。完成一次登录后即可解锁锁屏发消息、模型切换与手机审批。'
+              : '当前仅检测到 Antigravity 桌面端，发消息只能依赖窗口模拟粘贴：锁屏或关窗口发不出、易串到当前桌面窗口、切模型不生效且无手机审批弹窗。装好官方 agy CLI 即可自动切回直连模式。'}
+          </div>
+          ${agyCliMeta.installError ? `<div style="color:var(--red);margin-bottom:8px;font-size:11.5px;">上次安装提示：${deps.esc(agyCliMeta.installError)}</div>` : ''}
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+            ${agyCliMeta.needsCliLogin ? `
+              <button
+                type="button"
+                class="pill-action-btn primary"
+                onclick="loginHostAgyCli('${deps.escJsStr(h.hostId)}', '${deps.escJsStr(h.hostName)}')"
+                ${!isHostLive ? 'disabled' : ''}
+              >🔑 在电脑打开登录授权</button>
+            ` : agyCliMeta.needsAgentUpgradeFirst ? `
+              <button
+                type="button"
+                class="pill-action-btn primary"
+                onclick="upgradeHostTurbo('${deps.escJsStr(h.hostId)}', '${deps.escJsStr(h.hostName)}')"
+                ${!isHostLive || isUpgradingHost ? 'disabled' : ''}
+              >${isUpgradingHost ? '升级中…' : `🚀 先升级客户端 (v${deps.esc(hubVer)}) 再一键装 CLI`}</button>
+            ` : `
+              <button
+                type="button"
+                class="pill-action-btn primary"
+                onclick="installHostAgyCli('${deps.escJsStr(h.hostId)}', '${deps.escJsStr(h.hostName)}')"
+                ${!isHostLive || agyCliMeta.installing ? 'disabled' : ''}
+              >${agyCliMeta.installing ? '⏳ 正在电脑端安装 agy CLI…' : '⚡ 一键为此电脑安装 agy CLI'}</button>
+            `}
+          </div>
+        </div>
+      `
+      : (agyCliMeta.mode === 'connect-rpc' || agyCliMeta.mode === 'acp')
+        ? `
+          <div class="ios-agy-cli-callout ready" data-agy-cli-card="${deps.esc(h.hostId)}">
+            <span style="font-weight:650;color:var(--green);">✅ Antigravity 完整遥控已就绪</span>
+            <span style="color:var(--text-secondary);"> · ${agyCliMeta.mode === 'connect-rpc' ? 'Connect-RPC 实时直连' : '官方 agy ACP 协议直连'}${agyCliMeta.cliVersion ? ` (${deps.esc(agyCliMeta.cliVersion)})` : ''}</span>
+          </div>
+        `
+        : '';
     const versionBadgeHtml = isUpgradingHost
       ? `<span class="settings-status-pill tone-amber">升级重启中…</span>`
       : isHostOutdated
@@ -590,7 +697,7 @@ export function createSettingsPanel(deps) {
             <div style="font-size:11.5px;font-weight:650;color:var(--muted);margin-bottom:6px;">已检测到的 AI 工具</div>
             <div style="display:flex;flex-wrap:wrap;gap:6px;font-size:11.5px;">
               <span class="ios-harness-pill">${deps.renderHarnessBadgeHtml('dsh', 'inline')} DSH · 远控+审批</span>
-              <span class="ios-harness-pill">${deps.renderHarnessBadgeHtml('antigravity-ide', 'inline')} Antigravity · 远控+审批</span>
+              <span class="ios-harness-pill" ${agyCliMeta.needsCliInstall || agyCliMeta.needsCliLogin ? 'style="border-color:rgba(245,158,11,0.5);color:var(--amber);"' : ''}>${deps.renderHarnessBadgeHtml('antigravity-ide', 'inline')} Antigravity · ${agyPillStatus}</span>
               ${(h.bridgeState?.harnesses || []).map(ad => {
                 const canApproveNow = Boolean(ad.capabilities?.canApprove || ad.id === 'codex' || ad.id === 'workbuddy');
                 const isObserveAdapter = ad.capabilities?.canPrompt === false || ad.id === 'doubao';
@@ -608,6 +715,7 @@ export function createSettingsPanel(deps) {
                 `;
               }).join('')}
             </div>
+            ${agyCliCalloutHtml}
           </div>
 
           <div style="margin-top:12px;padding-top:10px;border-top:0.5px solid var(--hairline);font-size:11.5px;color:var(--muted);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px;">
