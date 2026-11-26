@@ -173,7 +173,13 @@ static esp_err_t handle_scan(httpd_req_t *req)
 
     static wifi_ap_record_t recs[PA_PORTAL_MAX_SCAN_APS];
     uint16_t count = PA_PORTAL_MAX_SCAN_APS;
-    if (esp_wifi_scan_start(&sc, true) != ESP_OK) {
+    esp_err_t serr = esp_wifi_scan_start(&sc, true);
+    if (serr != ESP_OK) {
+        vTaskDelay(pdMS_TO_TICKS(200));
+        serr = esp_wifi_scan_start(&sc, true);
+    }
+    if (serr != ESP_OK) {
+        ESP_LOGW(TAG, "[PA-PORTAL] Wi-Fi scan failed: %s", esp_err_to_name(serr));
         count = 0;
     } else if (esp_wifi_scan_get_ap_records(&count, recs) != ESP_OK) {
         count = 0;
@@ -184,7 +190,7 @@ static esp_err_t handle_scan(httpd_req_t *req)
     bool first = true;
     for (uint16_t i = 0; i < count; i++) {
         const char *ssid = (const char *)recs[i].ssid;
-        if (!ssid[0]) continue;
+        if (!ssid[0] || strcmp(ssid, PA_PORTAL_AP_SSID) == 0) continue;
         // Skip duplicate SSIDs
         bool dup = false;
         for (uint16_t j = 0; j < i; j++) {
@@ -295,31 +301,16 @@ static void dns_captive_task(void *arg)
     }
 
     static uint8_t pkt[512];
+    static const uint8_t ap_ip[4] = { 192, 168, 4, 1 };
     while (s_active) {
         struct sockaddr_in client = { 0 };
         socklen_t clen = sizeof(client);
         int len = recvfrom(sock, pkt, sizeof(pkt) - 16, 0, (struct sockaddr *)&client, &clen);
         if (len < 12) continue;
 
-        // Build minimal standard A-record response pointing to 192.168.4.1
-        pkt[2] = 0x81; // QR=1, RD=1
-        pkt[3] = 0x80; // RA=1, RCODE=0
-        pkt[6] = pkt[4]; // ANCOUNT = QDCOUNT
-        pkt[7] = pkt[5];
-        pkt[8] = 0; pkt[9] = 0;
-        pkt[10] = 0; pkt[11] = 0;
-
-        static const uint8_t ans[16] = {
-            0xC0, 0x0C,             // Name pointer to offset 12
-            0x00, 0x01,             // TYPE = A
-            0x00, 0x01,             // CLASS = IN
-            0x00, 0x00, 0x00, 0x3C, // TTL = 60s
-            0x00, 0x04,             // RDLENGTH = 4
-            192, 168, 4, 1          // 192.168.4.1
-        };
-        if (len + 16 <= (int)sizeof(pkt)) {
-            memcpy(pkt + len, ans, 16);
-            (void)sendto(sock, pkt, (size_t)(len + 16), 0, (struct sockaddr *)&client, clen);
+        size_t rlen = pa_dns_build_captive_reply(pkt, (size_t)len, sizeof(pkt), ap_ip);
+        if (rlen > 0) {
+            (void)sendto(sock, pkt, rlen, 0, (struct sockaddr *)&client, clen);
         }
     }
 
@@ -364,6 +355,10 @@ bool pa_portal_start(pa_net_config_t *cfg,
         s_events_registered = true;
     }
 
+    // Pause STA reconnect loop BEFORE entering APSTA so single-radio ESP32-C3 holds channel 1 steadily
+    // (prevents phone disconnects and ESP_ERR_WIFI_STATE failures during /scan!)
+    pa_net_wifi_pause_for_portal();
+
     wifi_config_t ap_cfg = { 0 };
     size_t slen = strlen(PA_PORTAL_AP_SSID);
     memcpy(ap_cfg.ap.ssid, PA_PORTAL_AP_SSID, slen);
@@ -374,21 +369,24 @@ bool pa_portal_start(pa_net_config_t *cfg,
 
     if (esp_wifi_set_mode(WIFI_MODE_APSTA) != ESP_OK) {
         ESP_LOGE(TAG, "Failed to switch to APSTA mode");
+        pa_net_set_sta_autoreconnect(true);
         return false;
     }
     if (esp_wifi_set_config(WIFI_IF_AP, &ap_cfg) != ESP_OK) {
         ESP_LOGE(TAG, "Failed to apply SoftAP config");
         (void)esp_wifi_set_mode(WIFI_MODE_STA);
+        pa_net_set_sta_autoreconnect(true);
         return false;
     }
 
     httpd_config_t hcfg = HTTPD_DEFAULT_CONFIG();
-    hcfg.max_open_sockets = 4;
+    hcfg.max_open_sockets = 5;
     hcfg.lru_purge_enable = true;
     hcfg.stack_size = 5120;
     hcfg.max_uri_handlers = 8;
     hcfg.recv_wait_timeout = 5;
     hcfg.send_wait_timeout = 5;
+    hcfg.uri_match_fn = httpd_uri_match_wildcard;
 
     if (httpd_start(&s_httpd, &hcfg) != ESP_OK) {
         ESP_LOGE(TAG, "httpd_start failed");
@@ -429,6 +427,7 @@ void pa_portal_stop(void)
         vTaskDelay(pdMS_TO_TICKS(50));
     }
     (void)esp_wifi_set_mode(WIFI_MODE_STA);
+    pa_net_set_sta_autoreconnect(true);
     ESP_LOGI(TAG, "[PA-PORTAL] SoftAP stopped, back to pure STA mode");
     log_heap("after_portal_stop");
 }

@@ -22,6 +22,7 @@ static const char *TAG = "pa_net";
 #define PA_HTTP_RESP_BUF_SIZE 6144
 
 static volatile bool s_wifi_connected = false;
+static volatile bool s_sta_autoreconnect = true;
 static char s_ip_str[24] = { 0 };
 static char s_resp_buf[PA_HTTP_RESP_BUF_SIZE];
 
@@ -102,16 +103,34 @@ bool pa_net_save_hub_config(pa_net_config_t *cfg, const char *hub_url, const cha
 static void apply_sta_config_and_connect(const pa_net_config_t *cfg)
 {
     if (!cfg || !cfg->wifi_ssid[0]) return;
+    s_sta_autoreconnect = true;
     wifi_config_t wcfg;
     memset(&wcfg, 0, sizeof(wcfg));
     size_t ssid_len = strnlen(cfg->wifi_ssid, sizeof(wcfg.sta.ssid) - 1);
     memcpy(wcfg.sta.ssid, cfg->wifi_ssid, ssid_len);
     size_t pass_len = strnlen(cfg->wifi_pass, sizeof(wcfg.sta.password) - 1);
     memcpy(wcfg.sta.password, cfg->wifi_pass, pass_len);
-    wcfg.sta.threshold.authmode = cfg->wifi_pass[0] ? WIFI_AUTH_WPA2_PSK : WIFI_AUTH_OPEN;
+    // Accept WPA1/WPA2/WPA3-transition routers & iPhone hotspots cleanly
+    wcfg.sta.threshold.authmode = cfg->wifi_pass[0] ? WIFI_AUTH_WPA_PSK : WIFI_AUTH_OPEN;
+    wcfg.sta.pmf_cfg.capable = true;
+    wcfg.sta.pmf_cfg.required = false;
     (void)esp_wifi_disconnect();
     (void)esp_wifi_set_config(WIFI_IF_STA, &wcfg);
     (void)esp_wifi_connect();
+}
+
+void pa_net_set_sta_autoreconnect(bool enabled)
+{
+    s_sta_autoreconnect = enabled;
+}
+
+void pa_net_wifi_pause_for_portal(void)
+{
+    // Stop STA channel-hopping so single-radio ESP32-C3 SoftAP stays rock-solid on ch1 & /scan succeeds
+    s_sta_autoreconnect = false;
+    s_wifi_connected = false;
+    s_ip_str[0] = '\0';
+    (void)esp_wifi_disconnect();
 }
 
 void pa_net_wifi_reconnect(const pa_net_config_t *cfg)
@@ -178,11 +197,11 @@ bool pa_net_save_portal_config(pa_net_config_t *cfg,
         nvs_close(h);
     }
 
-    ESP_LOGI(TAG, "[PA] Portal config saved: ssid=%s hub=%s token=%s",
+    ESP_LOGI(TAG, "[PA] Portal config saved to NVS: ssid=%s hub=%s token=%s",
              cfg->wifi_ssid, cfg->hub_url, cfg->hub_token[0] ? "<set>" : "<empty>");
-    if (wifi_changed) {
-        apply_sta_config_and_connect(cfg);
-    }
+    // NOTE: Do NOT call apply_sta_config_and_connect here; caller sends HTTP response first
+    // so SoftAP radio stays locked on channel 1 until the phone receives SAVE_OK_HTML!
+    (void)wifi_changed;
     return true;
 }
 
@@ -190,13 +209,19 @@ static void on_wifi_event(void *arg, esp_event_base_t base, int32_t id, void *da
 {
     (void)arg;
     if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
-        ESP_LOGI(TAG, "Wi-Fi STA started, connecting...");
-        (void)esp_wifi_connect();
+        if (s_sta_autoreconnect) {
+            ESP_LOGI(TAG, "Wi-Fi STA started, connecting...");
+            (void)esp_wifi_connect();
+        }
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
         s_wifi_connected = false;
         s_ip_str[0] = '\0';
-        ESP_LOGW(TAG, "Wi-Fi disconnected, retrying...");
-        (void)esp_wifi_connect();
+        if (s_sta_autoreconnect) {
+            ESP_LOGW(TAG, "Wi-Fi disconnected, retrying...");
+            (void)esp_wifi_connect();
+        } else {
+            ESP_LOGI(TAG, "Wi-Fi STA paused for SoftAP portal");
+        }
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         const ip_event_got_ip_t *ev = (const ip_event_got_ip_t *)data;
         snprintf(s_ip_str, sizeof(s_ip_str), IPSTR, IP2STR(&ev->ip_info.ip));
@@ -238,7 +263,9 @@ bool pa_net_wifi_start(const pa_net_config_t *cfg)
     memcpy(wcfg.sta.ssid, cfg->wifi_ssid, ssid_len);
     size_t pass_len = strnlen(cfg->wifi_pass, sizeof(wcfg.sta.password) - 1);
     memcpy(wcfg.sta.password, cfg->wifi_pass, pass_len);
-    wcfg.sta.threshold.authmode = cfg->wifi_pass[0] ? WIFI_AUTH_WPA2_PSK : WIFI_AUTH_OPEN;
+    wcfg.sta.threshold.authmode = cfg->wifi_pass[0] ? WIFI_AUTH_WPA_PSK : WIFI_AUTH_OPEN;
+    wcfg.sta.pmf_cfg.capable = true;
+    wcfg.sta.pmf_cfg.required = false;
 
     if (esp_wifi_set_storage(WIFI_STORAGE_RAM) != ESP_OK) return false;
     if (esp_wifi_set_mode(WIFI_MODE_STA) != ESP_OK) return false;

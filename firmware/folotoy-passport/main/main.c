@@ -47,7 +47,6 @@ static QueueHandle_t s_btn_queue;
 static QueueHandle_t s_net_queue;
 static QueueHandle_t s_chime_queue;
 static bool s_battery_ok = false;
-static volatile bool s_portal_manual_hold = false;
 static volatile uint32_t s_portal_saved_at_ms = 0;
 
 static uint32_t now_ms(void)
@@ -89,8 +88,8 @@ static void on_portal_phone(bool connected)
 
 static void on_portal_saved(void)
 {
-    s_portal_manual_hold = false;
-    s_portal_saved_at_ms = now_ms();
+    uint32_t ts = now_ms();
+    s_portal_saved_at_ms = ts ? ts : 1u;
     if (xSemaphoreTake(s_state_mux, pdMS_TO_TICKS(100)) == pdTRUE) {
         if (s_state.demo_mode) {
             memset(&s_state.digest, 0, sizeof(s_state.digest));
@@ -104,9 +103,8 @@ static void on_portal_saved(void)
     (void)xQueueSend(s_net_queue, &job, 0);
 }
 
-static void start_setup_portal_now(bool manual)
+static void start_setup_portal_now(void)
 {
-    s_portal_manual_hold = manual;
     s_portal_saved_at_ms = 0;
     if (pa_portal_start(&s_cfg, on_portal_phone, on_portal_saved)) {
         if (xSemaphoreTake(s_state_mux, pdMS_TO_TICKS(100)) == pdTRUE) {
@@ -119,7 +117,7 @@ static void start_setup_portal_now(bool manual)
 
 static void stop_setup_portal_now(void)
 {
-    s_portal_manual_hold = false;
+    s_portal_saved_at_ms = 0;
     pa_portal_stop();
     if (xSemaphoreTake(s_state_mux, pdMS_TO_TICKS(100)) == pdTRUE) {
         pa_state_exit_setup(&s_state, now_ms());
@@ -305,7 +303,7 @@ static void net_worker_task(void *arg)
         net_job_t job;
         while (xQueueReceive(s_net_queue, &job, pdMS_TO_TICKS(80)) == pdTRUE) {
             if (job.dispatch.cmd == PA_CMD_ENTER_SETUP) {
-                start_setup_portal_now(true);
+                start_setup_portal_now();
                 continue;
             }
             if (job.dispatch.cmd == PA_CMD_EXIT_SETUP) {
@@ -392,15 +390,19 @@ static void net_worker_task(void *arg)
             last_bat_ms = t;
         }
 
-        // 3. Auto-teardown SoftAP once Wi-Fi connects (wait 2s after /save so phone gets HTML reply)
-        bool wifi_ok = pa_net_is_wifi_connected();
-        if (wifi_ok && pa_portal_is_active() && !s_portal_manual_hold) {
-            if (s_portal_saved_at_ms == 0 || (t - s_portal_saved_at_ms) >= 2000) {
-                stop_setup_portal_now();
-                last_rev[0] = '\0';
-                last_poll_ms = 0;
-            }
+        // 3. Cleanly tear down SoftAP 900ms after phone /save (gives TCP ACK time to deliver SAVE_OK_HTML),
+        //    then re-enable STA reconnect so right password joins in ~3s and wrong password auto-reopens SoftAP in 14s!
+        if (pa_portal_is_active() && s_portal_saved_at_ms != 0 && (t - s_portal_saved_at_ms) >= 900u) {
+            s_portal_saved_at_ms = 0;
+            stop_setup_portal_now();
+            pa_net_wifi_reconnect(&s_cfg);
+            boot_ms = now_ms();
+            auto_portal_triggered = false;
+            last_rev[0] = '\0';
+            last_poll_ms = 0;
         }
+
+        bool wifi_ok = pa_net_is_wifi_connected();
 
         // Skip Hub polling while in Offline Demo Mode or holding SoftAP open
         bool skip_poll = false;
@@ -419,7 +421,7 @@ static void net_worker_task(void *arg)
                 auto_portal_triggered = true;
                 ESP_LOGI(TAG, "[PA] Wi-Fi not connected after %lums -> auto-starting SoftAP portal",
                          (unsigned long)grace_ms);
-                start_setup_portal_now(false);
+                start_setup_portal_now();
                 continue;
             }
             if (last_poll_ms != 0 && (t - last_poll_ms) < 1200u) continue;

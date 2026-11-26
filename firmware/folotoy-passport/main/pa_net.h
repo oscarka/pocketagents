@@ -26,6 +26,8 @@ bool pa_net_save_portal_config(pa_net_config_t *cfg,
                                const char *hub_url, const char *hub_token, bool keep_token_if_empty);
 bool pa_net_wifi_start(const pa_net_config_t *cfg);
 void pa_net_wifi_reconnect(const pa_net_config_t *cfg);
+void pa_net_set_sta_autoreconnect(bool enabled);
+void pa_net_wifi_pause_for_portal(void);
 bool pa_net_is_wifi_connected(void);
 void pa_net_get_ip_str(char *out, size_t out_size);
 

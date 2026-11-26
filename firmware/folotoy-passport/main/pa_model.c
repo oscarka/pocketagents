@@ -801,6 +801,56 @@ bool pa_is_pair_code(const char *token_or_code)
     return true;
 }
 
+size_t pa_dns_build_captive_reply(uint8_t *pkt, size_t req_len, size_t buf_size, const uint8_t ip4[4])
+{
+    if (!pkt || !ip4 || req_len < 12 || req_len > buf_size) return 0;
+    uint16_t qdcount = (uint16_t)((pkt[4] << 8) | pkt[5]);
+    if (qdcount == 0) return 0;
+
+    // Walk QNAME labels starting at offset 12 to find exact end of Question #1 (strips EDNS0 OPT)
+    size_t pos = 12;
+    int hops = 0;
+    while (pos < req_len && hops < 64) {
+        uint8_t lab = pkt[pos];
+        if (lab == 0) {
+            pos++; // consume null terminator
+            break;
+        }
+        if ((lab & 0xC0u) != 0) return 0; // compressed QNAME in query is invalid
+        pos += 1 + (size_t)lab;
+        hops++;
+    }
+    if (pos + 4 > req_len) return 0; // missing QTYPE (2) + QCLASS (2)
+
+    uint16_t qtype = (uint16_t)((pkt[pos] << 8) | pkt[pos + 1]);
+    size_t q_end = pos + 4;
+
+    // Standard DNS response flags: QR=1, AA=1, copy RD bit, RA=1, RCODE=0
+    uint8_t rd = pkt[2] & 0x01u;
+    pkt[2] = (uint8_t)(0x84u | rd);
+    pkt[3] = 0x80u;
+    pkt[4] = 0; pkt[5] = 1; // QDCOUNT = 1
+    pkt[8] = 0; pkt[9] = 0; // NSCOUNT = 0
+    pkt[10] = 0; pkt[11] = 0; // ARCOUNT = 0 (drop trailing EDNS0 OPT cleanly)
+
+    bool want_a = (qtype == 1u || qtype == 255u); // A or ANY
+    if (!want_a) {
+        pkt[6] = 0; pkt[7] = 0; // ANCOUNT = 0 (NOERROR empty answer for AAAA/HTTPS)
+        return q_end;
+    }
+
+    if (q_end + 16 > buf_size) return 0;
+    pkt[6] = 0; pkt[7] = 1; // ANCOUNT = 1
+    uint8_t *ans = pkt + q_end;
+    ans[0] = 0xC0; ans[1] = 0x0C; // Name pointer -> offset 12
+    ans[2] = 0x00; ans[3] = 0x01; // TYPE = A
+    ans[4] = 0x00; ans[5] = 0x01; // CLASS = IN
+    ans[6] = 0x00; ans[7] = 0x00; ans[8] = 0x00; ans[9] = 0x3C; // TTL = 60s
+    ans[10] = 0x00; ans[11] = 0x04; // RDLENGTH = 4
+    ans[12] = ip4[0]; ans[13] = ip4[1]; ans[14] = ip4[2]; ans[15] = ip4[3];
+    return q_end + 16;
+}
+
 void pa_state_enter_setup(pa_state_t *st, const char *ap_ssid, uint32_t now_ms)
 {
     if (!st) return;

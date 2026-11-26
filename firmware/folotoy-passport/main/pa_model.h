@@ -178,10 +178,14 @@ bool pa_parse_action_result_json(const char *json, pa_action_result_t *out);
 bool pa_parse_voice_result_json(const char *json, pa_voice_result_t *out);
 bool pa_parse_pair_exchange_json(const char *json, char *out_token, size_t out_size);
 
-// SoftAP HTML form URL decoding & 6-digit pairing code detection
+// SoftAP HTML form URL decoding, 6-char pairing code detection & RFC-safe DNS captive responder
 size_t pa_url_decode(const char *src, size_t src_len, char *dst, size_t dst_size);
 bool pa_parse_form_field(const char *body, const char *key, char *out, size_t out_size);
 bool pa_is_pair_code(const char *token_or_code);
+// Build in-place captive-portal DNS reply (strips EDNS0 OPT records cleanly; answers A/ANY with ip4,
+// and returns NOERROR empty answer for AAAA/HTTPS so iOS/Android fall back to IPv4 immediately).
+// Returns reply byte length, or 0 if query is malformed.
+size_t pa_dns_build_captive_reply(uint8_t *pkt, size_t req_len, size_t buf_size, const uint8_t ip4[4]);
 
 // Apply freshly fetched digest to state. Returns PA_CHIME_NEW_APPROVAL if a new approval arrived.
 pa_chime_t pa_state_apply_digest(pa_state_t *st, const pa_digest_t *d, uint32_t now_ms);

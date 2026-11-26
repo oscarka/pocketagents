@@ -232,11 +232,62 @@ static void test_softap_form_pair_code_and_demo_mode(void)
     assert(st.screen == PA_SCREEN_DASHBOARD);
 }
 
+static void test_dns_captive_portal_edns0(void)
+{
+    const uint8_t ip4[4] = { 192, 168, 4, 1 };
+
+    // 1. Modern iOS/Android A query for "captive.apple.com" WITH trailing 11-byte EDNS0 OPT record (ARCOUNT=1)
+    uint8_t pkt[128];
+    memset(pkt, 0, sizeof(pkt));
+    // Header: ID=0x1234, RD=1, QDCOUNT=1, ARCOUNT=1
+    pkt[0] = 0x12; pkt[1] = 0x34;
+    pkt[2] = 0x01; pkt[3] = 0x00;
+    pkt[4] = 0x00; pkt[5] = 0x01;
+    pkt[10] = 0x00; pkt[11] = 0x01;
+    // Question: \7captive\5apple\3com\0 + QTYPE=A(1) + QCLASS=IN(1)
+    const uint8_t q[] = {
+        7, 'c', 'a', 'p', 't', 'i', 'v', 'e',
+        5, 'a', 'p', 'p', 'l', 'e',
+        3, 'c', 'o', 'm', 0,
+        0x00, 0x01, 0x00, 0x01
+    };
+    memcpy(pkt + 12, q, sizeof(q));
+    // Trailing EDNS0 OPT RR (root=0, type=41, payload=4096, ext=0, rdlen=0)
+    const uint8_t opt[] = { 0x00, 0x00, 0x29, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+    size_t q_end = 12 + sizeof(q);
+    memcpy(pkt + q_end, opt, sizeof(opt));
+
+    size_t rlen = pa_dns_build_captive_reply(pkt, q_end + sizeof(opt), sizeof(pkt), ip4);
+    assert(rlen == q_end + 16); // EDNS0 cleanly stripped, A answer starts immediately at q_end!
+    assert(pkt[6] == 0 && pkt[7] == 1);   // ANCOUNT = 1
+    assert(pkt[10] == 0 && pkt[11] == 0); // ARCOUNT = 0
+    assert(pkt[q_end] == 0xC0 && pkt[q_end + 1] == 0x0C);
+    assert(pkt[q_end + 12] == 192 && pkt[q_end + 13] == 168 && pkt[q_end + 14] == 4 && pkt[q_end + 15] == 1);
+
+    // 2. AAAA (type 28) query with EDNS0 -> must return NOERROR empty answer (ANCOUNT=0) so iOS falls back to IPv4
+    uint8_t pkt6[128];
+    memcpy(pkt6, pkt, q_end + sizeof(opt));
+    pkt6[2] = 0x01; pkt6[3] = 0x00;
+    pkt6[10] = 0x00; pkt6[11] = 0x01;
+    pkt6[q_end - 3] = 0x1C; // QTYPE = 28 (AAAA)
+    size_t rlen6 = pa_dns_build_captive_reply(pkt6, q_end + sizeof(opt), sizeof(pkt6), ip4);
+    assert(rlen6 == q_end);
+    assert(pkt6[6] == 0 && pkt6[7] == 0); // ANCOUNT = 0
+    assert(pkt6[10] == 0 && pkt6[11] == 0);
+
+    // 3. Truncated / malformed query must safely return 0
+    uint8_t bad[16] = { 0 };
+    bad[5] = 1;
+    bad[12] = 40; // claims 40-byte label in 16-byte packet!
+    assert(pa_dns_build_captive_reply(bad, sizeof(bad), sizeof(bad), ip4) == 0);
+}
+
 int main(void)
 {
     test_digest_parsing_and_auto_popup();
     test_l2_pin_guard_and_ptt_voice();
     test_softap_form_pair_code_and_demo_mode();
+    test_dns_captive_portal_edns0();
     printf("ALL pa_model C host tests PASSED!\n");
     return 0;
 }
