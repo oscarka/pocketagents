@@ -844,6 +844,9 @@ export function parseAntigravityTranscript(jsonlText, {
   let lastActivity = mtimeMs
   let lastUserInputAt = 0
   let lastConclusionAt = 0
+  let transcriptModel = ''
+  let hasWorkflowFinishPrompt = false
+  let hasFinishToolCall = false
   let pendingApproval = null
   let trailingError = null
   const pendingBackgroundTaskIds = new Set()
@@ -927,6 +930,13 @@ export function parseAntigravityTranscript(jsonlText, {
     }
 
     if (stepType === 'USER_INPUT') {
+      if (
+        transcript.length === 0
+        && typeof step.content === 'string'
+        && /When you are done, call the finish tool with your result\.\s*(?:<\/USER_REQUEST>|$)/i.test(step.content)
+      ) {
+        hasWorkflowFinishPrompt = true
+      }
       const { userText, inferredWs, boundWs: stepBoundWs } = parseAntigravityUserInput(step.content)
       if (stepBoundWs && !boundWs) {
         boundWs = stepBoundWs
@@ -994,6 +1004,12 @@ export function parseAntigravityTranscript(jsonlText, {
             fullStepContent += `\n\n![${basename(cleanUri)}](${cleanUri})`
           }
         }
+      }
+      if (typeof step.model === 'string' && step.model.trim()) {
+        transcriptModel = step.model.trim()
+      }
+      if (Array.isArray(fullStepToolCalls) && fullStepToolCalls.some(tc => String(tc?.name || '').trim() === 'finish')) {
+        hasFinishToolCall = true
       }
       const rawContent = fullStepContent.trim()
       const rawThinking = String(step.thinking ?? '').trim()
@@ -1327,11 +1343,13 @@ export function parseAntigravityTranscript(jsonlText, {
     || detectedParentConvId
     || '',
   ).trim()
+  const isWorkflowWorker = Boolean(hasWorkflowFinishPrompt || hasFinishToolCall)
   const isSubagent = Boolean(
     parentConversationId
     || liveTrajectoryMeta?.subagentSpec
     || Number(liveTrajectoryMeta?.nestingDepth) > 0
-    || (!firstUserMsg && firstStep.type === 'SYSTEM_MESSAGE'),
+    || (!firstUserMsg && firstStep.type === 'SYSTEM_MESSAGE')
+    || isWorkflowWorker,
   )
 
   const effectiveBlockedSubagents = []
@@ -1707,7 +1725,7 @@ export function parseAntigravityTranscript(jsonlText, {
     ? `:${activeSubagents.map(s => `${String(s.id).slice(0, 6)}-${s.stepCount}`).join(',')}`
     : ''
   const sessionRev = `${transcript.length}:${lastStepIndex}:${status}:${turnState}:${pendingApproval?.code || ''}${activeSubRev}`
-  const resolvedModel = resolveAntigravityModelLabel(liveModel)
+  const resolvedModel = resolveAntigravityModelLabel(liveModel || transcriptModel)
 
   return {
     id: sessionId,
@@ -2806,30 +2824,85 @@ function buildCleanAgentApiEnv(hub) {
 }
 
 const DEFAULT_AGY_MODELS = [
-  { value: 'MODEL_PLACEHOLDER_M417', label: 'Gemini 4 Argon (High)' },
-  { value: 'MODEL_PLACEHOLDER_M418', label: 'Gemini 4 Argon (Medium)' },
-  { value: 'MODEL_PLACEHOLDER_M419', label: 'Gemini 4 Argon (Low)' },
-  { value: 'MODEL_PLACEHOLDER_M318', label: 'Gemini 3.8 Flash (High)' },
-  { value: 'MODEL_PLACEHOLDER_M319', label: 'Gemini 3.8 Flash (Medium)' },
-  { value: 'MODEL_PLACEHOLDER_M320', label: 'Gemini 3.8 Flash (Low)' },
-  { value: 'MODEL_PLACEHOLDER_M402', label: 'Claude Opus 5.5 (High)' },
-  { value: 'MODEL_PLACEHOLDER_M401', label: 'Claude Opus 5.5 (Medium)' },
-  { value: 'MODEL_PLACEHOLDER_M400', label: 'Claude Opus 5.5 (Low)' },
-  { value: 'MODEL_PLACEHOLDER_M405', label: 'Claude Sonnet 5.5 (High)' },
-  { value: 'MODEL_PLACEHOLDER_M404', label: 'Claude Sonnet 5.5 (Medium)' },
-  { value: 'MODEL_PLACEHOLDER_M403', label: 'Claude Sonnet 5.5 (Low)' },
-  { value: 'MODEL_OPENAI_GPT_OSS_120B_MEDIUM', label: 'GPT-OSS 120B (Medium)' },
+  { value: 'MODEL_PLACEHOLDER_M532', alias: 'gemini-4-neon-high', label: 'Gemini 4 Neon (High)' },
+  { value: 'MODEL_PLACEHOLDER_M535', alias: 'gemini-4-neon-xhigh', label: 'Gemini 4 Neon (XHigh)' },
+  { value: 'MODEL_PLACEHOLDER_M533', alias: 'gemini-4-neon-medium', label: 'Gemini 4 Neon (Medium)' },
+  { value: 'MODEL_PLACEHOLDER_M534', alias: 'gemini-4-neon-low', label: 'Gemini 4 Neon (Low)' },
+  { value: 'MODEL_PLACEHOLDER_M427', alias: 'gemini-4-carbon-high', label: 'Gemini 4 Carbon (High)' },
+  { value: 'MODEL_PLACEHOLDER_M437', alias: 'gemini-4-carbon-medium', label: 'Gemini 4 Carbon (Medium)' },
+  { value: 'MODEL_PLACEHOLDER_M438', alias: 'gemini-4-carbon-low', label: 'Gemini 4 Carbon (Low)' },
+  { value: 'MODEL_PLACEHOLDER_M417', alias: 'gemini-4-argon-high', label: 'Gemini 4 Argon (High)' },
+  { value: 'MODEL_PLACEHOLDER_M418', alias: 'gemini-4-argon-medium', label: 'Gemini 4 Argon (Medium)' },
+  { value: 'MODEL_PLACEHOLDER_M419', alias: 'gemini-4-argon-low', label: 'Gemini 4 Argon (Low)' },
+  { value: 'MODEL_PLACEHOLDER_M525', alias: 'gemini-4-hydrogen-high', label: 'Gemini 4 Hydrogen (High)' },
+  { value: 'MODEL_PLACEHOLDER_M528', alias: 'gemini-4-hydrogen-xhigh', label: 'Gemini 4 Hydrogen (XHigh)' },
+  { value: 'MODEL_PLACEHOLDER_M526', alias: 'gemini-4-hydrogen-medium', label: 'Gemini 4 Hydrogen (Medium)' },
+  { value: 'MODEL_PLACEHOLDER_M527', alias: 'gemini-4-hydrogen-low', label: 'Gemini 4 Hydrogen (Low)' },
+  { value: 'MODEL_PLACEHOLDER_M537', alias: 'gemini-pro-orchestrator-neon', label: 'Orchestrator (Neon)' },
+  { value: 'MODEL_PLACEHOLDER_M667', alias: 'gemini-pro-orchestrator', label: 'Orchestrator (Carbon)' },
+  { value: 'MODEL_PLACEHOLDER_M681', alias: 'gemini-pro-orchestrator-argon', label: 'Orchestrator (Argon)' },
+  { value: 'MODEL_PLACEHOLDER_M318', alias: 'gemini-3.8-flash-high', label: 'Gemini 3.8 Flash (High)' },
+  { value: 'MODEL_PLACEHOLDER_M319', alias: 'gemini-3.8-flash-medium', label: 'Gemini 3.8 Flash (Medium)' },
+  { value: 'MODEL_PLACEHOLDER_M320', alias: 'gemini-3.8-flash-low', label: 'Gemini 3.8 Flash (Low)' },
+  { value: 'MODEL_PLACEHOLDER_M402', alias: 'claude-opus-5-5-high', label: 'Claude Opus 5.5 (High)' },
+  { value: 'MODEL_PLACEHOLDER_M401', alias: 'claude-opus-5-5-medium', label: 'Claude Opus 5.5 (Medium)' },
+  { value: 'MODEL_PLACEHOLDER_M400', alias: 'claude-opus-5-5-low', label: 'Claude Opus 5.5 (Low)' },
+  { value: 'MODEL_PLACEHOLDER_M405', alias: 'claude-sonnet-5-5-high', label: 'Claude Sonnet 5.5 (High)' },
+  { value: 'MODEL_PLACEHOLDER_M404', alias: 'claude-sonnet-5-5-medium', label: 'Claude Sonnet 5.5 (Medium)' },
+  { value: 'MODEL_PLACEHOLDER_M403', alias: 'claude-sonnet-5-5-low', label: 'Claude Sonnet 5.5 (Low)' },
+  { value: 'MODEL_OPENAI_GPT_OSS_120B_MEDIUM', alias: 'gpt-oss-120b-medium', label: 'GPT-OSS 120B (Medium)' },
 ]
+
+const AGY_ALIAS_TO_DEFAULT = new Map(
+  DEFAULT_AGY_MODELS
+    .filter(m => m.alias)
+    .map(m => [m.alias.toLowerCase(), m]),
+)
 
 let cachedAgyModelCatalog = null
 let cachedAgyModelCatalogAt = 0
+let cachedAgyCliModelProbeAt = 0
+
+export function invalidateAntigravityModelCatalogCache() {
+  cachedAgyModelCatalog = null
+  cachedAgyModelCatalogAt = 0
+  cachedAgyCliModelProbeAt = 0
+}
+
+export function parseAgyModelsCliOutput(stdout = '') {
+  const models = []
+  const seen = new Set()
+  const rawLines = String(stdout || '').split('\n')
+  for (const rawLine of rawLines) {
+    // Strip ANSI escape sequences and carriage-return spinner prefixes
+    const clean = rawLine
+      .replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '')
+      .split('\r')
+      .pop()
+      .trim()
+    if (!clean) continue
+    if (/^(?:Usage:|Error:|Flags:|[IWEF]\d{4}\s)/i.test(clean)) continue
+    const match = clean.match(/^([a-z0-9][a-z0-9._-]{2,80})\s{2,}(.+?)$/)
+    if (!match) continue
+    const slug = match[1].trim()
+    const label = match[2].trim()
+    if (!slug || !label || /^(?:-h|--help)$/i.test(slug)) continue
+    const known = AGY_ALIAS_TO_DEFAULT.get(slug.toLowerCase())
+    const value = known ? known.value : slug
+    if (seen.has(value)) continue
+    seen.add(value)
+    models.push({ value, label })
+  }
+  return models
+}
 
 export function resolveAntigravityModelLabel(rawModel = '') {
   const clean = String(rawModel || '').trim()
   if (!clean) return ''
+  const lower = clean.toLowerCase()
   const pool = cachedAgyModelCatalog?.models || DEFAULT_AGY_MODELS
-  const hit = pool.find(m => m.value === clean || m.label === clean)
-    || DEFAULT_AGY_MODELS.find(m => m.value === clean || m.label === clean)
+  const hit = pool.find(m => m.value === clean || m.label === clean || (m.alias && m.alias.toLowerCase() === lower))
+    || DEFAULT_AGY_MODELS.find(m => m.value === clean || m.label === clean || (m.alias && m.alias.toLowerCase() === lower))
   if (hit) return hit.label
   return clean.startsWith('MODEL_PLACEHOLDER_') ? '' : clean
 }
@@ -2837,9 +2910,12 @@ export function resolveAntigravityModelLabel(rawModel = '') {
 export async function discoverAntigravityModelCatalog({
   execImpl = execFileAsync,
   fetchImpl = globalThis.fetch,
+  agyBin = '',
+  forceRefresh = false,
 } = {}) {
   const now = Date.now()
-  if (cachedAgyModelCatalog && now - cachedAgyModelCatalogAt < 60_000) {
+  const isDefaultRuntime = execImpl === execFileAsync && fetchImpl === globalThis.fetch && !agyBin
+  if (!forceRefresh && isDefaultRuntime && cachedAgyModelCatalog && now - cachedAgyModelCatalogAt < 60_000) {
     return cachedAgyModelCatalog
   }
   if (typeof fetchImpl === 'function') {
@@ -2880,23 +2956,63 @@ export async function discoverAntigravityModelCatalog({
               const defaultEntry =
                 (overrideDefaultVal && models.find(m => m.value === overrideDefaultVal))
                 || models[0]
-              cachedAgyModelCatalog = {
+              const result = {
                 defaultModel: defaultEntry.value,
                 defaultLabel: defaultEntry.label,
                 models,
               }
-              cachedAgyModelCatalogAt = now
-              return cachedAgyModelCatalog
+              if (isDefaultRuntime) {
+                cachedAgyModelCatalog = result
+                cachedAgyModelCatalogAt = now
+              }
+              return result
             }
           }
         } catch { }
       }
     } catch { }
   }
+  // Secondary official path: query `agy models` CLI when standalone Antigravity.app 2.0 does not expose a `--hub` RPC port.
+  // Cooldown-protected (10 min) so hosts without `agy` CLI never spawn repeated subprocesses.
+  if (typeof execImpl === 'function' && (!isDefaultRuntime || forceRefresh || now - cachedAgyCliModelProbeAt >= 600_000)) {
+    if (isDefaultRuntime) {
+      cachedAgyCliModelProbeAt = now
+    }
+    try {
+      let cli = agyBin
+      if (!cli) {
+        const home = homedir()
+        for (const cand of [process.env.ANTIGRAVITY_AGENTAPI_EXE, join(home, '.gemini', 'bin', 'agy'), join(home, '.local', 'bin', 'agy')].filter(Boolean)) {
+          try {
+            await access(cand)
+            cli = cand
+            break
+          } catch { }
+        }
+      }
+      if (cli) {
+        const { stdout } = await execImpl(cli, ['models'], { timeout: 12_000 })
+        const cliModels = parseAgyModelsCliOutput(stdout)
+        if (cliModels.length > 0) {
+          const result = {
+            defaultModel: cliModels[0].value,
+            defaultLabel: cliModels[0].label,
+            models: cliModels,
+          }
+          if (isDefaultRuntime) {
+            cachedAgyModelCatalog = result
+            cachedAgyModelCatalogAt = now
+          }
+          return result
+        }
+      }
+    } catch { }
+  }
+  const fallbackModels = DEFAULT_AGY_MODELS.map(({ value, label }) => ({ value, label }))
   return {
-    defaultModel: DEFAULT_AGY_MODELS[0].value,
-    defaultLabel: DEFAULT_AGY_MODELS[0].label,
-    models: DEFAULT_AGY_MODELS,
+    defaultModel: fallbackModels[0].value,
+    defaultLabel: fallbackModels[0].label,
+    models: fallbackModels,
   }
 }
 
@@ -2939,7 +3055,7 @@ async function resolveCascadeConfigForHub(hub, rawConvId, fetchImpl, peerTraject
     }
   }
 
-  let planModel = cleanRequestedModel || 'MODEL_PLACEHOLDER_M417'
+  let planModel = cleanRequestedModel || 'MODEL_PLACEHOLDER_M532'
   if (!cleanRequestedModel) {
     try {
       const resp = await fetchImpl(

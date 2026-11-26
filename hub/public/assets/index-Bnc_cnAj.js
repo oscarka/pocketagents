@@ -13781,58 +13781,142 @@ function initHubController() {
 	}
 	const FALLBACK_MODEL_CATALOG = {
 		"antigravity-ide": {
-			defaultLabel: "Gemini 4 Argon (High)",
+			defaultModel: "MODEL_PLACEHOLDER_M532",
+			defaultLabel: "Gemini 4 Neon (High)",
 			models: [
 				{
+					value: "MODEL_PLACEHOLDER_M532",
+					alias: "gemini-4-neon-high",
+					label: "Gemini 4 Neon (High)"
+				},
+				{
+					value: "MODEL_PLACEHOLDER_M535",
+					alias: "gemini-4-neon-xhigh",
+					label: "Gemini 4 Neon (XHigh)"
+				},
+				{
+					value: "MODEL_PLACEHOLDER_M533",
+					alias: "gemini-4-neon-medium",
+					label: "Gemini 4 Neon (Medium)"
+				},
+				{
+					value: "MODEL_PLACEHOLDER_M534",
+					alias: "gemini-4-neon-low",
+					label: "Gemini 4 Neon (Low)"
+				},
+				{
+					value: "MODEL_PLACEHOLDER_M427",
+					alias: "gemini-4-carbon-high",
+					label: "Gemini 4 Carbon (High)"
+				},
+				{
+					value: "MODEL_PLACEHOLDER_M437",
+					alias: "gemini-4-carbon-medium",
+					label: "Gemini 4 Carbon (Medium)"
+				},
+				{
+					value: "MODEL_PLACEHOLDER_M438",
+					alias: "gemini-4-carbon-low",
+					label: "Gemini 4 Carbon (Low)"
+				},
+				{
 					value: "MODEL_PLACEHOLDER_M417",
+					alias: "gemini-4-argon-high",
 					label: "Gemini 4 Argon (High)"
 				},
 				{
 					value: "MODEL_PLACEHOLDER_M418",
+					alias: "gemini-4-argon-medium",
 					label: "Gemini 4 Argon (Medium)"
 				},
 				{
 					value: "MODEL_PLACEHOLDER_M419",
+					alias: "gemini-4-argon-low",
 					label: "Gemini 4 Argon (Low)"
 				},
 				{
+					value: "MODEL_PLACEHOLDER_M525",
+					alias: "gemini-4-hydrogen-high",
+					label: "Gemini 4 Hydrogen (High)"
+				},
+				{
+					value: "MODEL_PLACEHOLDER_M528",
+					alias: "gemini-4-hydrogen-xhigh",
+					label: "Gemini 4 Hydrogen (XHigh)"
+				},
+				{
+					value: "MODEL_PLACEHOLDER_M526",
+					alias: "gemini-4-hydrogen-medium",
+					label: "Gemini 4 Hydrogen (Medium)"
+				},
+				{
+					value: "MODEL_PLACEHOLDER_M527",
+					alias: "gemini-4-hydrogen-low",
+					label: "Gemini 4 Hydrogen (Low)"
+				},
+				{
+					value: "MODEL_PLACEHOLDER_M537",
+					alias: "gemini-pro-orchestrator-neon",
+					label: "Orchestrator (Neon)"
+				},
+				{
+					value: "MODEL_PLACEHOLDER_M667",
+					alias: "gemini-pro-orchestrator",
+					label: "Orchestrator (Carbon)"
+				},
+				{
+					value: "MODEL_PLACEHOLDER_M681",
+					alias: "gemini-pro-orchestrator-argon",
+					label: "Orchestrator (Argon)"
+				},
+				{
 					value: "MODEL_PLACEHOLDER_M318",
+					alias: "gemini-3.8-flash-high",
 					label: "Gemini 3.8 Flash (High)"
 				},
 				{
 					value: "MODEL_PLACEHOLDER_M319",
+					alias: "gemini-3.8-flash-medium",
 					label: "Gemini 3.8 Flash (Medium)"
 				},
 				{
 					value: "MODEL_PLACEHOLDER_M320",
+					alias: "gemini-3.8-flash-low",
 					label: "Gemini 3.8 Flash (Low)"
 				},
 				{
 					value: "MODEL_PLACEHOLDER_M402",
+					alias: "claude-opus-5-5-high",
 					label: "Claude Opus 5.5 (High)"
 				},
 				{
 					value: "MODEL_PLACEHOLDER_M401",
+					alias: "claude-opus-5-5-medium",
 					label: "Claude Opus 5.5 (Medium)"
 				},
 				{
 					value: "MODEL_PLACEHOLDER_M400",
+					alias: "claude-opus-5-5-low",
 					label: "Claude Opus 5.5 (Low)"
 				},
 				{
 					value: "MODEL_PLACEHOLDER_M405",
+					alias: "claude-sonnet-5-5-high",
 					label: "Claude Sonnet 5.5 (High)"
 				},
 				{
 					value: "MODEL_PLACEHOLDER_M404",
+					alias: "claude-sonnet-5-5-medium",
 					label: "Claude Sonnet 5.5 (Medium)"
 				},
 				{
 					value: "MODEL_PLACEHOLDER_M403",
+					alias: "claude-sonnet-5-5-low",
 					label: "Claude Sonnet 5.5 (Low)"
 				},
 				{
 					value: "MODEL_OPENAI_GPT_OSS_120B_MEDIUM",
+					alias: "gpt-oss-120b-medium",
 					label: "GPT-OSS 120B (Medium)"
 				}
 			]
@@ -13934,21 +14018,31 @@ function initHubController() {
 			]
 		}
 	};
+	function isLegacyStaticAgyFallback(remoteCat, host) {
+		const models = remoteCat?.models;
+		if (!Array.isArray(models) || models.length !== 13) return false;
+		if (models[0]?.value !== "MODEL_PLACEHOLDER_M417" || models[6]?.value !== "MODEL_PLACEHOLDER_M402" || models[12]?.value !== "MODEL_OPENAI_GPT_OSS_120B_MEDIUM") return false;
+		return !(host?.bridgeState?.tasks || []).filter((t) => t.harness === "antigravity-ide").some((t) => Boolean(t.hasLiveSummary));
+	}
 	function getHarnessModelCatalog(host, harness = "dsh") {
 		const hKey = harness || "dsh";
 		const remoteCat = host?.bridgeState?.modelCatalog?.[hKey];
 		const fallback = FALLBACK_MODEL_CATALOG[hKey] || FALLBACK_MODEL_CATALOG.dsh;
-		if (remoteCat && Array.isArray(remoteCat.models) && remoteCat.models.length > 0) return {
-			defaultModel: remoteCat.defaultModel || "",
-			defaultLabel: remoteCat.defaultLabel || fallback.defaultLabel,
-			models: remoteCat.models
-		};
+		if (remoteCat && Array.isArray(remoteCat.models) && remoteCat.models.length > 0) {
+			if (hKey === "antigravity-ide" && isLegacyStaticAgyFallback(remoteCat, host)) return fallback;
+			return {
+				defaultModel: remoteCat.defaultModel || "",
+				defaultLabel: remoteCat.defaultLabel || fallback.defaultLabel,
+				models: remoteCat.models
+			};
+		}
 		return fallback;
 	}
 	function resolveModelShortLabel(catalog, modelVal, sessionModel = "") {
 		const raw = String(modelVal || sessionModel || "").trim();
 		if (raw) {
-			const hit = (catalog?.models || []).find((m) => m.value === raw || m.label === raw || m.value.endsWith(`::${raw}`)) || (FALLBACK_MODEL_CATALOG["antigravity-ide"]?.models || []).find((m) => m.value === raw || m.label === raw);
+			const lower = raw.toLowerCase();
+			const hit = (catalog?.models || []).find((m) => m.value === raw || m.label === raw || m.alias && m.alias.toLowerCase() === lower || m.value.endsWith(`::${raw}`)) || (FALLBACK_MODEL_CATALOG["antigravity-ide"]?.models || []).find((m) => m.value === raw || m.label === raw || m.alias && m.alias.toLowerCase() === lower);
 			if (hit) return hit.label;
 			const cleanParts = raw.split("::");
 			if (cleanParts.length >= 2) return cleanParts[1] + (cleanParts[2] ? ` (${cleanParts[2]})` : "");

@@ -17,6 +17,7 @@ import {
   invalidateAntigravityPluginsCache,
   isAntigravityIdeSessionId,
   loadAntigravityIdeSessions,
+  resolveAntigravityModelLabel,
   setAntigravityConversationPinned,
   setAntigravityConversationTitle,
   toggleAntigravityPlugin,
@@ -1227,7 +1228,9 @@ export class HubAgent {
         for (const t of bridgeState.tasks || []) {
           const override = this.sessionModelOverrides.get(t.id)
           if (override) {
-            t.model = override
+            t.model = t.harness === 'antigravity-ide'
+              ? (resolveAntigravityModelLabel(override) || override)
+              : override
           } else if (!t.model && t.harness === 'dsh' && dshCatalog?.defaultLabel) {
             t.model = dshCatalog.defaultLabel
           } else if (!t.model && t.harness === 'antigravity-ide' && agyCatalog?.defaultLabel) {
