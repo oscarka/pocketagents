@@ -1000,7 +1000,7 @@ export async function detectAntigravityHostStatus({
  * Trigger official Google Antigravity CLI (`agy`) installation on the host machine.
  * Uses strictly the official installer documented at https://antigravity.google/docs/getting-started.md.
  */
-async function detectMacSystemProxyEnv(execImpl = execFileAsync) {
+export async function detectMacSystemProxyEnv(execImpl = execFileAsync) {
   if (process.platform !== 'darwin' || typeof execImpl !== 'function') return {}
   if (process.env.HTTPS_PROXY || process.env.https_proxy || process.env.ALL_PROXY || process.env.all_proxy) {
     return {}

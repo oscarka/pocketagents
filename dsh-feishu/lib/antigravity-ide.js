@@ -6,7 +6,7 @@ import { homedir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { promisify } from 'node:util'
 import { fastScanBrainDirs, sendNativeKeystroke } from '../../dsh-turbo/index.js'
-import { findOfficialAgyCliPath } from './antigravity-acp.js'
+import { detectMacSystemProxyEnv, findOfficialAgyCliPath } from './antigravity-acp.js'
 import { cleanForChat, redactText } from './redact.js'
 
 const execFileAsync = promisify(execFile)
@@ -4755,8 +4755,22 @@ async function ensureEphemeralRevertHub({
 
     const csrfToken = randomUUID()
     const address = `127.0.0.1:${port}`
+    // Inherit working proxy (or macOS scutil system proxy on LaunchAgent hosts) so `agy --hub`
+    // can reach Google Cloud (`GetCascadeModelConfigData` / `RevertToCascadeStep`) behind GFW,
+    // while keeping 127.0.0.1/localhost strictly direct via NO_PROXY.
+    const inheritedProxy = {}
+    for (const k of ['HTTPS_PROXY', 'https_proxy', 'HTTP_PROXY', 'http_proxy', 'ALL_PROXY', 'all_proxy']) {
+      if (process.env[k]) inheritedProxy[k] = process.env[k]
+    }
+    const macProxy = Object.keys(inheritedProxy).length === 0 && process.platform === 'darwin' && spawnImpl === spawn
+      ? await detectMacSystemProxyEnv(execImpl).catch(() => ({}))
+      : {}
     const env = {
       ...withUtf8Env(buildCleanAgentApiEnv(null)),
+      ...inheritedProxy,
+      ...macProxy,
+      NO_PROXY: '127.0.0.1,localhost,::1',
+      no_proxy: '127.0.0.1,localhost,::1',
       // Required in headless macOS LaunchAgent environments (which lack IDE-inherited env vars):
       // without AGY_ENABLE_HUB=1, `agy --hub` falls back to launching the interactive TUI and exits with code=0 on non-TTY stdin.
       AGY_ENABLE_HUB: '1',
@@ -4862,6 +4876,19 @@ async function ensureEphemeralRevertHub({
       idleTimer: null,
     }
     touchEphemeralRevertHubIdleTimer(idleMs)
+    // Best-effort non-blocking pre-warm of Google Cloud model catalog while user views preview sheet,
+    // so subsequent RevertToCascadeStep completes in <200ms without cold model-config latency.
+    if (spawnImpl === spawn && typeof fetchImpl === 'function') {
+      void fetchImpl(
+        `http://${address}/exa.language_server_pb.LanguageServerService/GetCascadeModelConfigData`,
+        {
+          method: 'POST',
+          headers,
+          body: '{}',
+          ...(typeof AbortSignal?.timeout === 'function' ? { signal: AbortSignal.timeout(8000) } : {}),
+        },
+      ).catch(() => {})
+    }
     return {
       hub: {
         address,
@@ -4877,6 +4904,96 @@ async function ensureEphemeralRevertHub({
     return await ephemeralRevertHubStarting
   } finally {
     ephemeralRevertHubStarting = null
+  }
+}
+
+function withRpcTimeout(ms) {
+  return typeof AbortSignal?.timeout === 'function' ? { signal: AbortSignal.timeout(ms) } : {}
+}
+
+/**
+ * Fast overrideConfig builder for `RevertToCascadeStep`.
+ * Uses lightweight `GetCascadeModelConfigData` (~46KB, ~14ms warm) instead of downloading the entire
+ * conversation via `GetCascadeTrajectorySteps({ stepOffset: 0 })` (which can exceed 80–300MB on
+ * long media/Blender trajectories and cause mobile revert timeouts).
+ */
+async function resolveFastRevertOverrideConfig(hub, rawConvId, stepIndex, fetchImpl) {
+  const headers = {
+    'Content-Type': 'application/json',
+    'x-codeium-csrf-token': hub.csrfToken,
+  }
+  let planModel = ''
+  try {
+    const resp = await fetchImpl(
+      `http://${hub.address}/exa.language_server_pb.LanguageServerService/GetCascadeModelConfigData`,
+      {
+        method: 'POST',
+        headers,
+        body: '{}',
+        ...withRpcTimeout(6500),
+      },
+    )
+    if (resp?.ok) {
+      const data = await resp.json().catch(() => ({}))
+      planModel = String(
+        data?.defaultOverrideModelConfig?.modelOrAlias?.model
+        || data?.clientModelConfigs?.[0]?.modelOrAlias?.model
+        || '',
+      ).trim()
+    }
+  } catch {
+    // fall through to step-level fallback
+  }
+
+  if (!planModel) {
+    try {
+      const resp = await fetchImpl(
+        `http://${hub.address}/exa.language_server_pb.LanguageServerService/GetCascadeTrajectorySteps`,
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ cascadeId: rawConvId, stepOffset: Math.max(0, Number(stepIndex) || 0) }),
+          ...withRpcTimeout(4500),
+        },
+      )
+      if (resp?.ok) {
+        const data = await resp.json().catch(() => ({}))
+        const steps = Array.isArray(data?.steps) ? data.steps : []
+        for (let i = steps.length - 1; i >= 0; i -= 1) {
+          const uc = steps[i]?.userInput?.userConfig
+          if (uc?.plannerConfig?.planModel) {
+            return uc
+          }
+        }
+      }
+    } catch {
+      // fall through
+    }
+  }
+
+  if (!planModel) return undefined
+  return {
+    plannerConfig: {
+      planModel,
+      requestedModel: { model: planModel },
+      useAiCredits: true,
+      supportsLatexRendering: true,
+      toolConfig: {
+        runCommand: {
+          autoCommandConfig: {
+            autoExecutionPolicy: 'CASCADE_COMMANDS_AUTO_EXECUTION_AUTO',
+          },
+        },
+        antigravityBrowser: {
+          enableBrowserSubagentWebview: false,
+        },
+        notifyUser: {},
+      },
+    },
+    executorConfig: {
+      useCoreDirect: true,
+    },
+    conversationHistoryConfig: {},
   }
 }
 
@@ -4936,6 +5053,7 @@ export async function previewAntigravityRevert(
   const orderedHubs = await probeHubsForTrajectory(hubs, rawConvId, fetchImpl)
   let lastError = ''
   for (const hub of orderedHubs) {
+    let stage = 'LoadTrajectory'
     try {
       const headers = {
         'Content-Type': 'application/json',
@@ -4948,15 +5066,11 @@ export async function previewAntigravityRevert(
             method: 'POST',
             headers,
             body: JSON.stringify({ cascadeId: rawConvId }),
+            ...withRpcTimeout(8000),
           },
         ).catch(() => {})
       }
-      const { cascadeConfig } = await resolveCascadeConfigForHub(
-        hub,
-        rawConvId,
-        fetchImpl,
-        hub.trajectoryIds || [],
-      ).catch(() => ({ cascadeConfig: undefined }))
+      stage = 'GetRevertPreview'
       const resp = await fetchImpl(
         `http://${hub.address}/exa.language_server_pb.LanguageServerService/GetRevertPreview`,
         {
@@ -4965,8 +5079,8 @@ export async function previewAntigravityRevert(
           body: JSON.stringify({
             cascadeId: rawConvId,
             stepIndex: cleanStepIndex,
-            ...(cascadeConfig ? { overrideConfig: cascadeConfig } : {}),
           }),
+          ...withRpcTimeout(8000),
         },
       )
       const data = await resp.json().catch(() => ({}))
@@ -4986,9 +5100,9 @@ export async function previewAntigravityRevert(
           fileCount: files.length,
         }
       }
-      lastError = String(data?.message || data?.error || `HTTP ${resp.status}`).trim()
+      lastError = `${stage}: ${String(data?.message || data?.error || `HTTP ${resp.status}`).trim()}`
     } catch (err) {
-      lastError = err?.message || String(err)
+      lastError = `${stage}: ${err?.message || String(err)}`
     }
   }
   return {
@@ -5057,6 +5171,7 @@ export async function revertAntigravityToStep(
   const orderedHubs = await probeHubsForTrajectory(hubs, rawConvId, fetchImpl)
   let lastError = ''
   for (const hub of orderedHubs) {
+    let stage = 'LoadTrajectory'
     try {
       const headers = {
         'Content-Type': 'application/json',
@@ -5069,26 +5184,31 @@ export async function revertAntigravityToStep(
             method: 'POST',
             headers,
             body: JSON.stringify({ cascadeId: rawConvId }),
+            ...withRpcTimeout(8000),
           },
         ).catch(() => {})
       }
       // Best-effort cancel any in-flight invocation before reverting
+      stage = 'CancelCascadeInvocation'
       await fetchImpl(
         `http://${hub.address}/exa.language_server_pb.LanguageServerService/CancelCascadeInvocation`,
         {
           method: 'POST',
           headers,
           body: JSON.stringify({ cascadeId: rawConvId }),
+          ...withRpcTimeout(3000),
         },
       ).catch(() => {})
 
-      const { cascadeConfig } = await resolveCascadeConfigForHub(
+      stage = 'GetCascadeModelConfigData'
+      const overrideConfig = await resolveFastRevertOverrideConfig(
         hub,
         rawConvId,
+        cleanStepIndex,
         fetchImpl,
-        hub.trajectoryIds || [],
-      ).catch(() => ({ cascadeConfig: undefined }))
+      ).catch(() => undefined)
 
+      stage = 'RevertToCascadeStep'
       const resp = await fetchImpl(
         `http://${hub.address}/exa.language_server_pb.LanguageServerService/RevertToCascadeStep`,
         {
@@ -5097,9 +5217,10 @@ export async function revertAntigravityToStep(
           body: JSON.stringify({
             cascadeId: rawConvId,
             stepIndex: cleanStepIndex,
-            ...(cascadeConfig ? { overrideConfig: cascadeConfig } : {}),
+            ...(overrideConfig ? { overrideConfig } : {}),
             conversationOnly: onlyChat,
           }),
+          ...withRpcTimeout(14000),
         },
       )
       const data = await resp.json().catch(() => ({}))
@@ -5126,9 +5247,9 @@ export async function revertAntigravityToStep(
               : '✅ 已撤回对话并还原代码',
         }
       }
-      lastError = String(data?.message || data?.error || `HTTP ${resp.status}`).trim()
+      lastError = `${stage}: ${String(data?.message || data?.error || `HTTP ${resp.status}`).trim()}`
     } catch (err) {
-      lastError = err?.message || String(err)
+      lastError = `${stage}: ${err?.message || String(err)}`
     }
   }
   return {

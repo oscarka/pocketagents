@@ -364,6 +364,15 @@ test('standalone Antigravity 2.0 / ACP host falls back to on-demand ephemeral ag
       if (url.endsWith('/LoadTrajectory') || url.endsWith('/CancelCascadeInvocation')) {
         return { ok: true, status: 200, json: async () => ({}) }
       }
+      if (url.endsWith('/GetCascadeModelConfigData')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            defaultOverrideModelConfig: { modelOrAlias: { model: 'MODEL_PLACEHOLDER_M532' } },
+          }),
+        }
+      }
       if (url.endsWith('/GetRevertPreview')) {
         return {
           ok: true,
@@ -405,6 +414,12 @@ test('standalone Antigravity 2.0 / ACP host falls back to on-demand ephemeral ag
     assert.ok(spawnedCalls[0].args.includes('--hub'))
     assert.ok(spawnedCalls[0].args.includes('--app_data_dir=antigravity'))
     assert.equal(spawnedCalls[0].env.AGY_ENABLE_HUB, '1', 'must set AGY_ENABLE_HUB=1 for headless macOS LaunchAgent')
+    assert.match(String(spawnedCalls[0].env.NO_PROXY || ''), /127\.0\.0\.1/)
+    assert.equal(
+      rpcCalls.some(c => c.url.endsWith('/GetCascadeTrajectorySteps')),
+      false,
+      'preview must not download huge full-trajectory GetCascadeTrajectorySteps payload',
+    )
 
     // 2. Normal IDE hub discovery MUST ignore our ephemeral revert hub PID & address
     const discovered = await discoverAntigravityHubInstances({ execImpl: emptyPsExec })
@@ -426,6 +441,13 @@ test('standalone Antigravity 2.0 / ACP host falls back to on-demand ephemeral ag
     assert.equal(revRes.engine, 'agy-ephemeral-hub')
     assert.equal(revRes.revertedCount, 1)
     assert.equal(spawnedCalls.length, 1, 'should reuse warm ephemeral hub without respawning')
+    const revRpc = rpcCalls.find(c => c.url.endsWith('/RevertToCascadeStep'))
+    assert.equal(revRpc?.body?.overrideConfig?.plannerConfig?.planModel, 'MODEL_PLACEHOLDER_M532')
+    assert.equal(
+      rpcCalls.some(c => c.url.endsWith('/GetCascadeTrajectorySteps')),
+      false,
+      'revert must use lightweight GetCascadeModelConfigData instead of 80MB GetCascadeTrajectorySteps',
+    )
 
     // 4. Immediately after revert (before transcript.jsonl is appended), ACP-only loadAntigravityIdeSessions trims step >= 4
     //    AND keeps hasLiveSummary === false so host stays truthfully in ACP mode
