@@ -8,6 +8,10 @@ import {
   bindWalkMediaSession,
   canNativeAutoListenNow,
   claimNativeBackgroundWakeForCloudTts,
+  claimNativeBriefingKey,
+  delegateNativeBackgroundBriefing,
+  drainNativeSpokenBriefings,
+  hasNativeZeroWebViewBackgroundBriefing,
   isNativeIosShell,
   notifyNativeBackgroundWakeDone,
   playEarcon,
@@ -71,6 +75,33 @@ const DEFAULT_CONFIG: VoiceConfigState = {
     tts: { provider: 'native', credId: '', model: 'browser-speech-synthesis', voice: 'system-default', format: 'mp3', speed: 1.0 },
   },
 };
+
+function getVoiceAuthToken(): string {
+  try {
+    const fn = (window as any).__dshGetVoiceAuthToken;
+    if (typeof fn === 'function') {
+      const tok = String(fn() || '').trim();
+      if (tok) return tok;
+    }
+    return String(localStorage.getItem('dsh_hub_token') || '').trim();
+  } catch {
+    return '';
+  }
+}
+
+function buildWalkNativeExtraOpts(cfg: VoiceConfigState | null | undefined) {
+  const origin = (() => {
+    try { return typeof window !== 'undefined' && window.location ? String(window.location.origin || '') : ''; } catch { return ''; }
+  })();
+  return {
+    apiOrigin: origin,
+    authToken: getVoiceAuthToken(),
+    profileId: String(cfg?.activeProfile?.id || ''),
+    briefingDetail: String(cfg?.prefs?.briefingDetail || 'detailed'),
+    speechRate: Number(cfg?.prefs?.speechRate) || 1.0,
+    autoPlayWalkReplies: cfg?.prefs?.autoPlayWalkReplies !== false,
+  };
+}
 
 function apiCall(path: string, options: RequestInit = {}) {
   const bridge = (window as any).__dshVoiceApiFetch;
@@ -318,6 +349,67 @@ export function VoiceCopilotSheets() {
       setLabOpen(false);
     };
     (window as any).__dshRefreshVoiceConfig = () => refreshConfig(true);
+    const applyNativeSpokenBriefings = (items: any[]) => {
+      if (!Array.isArray(items) || items.length === 0) return true;
+      for (const item of items) {
+        if (!item || typeof item !== 'object') continue;
+        const kind = String(item.kind || '');
+        const hostId = String(item.hostId || '');
+        const code = String(item.code || '').trim().toUpperCase();
+        const agentId = String(item.agentId || '');
+        const spokenReply = String(item.spokenReply || '').trim();
+        const spokenAt = Number(item.spokenAt) || Date.now();
+        if (kind === 'approval' && hostId && code) {
+          const k = `${hostId}:${code}`;
+          seenApprovalsRef.current.add(k);
+          briefingQueueRef.current = briefingQueueRef.current.filter(
+            q => !(q.kind === 'approval' && q.hostId === hostId && String(q.code || '').toUpperCase() === code),
+          );
+        } else if (hostId && agentId) {
+          recentPushAgentsRef.current.set(`${hostId}:${agentId}`, spokenAt);
+          briefingQueueRef.current = briefingQueueRef.current.filter(
+            q => !(q.kind === 'completed' && q.hostId === hostId && q.agentId === agentId),
+          );
+        }
+        if (item.focusedApproval && typeof item.focusedApproval === 'object') {
+          focusedApprovalRef.current = item.focusedApproval;
+        }
+        if (item.focusedSession?.hostId && item.focusedSession?.agentId) {
+          focusedSessionRef.current = {
+            hostId: String(item.focusedSession.hostId),
+            agentId: String(item.focusedSession.agentId),
+            title: String(item.focusedSession.title || ''),
+            announcedAt: spokenAt,
+          };
+        } else if (kind === 'completed' && hostId && agentId) {
+          focusedSessionRef.current = {
+            hostId,
+            agentId,
+            announcedAt: spokenAt,
+          };
+        }
+        if (spokenReply) {
+          setLastReplyText(spokenReply);
+          setLastActionBadge(
+            kind === 'approval'
+              ? `🔔 ${item.approval?.slot ? `${item.approval.slot}号` : '后台已播'}待审批 ${code}`
+              : `✅ 后台已播报${item.summarizedByBrain ? ' · AI 摘要' : ''}`,
+          );
+        }
+      }
+      return true;
+    };
+    (window as any).__dshOnNativeBackgroundBriefingsSynced = applyNativeSpokenBriefings;
+    const onVisSyncNative = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        void drainNativeSpokenBriefings().then(items => {
+          if (items.length > 0) applyNativeSpokenBriefings(items);
+        });
+      }
+    };
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', onVisSyncNative);
+    }
     (window as any).__dshOnBackgroundPushWake = (payload?: any) => {
       if (!walkOpenRef.current) {
         notifyNativeBackgroundWakeDone();
@@ -561,6 +653,9 @@ export function VoiceCopilotSheets() {
 
     return () => {
       clearTimeout(initTimer);
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', onVisSyncNative);
+      }
       playerRef.current?.stop();
       recorderRef.current?.stop();
       void setWalkBackgroundKeepAlive(false, false, false);
@@ -615,7 +710,12 @@ export function VoiceCopilotSheets() {
     if (duckMusic) {
       setWalkAudioSessionMode('ambient');
     }
-    void setWalkBackgroundKeepAlive(true, duckMusic, keepMicWarm, proactiveBriefing, walkUsesCloudTts);
+    void setWalkBackgroundKeepAlive(true, duckMusic, keepMicWarm, proactiveBriefing, walkUsesCloudTts, buildWalkNativeExtraOpts(configRef.current));
+    void drainNativeSpokenBriefings().then(items => {
+      if (items.length > 0 && typeof (window as any).__dshOnNativeBackgroundBriefingsSynced === 'function') {
+        (window as any).__dshOnNativeBackgroundBriefingsSynced(items);
+      }
+    });
 
     void wakeRef.current?.enable().then(ok => setWakeLocked(ok));
     const unbindMedia = bindWalkMediaSession({
@@ -634,17 +734,21 @@ export function VoiceCopilotSheets() {
     };
   }, [walkOpen]);
 
-  // Keep native iOS background keepalive options in sync when user toggles footer switches inside Walk Mode
+  // Keep native iOS background keepalive options in sync when user toggles footer switches or config hydrates
   useEffect(() => {
     if (!walkOpen) return;
-    void setWalkBackgroundKeepAlive(
-      true,
-      config.prefs.duckMusicMode !== false,
-      Boolean(config.prefs.autoListenAfterBriefing),
-      config.prefs.proactiveBriefing || 'approvals',
-      (config.activeProfile?.tts?.provider || 'native') !== 'native',
-    );
-  }, [walkOpen, config.prefs.duckMusicMode, config.prefs.autoListenAfterBriefing, config.prefs.proactiveBriefing, config.activeProfile?.tts?.provider]);
+    void setWalkBackgroundKeepAlive(true, config.prefs.duckMusicMode !== false, Boolean(config.prefs.autoListenAfterBriefing), config.prefs.proactiveBriefing || 'approvals', (config.activeProfile?.tts?.provider || 'native') !== 'native', buildWalkNativeExtraOpts(config));
+  }, [
+    walkOpen,
+    config.prefs.duckMusicMode,
+    config.prefs.autoListenAfterBriefing,
+    config.prefs.proactiveBriefing,
+    config.prefs.briefingDetail,
+    config.prefs.speechRate,
+    config.prefs.autoPlayWalkReplies,
+    config.activeProfile?.id,
+    config.activeProfile?.tts?.provider,
+  ]);
 
   const drainBriefingQueue = async () => {
     if (drainingBriefingRef.current || !walkOpenRef.current) return;
@@ -656,6 +760,34 @@ export function VoiceCopilotSheets() {
     try {
       const cfg = configRef.current;
       const duckMusic = cfg.prefs.duckMusicMode !== false;
+      const dedupeKey = nextItem.kind === 'approval' && nextItem.code
+        ? `approval:${nextItem.hostId}:${String(nextItem.code).toUpperCase()}`
+        : `completed:${nextItem.hostId}:${nextItem.agentId || ''}`;
+
+      // When backgrounded inside PocketAgentsShell v1.1.5+, hand off directly to Native Swift
+      // URLSession + AVAudioPlayer so iOS WKWebView suspension can NEVER freeze mid-briefing!
+      const isHidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
+      if (isHidden && hasNativeZeroWebViewBackgroundBriefing()) {
+        const delegated = await delegateNativeBackgroundBriefing({
+          kind: nextItem.kind,
+          hostId: nextItem.hostId,
+          hostName: nextItem.hostName,
+          code: nextItem.code || '',
+          agentId: nextItem.agentId || '',
+          title: nextItem.title || '',
+          dedupeKey,
+        });
+        if (delegated) {
+          return;
+        }
+      }
+
+      // Atomic cross-layer dedupe: skip if Native Swift already spoke this exact approval/task while backgrounded
+      const claimed = await claimNativeBriefingKey(dedupeKey);
+      if (!claimed) {
+        return;
+      }
+
       const res = await apiCall('/api/voice/briefing', {
         method: 'POST',
         body: JSON.stringify({

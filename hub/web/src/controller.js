@@ -11285,6 +11285,7 @@ export function initHubController() {
 
   function hasActiveUserInputInProgress() {
     if (typeof document === 'undefined') return false;
+    if (typeof window !== 'undefined' && (window.__dshWalkModeOpen || window.__dshWalkKeepAliveActive)) return true;
     if (inFlightCommandCount > 0) return true;
     if (imagePickerActiveUntil > Date.now()) return true;
     if (isVoiceRecording()) return true;
@@ -11407,7 +11408,8 @@ export function initHubController() {
   function triggerAppShellUpgradeReload(nextBuild) {
     if (!nextBuild || nextBuild === 'dev') return;
     pendingTargetUiBuild = nextBuild;
-    if (!hasActiveUserInputInProgress()) {
+    const walkBusy = typeof window !== 'undefined' && Boolean(window.__dshWalkModeOpen || window.__dshWalkKeepAliveActive);
+    if (!hasActiveUserInputInProgress() && !walkBusy) {
       reloadWithFreshAppShell(nextBuild);
       return;
     }
@@ -11423,7 +11425,7 @@ export function initHubController() {
         const staleBootMismatch = bootedFromHashedBundle;
         initialUiBuild = incomingBuild;
         const isHidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
-        const walkKeepAlive = typeof window !== 'undefined' && Boolean(window.__dshWalkKeepAliveActive);
+        const walkKeepAlive = typeof window !== 'undefined' && Boolean(window.__dshWalkKeepAliveActive || window.__dshWalkModeOpen);
         if ((staleBootMismatch || isHidden) && !hasActiveUserInputInProgress() && !walkKeepAlive) {
           reloadWithFreshAppShell(incomingBuild);
           return;
@@ -12316,6 +12318,7 @@ export function initHubController() {
     applyHubState,
     getHubState: () => hubState,
     __dshVoiceApiFetch: apiFetch,
+    __dshGetVoiceAuthToken: () => getToken(),
     fetchState,
     connectSSE,
     renderHarnessBadgeHtml,
@@ -12681,7 +12684,7 @@ export function initHubController() {
         document.visibilityState === 'hidden' &&
         pendingBackgroundUiReload &&
         !hasActiveUserInputInProgress() &&
-        !(typeof window !== 'undefined' && window.__dshWalkKeepAliveActive)
+        !(typeof window !== 'undefined' && (window.__dshWalkKeepAliveActive || window.__dshWalkModeOpen))
       ) {
         pendingBackgroundUiReload = false;
         reloadWithFreshAppShell(pendingTargetUiBuild);

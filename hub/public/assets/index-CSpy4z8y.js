@@ -2585,14 +2585,50 @@ function isNativeIosShell() {
 		return false;
 	}
 }
-async function setWalkBackgroundKeepAlive(active, duckMusic = true, keepMicWarm = false, proactiveBriefing = "approvals", useCloudTts = false) {
+async function setWalkBackgroundKeepAlive(active, duckMusic = true, keepMicWarm = false, proactiveBriefing = "approvals", useCloudTts = false, extraOpts) {
 	try {
 		if (typeof window !== "undefined") window.__dshWalkKeepAliveActive = Boolean(active);
 		const bridge = getNativeAudioBridge();
 		if (!bridge?.setBackgroundKeepAlive) return false;
-		return Boolean(await bridge.setBackgroundKeepAlive(Boolean(active), Boolean(duckMusic), Boolean(keepMicWarm), String(proactiveBriefing || "approvals"), Boolean(useCloudTts)));
+		return Boolean(await bridge.setBackgroundKeepAlive(Boolean(active), Boolean(duckMusic), Boolean(keepMicWarm), String(proactiveBriefing || "approvals"), Boolean(useCloudTts), extraOpts));
 	} catch {
 		return false;
+	}
+}
+function hasNativeZeroWebViewBackgroundBriefing() {
+	try {
+		const bridge = getNativeAudioBridge();
+		return Boolean(bridge && typeof bridge.speakBackgroundBriefing === "function");
+	} catch {
+		return false;
+	}
+}
+async function claimNativeBriefingKey(key) {
+	try {
+		const bridge = getNativeAudioBridge();
+		if (!bridge?.claimBriefingKey || !key) return true;
+		return Boolean(await bridge.claimBriefingKey(key));
+	} catch {
+		return true;
+	}
+}
+async function delegateNativeBackgroundBriefing(item) {
+	try {
+		const bridge = getNativeAudioBridge();
+		if (!bridge?.speakBackgroundBriefing) return false;
+		return Boolean(await bridge.speakBackgroundBriefing(item));
+	} catch {
+		return false;
+	}
+}
+async function drainNativeSpokenBriefings() {
+	try {
+		const bridge = getNativeAudioBridge();
+		if (!bridge?.drainNativeSpokenBriefings) return [];
+		const list = await bridge.drainNativeSpokenBriefings();
+		return Array.isArray(list) ? list : [];
+	} catch {
+		return [];
 	}
 }
 async function canNativeAutoListenNow() {
@@ -5025,6 +5061,34 @@ var DEFAULT_CONFIG = {
 		}
 	}
 };
+function getVoiceAuthToken() {
+	try {
+		const fn = window.__dshGetVoiceAuthToken;
+		if (typeof fn === "function") {
+			const tok = String(fn() || "").trim();
+			if (tok) return tok;
+		}
+		return String(localStorage.getItem("dsh_hub_token") || "").trim();
+	} catch {
+		return "";
+	}
+}
+function buildWalkNativeExtraOpts(cfg) {
+	return {
+		apiOrigin: (() => {
+			try {
+				return typeof window !== "undefined" && window.location ? String(window.location.origin || "") : "";
+			} catch {
+				return "";
+			}
+		})(),
+		authToken: getVoiceAuthToken(),
+		profileId: String(cfg?.activeProfile?.id || ""),
+		briefingDetail: String(cfg?.prefs?.briefingDetail || "detailed"),
+		speechRate: Number(cfg?.prefs?.speechRate) || 1,
+		autoPlayWalkReplies: cfg?.prefs?.autoPlayWalkReplies !== false
+	};
+}
 function apiCall(path, options = {}) {
 	const bridge = window.__dshVoiceApiFetch;
 	if (typeof bridge === "function") return bridge(path, options);
@@ -5248,6 +5312,50 @@ function VoiceCopilotSheets() {
 			setLabOpen(false);
 		};
 		window.__dshRefreshVoiceConfig = () => refreshConfig(true);
+		const applyNativeSpokenBriefings = (items) => {
+			if (!Array.isArray(items) || items.length === 0) return true;
+			for (const item of items) {
+				if (!item || typeof item !== "object") continue;
+				const kind = String(item.kind || "");
+				const hostId = String(item.hostId || "");
+				const code = String(item.code || "").trim().toUpperCase();
+				const agentId = String(item.agentId || "");
+				const spokenReply = String(item.spokenReply || "").trim();
+				const spokenAt = Number(item.spokenAt) || Date.now();
+				if (kind === "approval" && hostId && code) {
+					const k = `${hostId}:${code}`;
+					seenApprovalsRef.current.add(k);
+					briefingQueueRef.current = briefingQueueRef.current.filter((q) => !(q.kind === "approval" && q.hostId === hostId && String(q.code || "").toUpperCase() === code));
+				} else if (hostId && agentId) {
+					recentPushAgentsRef.current.set(`${hostId}:${agentId}`, spokenAt);
+					briefingQueueRef.current = briefingQueueRef.current.filter((q) => !(q.kind === "completed" && q.hostId === hostId && q.agentId === agentId));
+				}
+				if (item.focusedApproval && typeof item.focusedApproval === "object") focusedApprovalRef.current = item.focusedApproval;
+				if (item.focusedSession?.hostId && item.focusedSession?.agentId) focusedSessionRef.current = {
+					hostId: String(item.focusedSession.hostId),
+					agentId: String(item.focusedSession.agentId),
+					title: String(item.focusedSession.title || ""),
+					announcedAt: spokenAt
+				};
+				else if (kind === "completed" && hostId && agentId) focusedSessionRef.current = {
+					hostId,
+					agentId,
+					announcedAt: spokenAt
+				};
+				if (spokenReply) {
+					setLastReplyText(spokenReply);
+					setLastActionBadge(kind === "approval" ? `🔔 ${item.approval?.slot ? `${item.approval.slot}号` : "后台已播"}待审批 ${code}` : `✅ 后台已播报${item.summarizedByBrain ? " · AI 摘要" : ""}`);
+				}
+			}
+			return true;
+		};
+		window.__dshOnNativeBackgroundBriefingsSynced = applyNativeSpokenBriefings;
+		const onVisSyncNative = () => {
+			if (typeof document !== "undefined" && document.visibilityState === "visible") drainNativeSpokenBriefings().then((items) => {
+				if (items.length > 0) applyNativeSpokenBriefings(items);
+			});
+		};
+		if (typeof document !== "undefined") document.addEventListener("visibilitychange", onVisSyncNative);
 		window.__dshOnBackgroundPushWake = (payload) => {
 			if (!walkOpenRef.current) {
 				notifyNativeBackgroundWakeDone();
@@ -5439,6 +5547,7 @@ function VoiceCopilotSheets() {
 		}, 120);
 		return () => {
 			clearTimeout(initTimer);
+			if (typeof document !== "undefined") document.removeEventListener("visibilitychange", onVisSyncNative);
 			playerRef.current?.stop();
 			recorderRef.current?.stop();
 			setWalkBackgroundKeepAlive(false, false, false);
@@ -5484,7 +5593,10 @@ function VoiceCopilotSheets() {
 		const proactiveBriefing = configRef.current?.prefs?.proactiveBriefing || "approvals";
 		const walkUsesCloudTts = (configRef.current?.activeProfile?.tts?.provider || "native") !== "native";
 		if (duckMusic) setWalkAudioSessionMode("ambient");
-		setWalkBackgroundKeepAlive(true, duckMusic, keepMicWarm, proactiveBriefing, walkUsesCloudTts);
+		setWalkBackgroundKeepAlive(true, duckMusic, keepMicWarm, proactiveBriefing, walkUsesCloudTts, buildWalkNativeExtraOpts(configRef.current));
+		drainNativeSpokenBriefings().then((items) => {
+			if (items.length > 0 && typeof window.__dshOnNativeBackgroundBriefingsSynced === "function") window.__dshOnNativeBackgroundBriefingsSynced(items);
+		});
 		wakeRef.current?.enable().then((ok) => setWakeLocked(ok));
 		const unbindMedia = bindWalkMediaSession({
 			onToggleListen: () => {
@@ -5505,12 +5617,16 @@ function VoiceCopilotSheets() {
 	}, [walkOpen]);
 	A(() => {
 		if (!walkOpen) return;
-		setWalkBackgroundKeepAlive(true, config.prefs.duckMusicMode !== false, Boolean(config.prefs.autoListenAfterBriefing), config.prefs.proactiveBriefing || "approvals", (config.activeProfile?.tts?.provider || "native") !== "native");
+		setWalkBackgroundKeepAlive(true, config.prefs.duckMusicMode !== false, Boolean(config.prefs.autoListenAfterBriefing), config.prefs.proactiveBriefing || "approvals", (config.activeProfile?.tts?.provider || "native") !== "native", buildWalkNativeExtraOpts(config));
 	}, [
 		walkOpen,
 		config.prefs.duckMusicMode,
 		config.prefs.autoListenAfterBriefing,
 		config.prefs.proactiveBriefing,
+		config.prefs.briefingDetail,
+		config.prefs.speechRate,
+		config.prefs.autoPlayWalkReplies,
+		config.activeProfile?.id,
 		config.activeProfile?.tts?.provider
 	]);
 	const drainBriefingQueue = async () => {
@@ -5523,6 +5639,19 @@ function VoiceCopilotSheets() {
 		try {
 			const cfg = configRef.current;
 			const duckMusic = cfg.prefs.duckMusicMode !== false;
+			const dedupeKey = nextItem.kind === "approval" && nextItem.code ? `approval:${nextItem.hostId}:${String(nextItem.code).toUpperCase()}` : `completed:${nextItem.hostId}:${nextItem.agentId || ""}`;
+			if (typeof document !== "undefined" && document.visibilityState === "hidden" && hasNativeZeroWebViewBackgroundBriefing()) {
+				if (await delegateNativeBackgroundBriefing({
+					kind: nextItem.kind,
+					hostId: nextItem.hostId,
+					hostName: nextItem.hostName,
+					code: nextItem.code || "",
+					agentId: nextItem.agentId || "",
+					title: nextItem.title || "",
+					dedupeKey
+				})) return;
+			}
+			if (!await claimNativeBriefingKey(dedupeKey)) return;
 			const data = await (await apiCall("/api/voice/briefing", {
 				method: "POST",
 				body: JSON.stringify({
@@ -24786,6 +24915,7 @@ function initHubController() {
 	let pendingTargetUiBuild = "";
 	function hasActiveUserInputInProgress() {
 		if (typeof document === "undefined") return false;
+		if (typeof window !== "undefined" && (window.__dshWalkModeOpen || window.__dshWalkKeepAliveActive)) return true;
 		if (inFlightCommandCount > 0) return true;
 		if (imagePickerActiveUntil > Date.now()) return true;
 		if (isVoiceRecording()) return true;
@@ -24884,7 +25014,8 @@ function initHubController() {
 	function triggerAppShellUpgradeReload(nextBuild) {
 		if (!nextBuild || nextBuild === "dev") return;
 		pendingTargetUiBuild = nextBuild;
-		if (!hasActiveUserInputInProgress()) {
+		const walkBusy = typeof window !== "undefined" && Boolean(window.__dshWalkModeOpen || window.__dshWalkKeepAliveActive);
+		if (!hasActiveUserInputInProgress() && !walkBusy) {
 			reloadWithFreshAppShell(nextBuild);
 			return;
 		}
@@ -24898,7 +25029,7 @@ function initHubController() {
 				const staleBootMismatch = bootedFromHashedBundle;
 				initialUiBuild = incomingBuild;
 				const isHidden = typeof document !== "undefined" && document.visibilityState === "hidden";
-				const walkKeepAlive = typeof window !== "undefined" && Boolean(window.__dshWalkKeepAliveActive);
+				const walkKeepAlive = typeof window !== "undefined" && Boolean(window.__dshWalkKeepAliveActive || window.__dshWalkModeOpen);
 				if ((staleBootMismatch || isHidden) && !hasActiveUserInputInProgress() && !walkKeepAlive) {
 					reloadWithFreshAppShell(incomingBuild);
 					return;
@@ -25759,6 +25890,7 @@ function initHubController() {
 		applyHubState,
 		getHubState: () => hubState,
 		__dshVoiceApiFetch: apiFetch,
+		__dshGetVoiceAuthToken: () => getToken(),
 		fetchState,
 		connectSSE,
 		renderHarnessBadgeHtml,
@@ -26066,7 +26198,7 @@ function initHubController() {
 	}
 	if (typeof document !== "undefined") document.addEventListener("visibilitychange", () => {
 		if (document.visibilityState === "visible") resumeForegroundSync();
-		else if (document.visibilityState === "hidden" && pendingBackgroundUiReload && !hasActiveUserInputInProgress() && !(typeof window !== "undefined" && window.__dshWalkKeepAliveActive)) {
+		else if (document.visibilityState === "hidden" && pendingBackgroundUiReload && !hasActiveUserInputInProgress() && !(typeof window !== "undefined" && (window.__dshWalkKeepAliveActive || window.__dshWalkModeOpen))) {
 			pendingBackgroundUiReload = false;
 			reloadWithFreshAppShell(pendingTargetUiBuild);
 		}

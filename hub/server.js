@@ -411,6 +411,8 @@ export function createHubServer({
   const API_AUTH_MAX_FAILS = 30
   let activeAdminSseCount = 0
   const activeHostSseCounts = new Map()
+  const voiceDiagEvents = []
+  const VOICE_DIAG_MAX_EVENTS = 120
 
   function checkApiAuthRateLimited(clientIp, nowMs = hub.now ? hub.now() : Date.now()) {
     const key = String(clientIp || 'unknown')
@@ -1985,6 +1987,47 @@ export function createHubServer({
         if (method === 'POST' && pathname === '/api/voice/briefing') {
           const outcome = await voiceCopilot.buildProactiveBriefing(body || {})
           return { status: outcome.ok ? 200 : 404, json: outcome }
+        }
+
+        if (method === 'POST' && pathname === '/api/voice/diag') {
+          const nowMs = hub.now ? hub.now() : Date.now()
+          const rawEvents = Array.isArray(body?.events) ? body.events.slice(-20) : [body || {}]
+          let recorded = 0
+          for (const item of rawEvents) {
+            if (!item || typeof item !== 'object') continue
+            const entry = {
+              at: Number(item.at) || nowMs,
+              receivedAt: nowMs,
+              source: String(item.source || 'ios-native').slice(0, 32),
+              event: String(item.event || 'log').slice(0, 64),
+              appState: String(item.appState || '').slice(0, 24),
+              detail: String(item.detail || '').slice(0, 320),
+              ...(item.osStatus !== undefined && item.osStatus !== null ? { osStatus: Number(item.osStatus) || 0 } : {}),
+              ...(item.latencyMs !== undefined && item.latencyMs !== null ? { latencyMs: Math.max(0, Math.round(Number(item.latencyMs) || 0)) } : {}),
+              ...(item.version ? { version: String(item.version).slice(0, 24) } : {}),
+            }
+            voiceDiagEvents.push(entry)
+            recorded += 1
+            logger?.info?.(
+              `[voice-diag] src=${entry.source} ev=${entry.event} state=${entry.appState || '-'} osStatus=${entry.osStatus ?? '-'} ms=${entry.latencyMs ?? '-'} ${entry.detail}`,
+            )
+          }
+          while (voiceDiagEvents.length > VOICE_DIAG_MAX_EVENTS) {
+            voiceDiagEvents.shift()
+          }
+          return { status: 200, json: { ok: true, recorded, total: voiceDiagEvents.length } }
+        }
+
+        if (method === 'GET' && pathname === '/api/voice/diag') {
+          const limit = Math.max(1, Math.min(VOICE_DIAG_MAX_EVENTS, Number(urlObj.searchParams.get('limit')) || 60))
+          return {
+            status: 200,
+            json: {
+              ok: true,
+              total: voiceDiagEvents.length,
+              events: voiceDiagEvents.slice(-limit),
+            },
+          }
         }
 
         if (method === 'POST' && pathname === '/api/voice/pin/clear') {

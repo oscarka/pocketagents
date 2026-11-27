@@ -3,6 +3,26 @@
 export type EarconKind = 'listen' | 'done' | 'approval' | 'pin_ok' | 'alert';
 export type WalkAudioSessionMode = 'ambient' | 'transient' | 'play-and-record' | 'auto';
 
+export interface NativeWalkKeepAliveExtraOpts {
+  apiOrigin?: string;
+  authToken?: string;
+  profileId?: string;
+  briefingDetail?: string;
+  speechRate?: number;
+  autoPlayWalkReplies?: boolean;
+}
+
+export interface NativeBackgroundBriefingPayload {
+  kind: 'approval' | 'completed';
+  hostId: string;
+  hostName?: string;
+  code?: string;
+  agentId?: string;
+  title?: string;
+  body?: string;
+  dedupeKey?: string;
+}
+
 export interface NativeAudioBridgeApi {
   platform?: string;
   version?: string;
@@ -11,7 +31,13 @@ export interface NativeAudioBridgeApi {
     duckMusic?: boolean,
     keepMicWarm?: boolean,
     proactiveBriefing?: string,
+    useCloudTts?: boolean,
+    extraOpts?: NativeWalkKeepAliveExtraOpts,
   ) => Promise<boolean>;
+  claimBriefingKey?: (key: string) => Promise<boolean>;
+  speakBackgroundBriefing?: (item: NativeBackgroundBriefingPayload) => Promise<boolean>;
+  drainNativeSpokenBriefings?: () => Promise<any[]>;
+  postDiagEvent?: (event: string, detail: string, latencyMs?: number) => Promise<boolean>;
   canAutoListenNow?: () => Promise<boolean>;
   claimBackgroundWakeForCloudTts?: () => Promise<boolean>;
   notifyBackgroundWakeDone?: () => Promise<boolean>;
@@ -62,6 +88,7 @@ export async function setWalkBackgroundKeepAlive(
   keepMicWarm = false,
   proactiveBriefing = 'approvals',
   useCloudTts = false,
+  extraOpts?: NativeWalkKeepAliveExtraOpts,
 ): Promise<boolean> {
   try {
     if (typeof window !== 'undefined') {
@@ -76,10 +103,51 @@ export async function setWalkBackgroundKeepAlive(
         Boolean(keepMicWarm),
         String(proactiveBriefing || 'approvals'),
         Boolean(useCloudTts),
+        extraOpts,
       ),
     );
   } catch {
     return false;
+  }
+}
+
+export function hasNativeZeroWebViewBackgroundBriefing(): boolean {
+  try {
+    const bridge = getNativeAudioBridge();
+    return Boolean(bridge && typeof bridge.speakBackgroundBriefing === 'function');
+  } catch {
+    return false;
+  }
+}
+
+export async function claimNativeBriefingKey(key: string): Promise<boolean> {
+  try {
+    const bridge = getNativeAudioBridge();
+    if (!bridge?.claimBriefingKey || !key) return true;
+    return Boolean(await bridge.claimBriefingKey(key));
+  } catch {
+    return true;
+  }
+}
+
+export async function delegateNativeBackgroundBriefing(item: NativeBackgroundBriefingPayload): Promise<boolean> {
+  try {
+    const bridge = getNativeAudioBridge();
+    if (!bridge?.speakBackgroundBriefing) return false;
+    return Boolean(await bridge.speakBackgroundBriefing(item));
+  } catch {
+    return false;
+  }
+}
+
+export async function drainNativeSpokenBriefings(): Promise<any[]> {
+  try {
+    const bridge = getNativeAudioBridge();
+    if (!bridge?.drainNativeSpokenBriefings) return [];
+    const list = await bridge.drainNativeSpokenBriefings();
+    return Array.isArray(list) ? list : [];
+  } catch {
+    return [];
   }
 }
 

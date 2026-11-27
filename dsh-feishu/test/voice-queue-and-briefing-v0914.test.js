@@ -391,3 +391,95 @@ test('v0.9.16 Volcengine ASR->TTS cloneSecretFromCredId allows official openspee
   })
   assert.equal(crossProvClone.status, 400)
 })
+
+test('v0.9.45 native zero-WebView background briefing, /api/voice/diag ring buffer, and Walk Mode anti-reload guard', async () => {
+  const { readFileSync, existsSync } = await import('node:fs')
+  const { resolve } = await import('node:path')
+  const hub = new HubCore()
+  const logs = []
+  const { dispatchRequest } = createHubServer({
+    hub,
+    token: 'voice-diag-token-0945',
+    requireToken: true,
+    voiceVaultFile: '',
+    logger: { info: m => logs.push(m), warn: () => {}, error: () => {} },
+  })
+  const headers = { 'x-hub-token': 'voice-diag-token-0945' }
+
+  // 1. /api/voice/diag requires auth
+  const unauth = await dispatchRequest({ method: 'GET', url: '/api/voice/diag', headers: {} })
+  assert.equal(unauth.status, 401)
+
+  // 2. POST + GET /api/voice/diag records structured native audio events and logs compact line
+  const postRes = await dispatchRequest({
+    method: 'POST',
+    url: '/api/voice/diag',
+    headers,
+    body: {
+      source: 'ios-native',
+      version: '1.1.5',
+      event: 'bg_briefing_done',
+      appState: 'background',
+      osStatus: 0,
+      latencyMs: 1420,
+      detail: 'src=apns_native kind=approval chunks=2/2 mode=playback_voicePrompt_duck',
+    },
+  })
+  assert.equal(postRes.status, 200)
+  assert.equal(postRes.json.ok, true)
+  assert.equal(postRes.json.recorded, 1)
+  assert.ok(logs.some(line => line.includes('[voice-diag]') && line.includes('playback_voicePrompt_duck')))
+
+  const getRes = await dispatchRequest({ method: 'GET', url: '/api/voice/diag?limit=10', headers })
+  assert.equal(getRes.status, 200)
+  assert.equal(getRes.json.ok, true)
+  assert.equal(getRes.json.events.length, 1)
+  assert.equal(getRes.json.events[0].event, 'bg_briefing_done')
+  assert.equal(getRes.json.events[0].version, '1.1.5')
+
+  // 3. Ring buffer enforces 120-event cap without unbounded memory growth
+  const batch = Array.from({ length: 20 }, (_, idx) => ({
+    event: `ev_${idx}`,
+    detail: 'x'.repeat(500),
+    latencyMs: idx * 10,
+  }))
+  for (let i = 0; i < 7; i += 1) {
+    const r = await dispatchRequest({ method: 'POST', url: '/api/voice/diag', headers, body: { events: batch } })
+    assert.equal(r.status, 200)
+  }
+  const capped = await dispatchRequest({ method: 'GET', url: '/api/voice/diag?limit=200', headers })
+  assert.equal(capped.json.total, 120)
+  assert.equal(capped.json.events.length, 120)
+  assert.ok(capped.json.events[0].detail.length <= 320)
+
+  // 4. Web controller protects Walk Mode from Service Worker / SSE auto-reload wipeout
+  const rootDir = resolve(process.cwd())
+  const controllerSrc = readFileSync(resolve(rootDir, 'hub/web/src/controller.js'), 'utf8')
+  assert.match(controllerSrc, /hasActiveUserInputInProgress\(\)[\s\S]{0,220}__dshWalkModeOpen \|\| window\.__dshWalkKeepAliveActive/)
+  assert.match(controllerSrc, /triggerAppShellUpgradeReload\(nextBuild\)[\s\S]{0,280}walkBusy/)
+  assert.match(controllerSrc, /__dshGetVoiceAuthToken:\s*\(\)\s*=>\s*getToken\(\)/)
+
+  // 5. Walk Mode frontend syncs native context, delegates hidden briefings, and deduplicates atomically
+  const voiceSheetsSrc = readFileSync(resolve(rootDir, 'hub/web/src/components/VoiceCopilotSheets.tsx'), 'utf8')
+  const walkAudioSrc = readFileSync(resolve(rootDir, 'hub/web/src/voice/walkAudio.ts'), 'utf8')
+  assert.match(voiceSheetsSrc, /buildWalkNativeExtraOpts/)
+  assert.match(voiceSheetsSrc, /__dshOnNativeBackgroundBriefingsSynced/)
+  assert.match(voiceSheetsSrc, /delegateNativeBackgroundBriefing/)
+  assert.match(voiceSheetsSrc, /claimNativeBriefingKey/)
+  assert.match(walkAudioSrc, /speakBackgroundBriefing/)
+  assert.match(walkAudioSrc, /drainNativeSpokenBriefings/)
+
+  // 6. Optional local iOS native shell contract check (when ios-local-shell is present)
+  const nativeAudioPath = resolve(rootDir, 'ios-local-shell/PocketAgentsShell/NativeAudioBridge.swift')
+  if (existsSync(nativeAudioPath)) {
+    const swiftSrc = readFileSync(nativeAudioPath, 'utf8')
+    assert.match(swiftSrc, /shellVersion = "1\.1\.5"/)
+    assert.match(swiftSrc, /\/api\/voice\/briefing/)
+    assert.match(swiftSrc, /\/api\/voice\/tts/)
+    assert.match(swiftSrc, /\/api\/voice\/diag/)
+    assert.match(swiftSrc, /\.voicePrompt, \[\.mixWithOthers, \.duckOthers\]/)
+    assert.match(swiftSrc, /playback_exclusive/)
+    assert.match(swiftSrc, /isNativeBackgroundBriefingRunning \|\| self\.speechPlayer != nil/)
+    assert.doesNotMatch(swiftSrc, /__dshOnBackgroundPushWake/)
+  }
+})
