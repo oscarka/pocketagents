@@ -350,7 +350,8 @@ test('v0.9.20 settings-panel: renders 4 grouped sections ("模型与偏好") and
   // Compact host strip & crisp single-line values on Home
   assert.match(mockViewport.innerHTML, /mac-mini/);
   assert.match(mockViewport.innerHTML, /macbook-air/);
-  assert.match(mockViewport.innerHTML, /豆包 · DeepSeek/);
+  assert.match(mockViewport.innerHTML, /id="settingsVoiceSummaryText">已配置</);
+  assert.doesNotMatch(mockViewport.innerHTML, /豆包 · DeepSeek/);
   assert.match(mockViewport.innerHTML, /已开启/);
   assert.match(mockViewport.innerHTML, /1 条/);
   // Heavy capability matrix table is NOT flattened onto Settings Home
@@ -970,6 +971,7 @@ test('v0.9.41 decouples global AI Models pool from Walk Mode & Chat Voice with i
   const { VoiceVault } = await import('../../hub/voice-vault.js');
   const {
     formatModelsCompactValue,
+    formatVoiceCompactValue,
     formatChatVoiceCompactValue,
     getCredentialFeatureUsages,
     resolveFeatureStageConfig,
@@ -1008,17 +1010,35 @@ test('v0.9.41 decouples global AI Models pool from Walk Mode & Chat Voice with i
   assert.equal(pub.prefs.chatSttTarget, `cred:${cAsr.credential.id}`);
   assert.equal(pub.prefs.useByokForChatStt, true);
   assert.equal(formatModelsCompactValue(pub), '3 个供应商');
-  assert.match(formatChatVoiceCompactValue(pub), /豆包.*OpenAI 语音|OpenAI 语音/);
-  assert.doesNotMatch(formatChatVoiceCompactValue(pub), /跟随随行/);
+  assert.equal(formatChatVoiceCompactValue(pub), '已配置');
+  assert.doesNotMatch(formatChatVoiceCompactValue(pub), /豆包|跟随随行/);
 
-  // Legacy follow_walk targets never display "跟随随行" and resolve to concrete provider/native
+  // Walk Mode compact value shows clean Apple-style status ('已配置' / '已开启' / '默认') without vendor duplication
+  assert.equal(formatVoiceCompactValue(pub), '默认');
+  assert.equal(formatVoiceCompactValue(pub, { walkActive: true }), '已开启');
+  await vault.upsertProfile({
+    id: 'cloud-walk',
+    name: 'Cloud Walk',
+    activate: true,
+    stt: { provider: 'volcengine_asr', credId: cAsr.credential.id },
+    brain: { provider: 'openai_compat', credId: c2.credential.id },
+    tts: { provider: 'volcengine_tts', credId: c1.credential.id },
+  });
+  const pubWithCloudWalk = vault.toPublicState();
+  assert.equal(formatVoiceCompactValue(pubWithCloudWalk), '已配置');
+  assert.equal(formatVoiceCompactValue(pubWithCloudWalk, { walkActive: true }), '已开启');
+
+  // Legacy follow_walk targets resolve cleanly to '默认' when Walk Mode is native
   assert.equal(
     formatChatVoiceCompactValue({
       ...pub,
       prefs: { ...pub.prefs, chatSttTarget: 'follow_walk', chatTtsTarget: 'follow_walk' },
     }),
-    '免费本机',
+    '默认',
   );
+  assert.equal(translateZhStringToEn('已配置'), 'Configured');
+  assert.equal(translateZhStringToEn('默认'), 'Default');
+  assert.equal(translateZhStringToEn('已开启'), 'On');
 
   const stageOverride = resolveFeatureStageConfig(pub.prefs.chatTtsTarget, 'tts', pub.activeProfile, pub.credentials);
   assert.equal(stageOverride?.credId, c2.credential.id);

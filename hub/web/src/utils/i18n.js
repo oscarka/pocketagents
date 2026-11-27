@@ -160,6 +160,7 @@ const EXACT_ZH_TO_EN = {
   '模型 ID': 'Model ID',
   '设为默认': 'Set Default',
   '已默认': 'Default',
+  '默认': 'Default',
   '测试': 'Test',
   '编辑': 'Edit',
   '删除': 'Delete',

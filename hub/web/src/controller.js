@@ -8924,6 +8924,7 @@ export function initHubController() {
       installingAgyCliMap,
       currentDeviceId: getOrCreateClientDeviceId(),
       tokenTail: getToken().slice(-4),
+      walkActive: Boolean(typeof window !== 'undefined' && window.__dshWalkModeOpen),
     }),
     getViewport: () => document.getElementById('mainViewport'),
     getCopilotSummaryText: () => goalCopilotUi.getPluginSummaryText(),
@@ -8944,6 +8945,14 @@ export function initHubController() {
   });
 
   window.addEventListener('dsh:voice-config', () => {
+    lastRenderedSettingsKey = '';
+    settingsPanel.invalidate();
+    if (currentTab === 'settings') {
+      renderSettingsTab();
+    }
+  });
+
+  window.addEventListener('dsh:walk-state', () => {
     lastRenderedSettingsKey = '';
     settingsPanel.invalidate();
     if (currentTab === 'settings') {

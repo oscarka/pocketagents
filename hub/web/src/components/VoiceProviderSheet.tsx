@@ -694,7 +694,9 @@ export function VoiceProviderSheet(props: VoiceProviderSheetProps) {
     ? [{ label: '团子 3.0 女声', value: 'multi_female_tuanzi_v3_uranus_bigtts' }]
     : (TTS_VOICE_OPTIONS[draft.provider as keyof typeof TTS_VOICE_OPTIONS] || []);
   const isVolcDraft = draft.provider === 'volcengine_asr' || draft.provider === 'volcengine_tts';
-  const compactSummary = formatVoiceCompactValue(config);
+  const compactSummary = formatVoiceCompactValue(config, {
+    walkActive: Boolean(typeof window !== 'undefined' && (window as any).__dshWalkModeOpen),
+  });
 
   const rawChatSttTarget = String(config.prefs.chatSttTarget || 'native');
   const rawChatTtsTarget = String(config.prefs.chatTtsTarget || 'native');

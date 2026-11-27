@@ -390,7 +390,7 @@ export function createSettingsPanel(deps) {
             >
               <span class="ios-ico indigo">${SVG_ICONS.headphones}</span>
               <span class="ios-row-title">边走边听 (Beta)</span>
-              <span class="ios-row-val" id="settingsVoiceSummaryText">${deps.esc(voiceCompact)}</span>
+              <span class="ios-row-val${voiceCompact === '已开启' ? ' tone-green' : ''}" id="settingsVoiceSummaryText">${deps.esc(voiceCompact)}</span>
               <span class="ios-chev">${SVG_ICONS.chev}</span>
             </button>
 
@@ -1089,9 +1089,10 @@ export function createSettingsPanel(deps) {
     if (!viewport) return;
     const state = deps.getState();
     const voiceCfg = getVoiceConfig();
+    const walkActive = Boolean(state.walkActive ?? (typeof window !== 'undefined' && window.__dshWalkModeOpen));
     const voiceSummaries = {
       modelsCompact: formatModelsCompactValue(voiceCfg),
-      voiceCompact: formatVoiceCompactValue(voiceCfg),
+      voiceCompact: formatVoiceCompactValue(voiceCfg, { walkActive }),
       chatVoiceCompact: formatChatVoiceCompactValue(voiceCfg),
     };
     const signature = buildSignature(state, voiceSummaries);
