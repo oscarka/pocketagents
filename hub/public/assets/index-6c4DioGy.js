@@ -4302,13 +4302,138 @@ function VoiceProviderSheet(props) {
 	const chatSttTargetVal = rawChatSttTarget === "follow_walk" ? sttVal.startsWith("cred:") ? sttVal : "native" : rawChatSttTarget;
 	const chatTtsTargetVal = rawChatTtsTarget === "follow_walk" ? ttsVal.startsWith("cred:") ? ttsVal : "native" : rawChatTtsTarget;
 	const navTitle = viewMode === "editor" ? draft.id ? "编辑 Provider" : "添加 Provider" : viewMode === "models" ? "AI 模型与供应商" : viewMode === "chat" ? "聊天语音" : "边走边听 (Beta)";
+	const showBackBtn = viewMode === "editor" || viewMode === "models" && returnView !== "models";
+	const sheetPanelRef = T(null);
+	const swipeRef = T({
+		tracking: false,
+		decided: null,
+		startX: 0,
+		startY: 0,
+		lastX: 0,
+		lastY: 0,
+		startedAt: 0,
+		width: 375
+	});
+	const handleVoiceSheetBackAction = () => {
+		if (showBackBtn) {
+			setEditorError("");
+			if (viewMode === "editor") setViewMode(returnView);
+			else {
+				const target = returnView;
+				setReturnView(target);
+				setViewMode(target);
+			}
+			return;
+		}
+		onClose();
+	};
+	const resetVoiceSheetTransform = () => {
+		const el = sheetPanelRef.current;
+		if (!el) return;
+		el.style.transition = "";
+		el.style.transform = "";
+		el.style.willChange = "";
+	};
+	const onVoiceSheetTouchStart = (event) => {
+		if (!event?.touches || event.touches.length !== 1) return;
+		const target = event.target;
+		if (target && typeof target.closest === "function" && target.closest("textarea, input, select, [data-no-back-swipe]")) return;
+		const el = sheetPanelRef.current;
+		if (!el) return;
+		const rect = el.getBoundingClientRect();
+		const width = el.offsetWidth || rect.width || window.innerWidth || 375;
+		const touch = event.touches[0];
+		const startRelX = touch.clientX - rect.left;
+		const maxZone = Math.min(Math.max(56, width * .24), 104);
+		if (startRelX < 0 || startRelX > maxZone) return;
+		swipeRef.current = {
+			tracking: true,
+			decided: null,
+			startX: touch.clientX,
+			startY: touch.clientY,
+			lastX: touch.clientX,
+			lastY: touch.clientY,
+			startedAt: Date.now(),
+			width
+		};
+	};
+	const onVoiceSheetTouchMove = (event) => {
+		const sw = swipeRef.current;
+		if (!sw.tracking) return;
+		if (!event?.touches || event.touches.length !== 1) {
+			sw.tracking = false;
+			sw.decided = null;
+			resetVoiceSheetTransform();
+			return;
+		}
+		const touch = event.touches[0];
+		const dx = touch.clientX - sw.startX;
+		const dy = touch.clientY - sw.startY;
+		sw.lastX = touch.clientX;
+		sw.lastY = touch.clientY;
+		if (sw.decided === null) {
+			if (Math.abs(dx) < 9 && Math.abs(dy) < 9) return;
+			if (Date.now() - sw.startedAt > 400 || dx <= -8 || Math.abs(dy) >= 12 && Math.abs(dy) > Math.abs(dx) * 1.12) {
+				sw.tracking = false;
+				return;
+			}
+			if (dx >= 10 && dx >= Math.abs(dy) * 1.1) {
+				sw.decided = true;
+				if (sheetPanelRef.current) {
+					sheetPanelRef.current.style.transition = "none";
+					sheetPanelRef.current.style.willChange = "transform";
+				}
+			} else if (Math.hypot(dx, dy) > 26) {
+				sw.tracking = false;
+				return;
+			} else return;
+		}
+		const clampedX = Math.max(0, Math.min(dx, sw.width));
+		if (event.cancelable) event.preventDefault();
+		if (sheetPanelRef.current) sheetPanelRef.current.style.transform = `translate3d(${clampedX}px, 0, 0)`;
+	};
+	const onVoiceSheetTouchEnd = () => {
+		const sw = swipeRef.current;
+		if (!sw.tracking) return;
+		sw.tracking = false;
+		const wasDecided = sw.decided === true;
+		sw.decided = null;
+		if (!wasDecided) return;
+		const effDx = Math.max(0, sw.lastX - sw.startX);
+		const absDy = Math.abs(sw.lastY - sw.startY);
+		const velocity = effDx / Math.max(1, Date.now() - sw.startedAt);
+		const distThreshold = Math.min(Math.max(60, sw.width * .17), 115);
+		const dismiss = absDy <= effDx * 1.15 && (effDx >= distThreshold || effDx >= 30 && velocity >= .3);
+		const el = sheetPanelRef.current;
+		if (dismiss) {
+			if (el) {
+				el.style.transition = "transform 0.14s cubic-bezier(0.22, 1, 0.36, 1)";
+				el.style.transform = `translate3d(${sw.width}px, 0, 0)`;
+			}
+			setTimeout(() => {
+				resetVoiceSheetTransform();
+				handleVoiceSheetBackAction();
+			}, 145);
+		} else if (el) {
+			el.style.transition = "transform 0.22s cubic-bezier(0.22, 1, 0.36, 1)";
+			el.style.transform = "translate3d(0px, 0, 0)";
+			setTimeout(resetVoiceSheetTransform, 230);
+		}
+	};
 	return /* @__PURE__ */ k$1("div", {
 		id: "voiceLabSheet",
 		class: "sheet-backdrop open voice-lab-backdrop",
 		onClick: (e) => {
 			if (e.target === e.currentTarget) onClose();
 		}
-	}, /* @__PURE__ */ k$1("div", { class: "sheet-panel voice-lab-panel vp-ios-sheet" }, /* @__PURE__ */ k$1("div", { class: "sheet-handle" }), /* @__PURE__ */ k$1("div", { class: "vp-sheet-nav" }, /* @__PURE__ */ k$1("div", { class: "vp-sheet-nav-left" }, (viewMode === "editor" || viewMode === "models" && returnView !== "models") && /* @__PURE__ */ k$1("button", {
+	}, /* @__PURE__ */ k$1("div", {
+		ref: sheetPanelRef,
+		class: "sheet-panel voice-lab-panel vp-ios-sheet",
+		onTouchStart: onVoiceSheetTouchStart,
+		onTouchMove: onVoiceSheetTouchMove,
+		onTouchEnd: onVoiceSheetTouchEnd,
+		onTouchCancel: onVoiceSheetTouchEnd
+	}, /* @__PURE__ */ k$1("div", { class: "sheet-handle" }), /* @__PURE__ */ k$1("div", { class: "vp-sheet-nav" }, /* @__PURE__ */ k$1("div", { class: "vp-sheet-nav-left" }, showBackBtn && /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: "vp-nav-back",
 		id: "vpBackToListBtn",
@@ -16675,6 +16800,7 @@ function initHubController() {
 			}
 		}
 		const searchBox = document.getElementById("searchAndFilterBox");
+		document.body.classList.toggle("tab-settings-active", currentTab === "settings");
 		const normalizedSessions = getNormalizedSessions();
 		if (currentTab === "chats") {
 			searchBox.style.display = hosts.length === 0 ? "none" : "block";
@@ -22627,11 +22753,15 @@ function initHubController() {
 		settingsPanel.invalidate();
 		if (currentTab === "settings") renderSettingsTab();
 	});
+	function rawCloseSettingsSubpage() {
+		settingsPanel.closeSubpage();
+	}
 	function openSettingsSubpage(page, param = "") {
 		settingsPanel.openSubpage(page, param);
+		if (settingsPanel.getActiveSubpage() !== "home") trackOverlay("settings-subpage", rawCloseSettingsSubpage);
 	}
 	function closeSettingsSubpage() {
-		settingsPanel.closeSubpage();
+		dismissOverlay("settings-subpage", rawCloseSettingsSubpage);
 	}
 	function renderSettingsTab() {
 		if (!lastRenderedSettingsKey) {
@@ -23159,10 +23289,12 @@ function initHubController() {
 	}
 	function switchTab(tab) {
 		if (tab === "settings" && currentTab === "settings" && settingsPanel.getActiveSubpage() !== "home") {
-			settingsPanel.closeSubpage();
+			closeSettingsSubpage();
 			return;
 		}
+		if (currentTab === "settings" && tab !== "settings" && settingsPanel.getActiveSubpage() !== "home") closeSettingsSubpage();
 		currentTab = tab;
+		document.body.classList.toggle("tab-settings-active", currentTab === "settings");
 		document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
 		document.getElementById("tab-" + tab).classList.add("active");
 		if (tab === "files") {
@@ -23731,6 +23863,179 @@ function initHubController() {
 		window.addEventListener("touchend", finishSwipe);
 		window.addEventListener("touchcancel", finishSwipe);
 	}
+	function setupSettingsSubpageSwipeBack() {
+		const vp = document.getElementById("mainViewport");
+		if (!vp) return;
+		let tracking = false;
+		let decided = null;
+		let startX = 0;
+		let startY = 0;
+		let startRelX = 0;
+		let lastX = 0;
+		let lastY = 0;
+		let startedAt = 0;
+		let width = 0;
+		let activePageEl = null;
+		let originTarget = null;
+		let lastHandledMoveEvt = null;
+		let lastHandledEndEvt = null;
+		const resetPageStyle = (el = activePageEl) => {
+			if (!el) return;
+			el.style.transition = "";
+			el.style.transform = "";
+			el.style.willChange = "";
+			el.style.boxShadow = "";
+		};
+		const isInteractiveExcluded = (target) => {
+			if (!target || typeof target.closest !== "function") return false;
+			return Boolean(target.closest("textarea, input, select, video, audio, [data-no-back-swipe]"));
+		};
+		const canScrollHorizontally = (target, dx) => {
+			if (startRelX <= 28) return false;
+			let node = target;
+			while (node && node !== vp && node.nodeType === 1) {
+				const overflowX = window.getComputedStyle(node).overflowX;
+				if (/(auto|scroll)/.test(overflowX) && node.scrollWidth > node.clientWidth + 8) {
+					if (dx > 0 && node.scrollLeft > 2) return true;
+				}
+				node = node.parentElement;
+			}
+			return false;
+		};
+		const detachOriginListeners = () => {
+			if (!originTarget || originTarget === window || typeof originTarget.removeEventListener !== "function") {
+				originTarget = null;
+				return;
+			}
+			try {
+				originTarget.removeEventListener("touchmove", onMove);
+				originTarget.removeEventListener("touchend", finishSwipe);
+				originTarget.removeEventListener("touchcancel", finishSwipe);
+			} catch {}
+			originTarget = null;
+		};
+		const onMove = (event) => {
+			if (!tracking || !activePageEl) return;
+			if (event === lastHandledMoveEvt) return;
+			lastHandledMoveEvt = event;
+			if (!event.touches || event.touches.length !== 1) {
+				tracking = false;
+				decided = null;
+				detachOriginListeners();
+				resetPageStyle();
+				activePageEl = null;
+				return;
+			}
+			const touch = event.touches[0];
+			const dx = touch.clientX - startX;
+			const dy = touch.clientY - startY;
+			lastX = touch.clientX;
+			lastY = touch.clientY;
+			if (decided === null) {
+				if (Math.abs(dx) < 9 && Math.abs(dy) < 9) return;
+				if (Date.now() - startedAt > 400) {
+					tracking = false;
+					detachOriginListeners();
+					activePageEl = null;
+					return;
+				}
+				if (dx <= -8 || Math.abs(dy) >= 12 && Math.abs(dy) > Math.abs(dx) * 1.12) {
+					tracking = false;
+					detachOriginListeners();
+					activePageEl = null;
+					return;
+				}
+				if (dx >= 10 && dx >= Math.abs(dy) * 1.1) {
+					if (canScrollHorizontally(originTarget || event.target, dx)) {
+						tracking = false;
+						detachOriginListeners();
+						activePageEl = null;
+						return;
+					}
+					decided = true;
+					activePageEl.style.transition = "none";
+					activePageEl.style.willChange = "transform";
+				} else if (Math.hypot(dx, dy) > 26) {
+					tracking = false;
+					detachOriginListeners();
+					activePageEl = null;
+					return;
+				} else return;
+			}
+			const clampedX = Math.max(0, Math.min(dx, width));
+			if (event.cancelable) event.preventDefault();
+			activePageEl.style.transform = `translate3d(${clampedX}px, 0, 0)`;
+			activePageEl.style.boxShadow = clampedX > 0 ? "-10px 0 28px rgba(15, 23, 42, 0.14)" : "";
+		};
+		const finishSwipe = (event) => {
+			if (event && event === lastHandledEndEvt) return;
+			lastHandledEndEvt = event || null;
+			if (!tracking) return;
+			tracking = false;
+			detachOriginListeners();
+			const pageEl = activePageEl;
+			activePageEl = null;
+			const wasDecided = decided === true;
+			decided = null;
+			if (!wasDecided || !pageEl) return;
+			const effDx = Math.max(0, lastX - startX);
+			const absDy = Math.abs(lastY - startY);
+			const durationMs = Math.max(1, Date.now() - startedAt);
+			const velocity = effDx / durationMs;
+			const distThreshold = Math.min(Math.max(60, width * .17), 115);
+			if (absDy <= effDx * 1.15 && (effDx >= distThreshold || effDx >= 30 && velocity >= .3 || shouldDismissHorizontalSwipe({
+				dx: effDx,
+				dy: absDy,
+				width,
+				durationMs
+			}))) {
+				pageEl.style.transition = "transform 0.14s cubic-bezier(0.22, 1, 0.36, 1)";
+				pageEl.style.transform = `translate3d(${width}px, 0, 0)`;
+				setTimeout(() => {
+					resetPageStyle(pageEl);
+					closeSettingsSubpage();
+				}, 145);
+			} else {
+				pageEl.style.transition = "transform 0.22s cubic-bezier(0.22, 1, 0.36, 1)";
+				pageEl.style.transform = "translate3d(0px, 0, 0)";
+				setTimeout(() => {
+					resetPageStyle(pageEl);
+				}, 230);
+			}
+		};
+		vp.addEventListener("touchstart", (event) => {
+			if (event.touches.length !== 1) return;
+			if (currentTab !== "settings" || settingsPanel.getActiveSubpage() === "home") return;
+			if (document.body.classList.contains("mobile-chat-open")) return;
+			if (document.querySelector(".sheet-backdrop.open, #triageDeckOverlay.open")) return;
+			if (isInteractiveExcluded(event.target)) return;
+			const pageEl = vp.querySelector(".ios-subpage-wrap");
+			if (!pageEl) return;
+			detachOriginListeners();
+			const touch = event.touches[0];
+			const rect = vp.getBoundingClientRect();
+			width = vp.offsetWidth || rect.width || window.innerWidth || 375;
+			startRelX = touch.clientX - rect.left;
+			if (!isWithinLeftSwipeBackZone(startRelX, width)) return;
+			startedAt = Date.now();
+			tracking = true;
+			decided = null;
+			activePageEl = pageEl;
+			startX = touch.clientX;
+			startY = touch.clientY;
+			lastX = startX;
+			lastY = startY;
+			originTarget = event.target;
+			if (originTarget && originTarget !== window && originTarget !== vp && typeof originTarget.addEventListener === "function") try {
+				originTarget.addEventListener("touchmove", onMove, { passive: false });
+				originTarget.addEventListener("touchend", finishSwipe);
+				originTarget.addEventListener("touchcancel", finishSwipe);
+			} catch {}
+		}, { passive: true });
+		window.addEventListener("touchmove", onMove, { passive: false });
+		window.addEventListener("touchend", finishSwipe);
+		window.addEventListener("touchcancel", finishSwipe);
+	}
 	function setupSheetSwipeDismiss() {
 		document.querySelectorAll(".sheet-backdrop").forEach((backdrop) => {
 			const panel = backdrop.querySelector(".sheet-panel");
@@ -24171,6 +24476,7 @@ function initHubController() {
 	}
 	function setupOverlayGestures() {
 		setupChatSwipeBack();
+		setupSettingsSubpageSwipeBack();
 		setupSheetSwipeDismiss();
 		setupStandaloneImageLongPressSave();
 		setupMainViewportPullRefresh();

@@ -1,5 +1,5 @@
 import { h, Fragment } from 'preact';
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import { applyLangToDom, getLangPref, translateZhStringToEn } from '../utils/i18n.js';
 import {
   PROTOCOL_LABELS,
@@ -715,6 +715,137 @@ export function VoiceProviderSheet(props: VoiceProviderSheetProps) {
           ? '聊天语音'
           : '边走边听 (Beta)';
   const showBackBtn = viewMode === 'editor' || (viewMode === 'models' && returnView !== 'models');
+  const sheetPanelRef = useRef<HTMLDivElement | null>(null);
+  const swipeRef = useRef<{
+    tracking: boolean;
+    decided: boolean | null;
+    startX: number;
+    startY: number;
+    lastX: number;
+    lastY: number;
+    startedAt: number;
+    width: number;
+  }>({ tracking: false, decided: null, startX: 0, startY: 0, lastX: 0, lastY: 0, startedAt: 0, width: 375 });
+
+  const handleVoiceSheetBackAction = () => {
+    if (showBackBtn) {
+      setEditorError('');
+      if (viewMode === 'editor') {
+        setViewMode(returnView);
+      } else {
+        const target = returnView;
+        setReturnView(target);
+        setViewMode(target);
+      }
+      return;
+    }
+    onClose();
+  };
+
+  const resetVoiceSheetTransform = () => {
+    const el = sheetPanelRef.current;
+    if (!el) return;
+    el.style.transition = '';
+    el.style.transform = '';
+    el.style.willChange = '';
+  };
+
+  const onVoiceSheetTouchStart = (event: any) => {
+    if (!event?.touches || event.touches.length !== 1) return;
+    const target = event.target;
+    if (target && typeof target.closest === 'function' && target.closest('textarea, input, select, [data-no-back-swipe]')) {
+      return;
+    }
+    const el = sheetPanelRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const width = el.offsetWidth || rect.width || window.innerWidth || 375;
+    const touch = event.touches[0];
+    const startRelX = touch.clientX - rect.left;
+    // Left-edge swipe-back zone (matches chat & settings subpage feel)
+    const maxZone = Math.min(Math.max(56, width * 0.24), 104);
+    if (startRelX < 0 || startRelX > maxZone) return;
+    swipeRef.current = {
+      tracking: true,
+      decided: null,
+      startX: touch.clientX,
+      startY: touch.clientY,
+      lastX: touch.clientX,
+      lastY: touch.clientY,
+      startedAt: Date.now(),
+      width,
+    };
+  };
+
+  const onVoiceSheetTouchMove = (event: any) => {
+    const sw = swipeRef.current;
+    if (!sw.tracking) return;
+    if (!event?.touches || event.touches.length !== 1) {
+      sw.tracking = false;
+      sw.decided = null;
+      resetVoiceSheetTransform();
+      return;
+    }
+    const touch = event.touches[0];
+    const dx = touch.clientX - sw.startX;
+    const dy = touch.clientY - sw.startY;
+    sw.lastX = touch.clientX;
+    sw.lastY = touch.clientY;
+    if (sw.decided === null) {
+      if (Math.abs(dx) < 9 && Math.abs(dy) < 9) return;
+      if (Date.now() - sw.startedAt > 400 || dx <= -8 || (Math.abs(dy) >= 12 && Math.abs(dy) > Math.abs(dx) * 1.12)) {
+        sw.tracking = false;
+        return;
+      }
+      if (dx >= 10 && dx >= Math.abs(dy) * 1.1) {
+        sw.decided = true;
+        if (sheetPanelRef.current) {
+          sheetPanelRef.current.style.transition = 'none';
+          sheetPanelRef.current.style.willChange = 'transform';
+        }
+      } else if (Math.hypot(dx, dy) > 26) {
+        sw.tracking = false;
+        return;
+      } else {
+        return;
+      }
+    }
+    const clampedX = Math.max(0, Math.min(dx, sw.width));
+    if (event.cancelable) event.preventDefault();
+    if (sheetPanelRef.current) {
+      sheetPanelRef.current.style.transform = `translate3d(${clampedX}px, 0, 0)`;
+    }
+  };
+
+  const onVoiceSheetTouchEnd = () => {
+    const sw = swipeRef.current;
+    if (!sw.tracking) return;
+    sw.tracking = false;
+    const wasDecided = sw.decided === true;
+    sw.decided = null;
+    if (!wasDecided) return;
+    const effDx = Math.max(0, sw.lastX - sw.startX);
+    const absDy = Math.abs(sw.lastY - sw.startY);
+    const durationMs = Math.max(1, Date.now() - sw.startedAt);
+    const velocity = effDx / durationMs;
+    const distThreshold = Math.min(Math.max(60, sw.width * 0.17), 115);
+    const dismiss = absDy <= effDx * 1.15 && (effDx >= distThreshold || (effDx >= 30 && velocity >= 0.3));
+    const el = sheetPanelRef.current;
+    if (dismiss) {
+      if (el) {
+        el.style.transition = 'transform 0.14s cubic-bezier(0.22, 1, 0.36, 1)';
+        el.style.transform = `translate3d(${sw.width}px, 0, 0)`;
+      }
+      setTimeout(() => {
+        resetVoiceSheetTransform();
+        handleVoiceSheetBackAction();
+      }, 145);
+    } else if (el) {
+      el.style.transition = 'transform 0.22s cubic-bezier(0.22, 1, 0.36, 1)';
+      el.style.transform = 'translate3d(0px, 0, 0)';
+      setTimeout(resetVoiceSheetTransform, 230);
+    }
+  };
 
   return (
     <div
@@ -724,7 +855,14 @@ export function VoiceProviderSheet(props: VoiceProviderSheetProps) {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div class="sheet-panel voice-lab-panel vp-ios-sheet">
+      <div
+        ref={sheetPanelRef}
+        class="sheet-panel voice-lab-panel vp-ios-sheet"
+        onTouchStart={onVoiceSheetTouchStart}
+        onTouchMove={onVoiceSheetTouchMove}
+        onTouchEnd={onVoiceSheetTouchEnd}
+        onTouchCancel={onVoiceSheetTouchEnd}
+      >
         <div class="sheet-handle"></div>
 
         {/* 顶部栏：Apple 极简导航栏 */}

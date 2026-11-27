@@ -1114,3 +1114,29 @@ test('v0.9.41 cloud TTS skips punctuation-only chunks, retries transient Seed-TT
   assert.match(sheetsSrc, /__dshVoiceByokCanSpeak/);
   assert.match(sheetsSrc, /allowNativeFallback:\s*false/);
 });
+
+test('Settings tab hides global top-bar cleanly and supports left-edge swipe-back on all 2nd-level pages', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const { resolve } = await import('node:path');
+  const [cssSrc, ctrlSrc, vpSrc] = await Promise.all([
+    readFile(resolve(process.cwd(), 'hub/web/src/styles/app.css'), 'utf8'),
+    readFile(resolve(process.cwd(), 'hub/web/src/controller.js'), 'utf8'),
+    readFile(resolve(process.cwd(), 'hub/web/src/components/VoiceProviderSheet.tsx'), 'utf8'),
+  ]);
+
+  // 1. Settings tab hides global top-bar (host switcher / new chat) and reserves iOS safe-area top
+  assert.match(cssSrc, /body\.tab-settings-active\s+\.top-bar\s*\{\s*display:\s*none;/);
+  assert.match(cssSrc, /body\.tab-settings-active\s+\.primary-pane\s*\{\s*padding-top:\s*var\(--safe-top\);/);
+  assert.match(ctrlSrc, /document\.body\.classList\.toggle\('tab-settings-active',\s*currentTab === 'settings'\)/);
+
+  // 2. Settings subpages integrate with overlayStack history and left-edge interactive swipe-back
+  assert.match(ctrlSrc, /trackOverlay\('settings-subpage',\s*rawCloseSettingsSubpage\)/);
+  assert.match(ctrlSrc, /dismissOverlay\('settings-subpage',\s*rawCloseSettingsSubpage\)/);
+  assert.match(ctrlSrc, /function setupSettingsSubpageSwipeBack\(\)/);
+  assert.match(ctrlSrc, /setupSettingsSubpageSwipeBack\(\);/);
+
+  // 3. VoiceProviderSheet (AI Models / Walk Mode / Chat Voice) also supports left-edge swipe-back
+  assert.match(vpSrc, /onTouchStart=\{onVoiceSheetTouchStart\}/);
+  assert.match(vpSrc, /onTouchMove=\{onVoiceSheetTouchMove\}/);
+  assert.match(vpSrc, /onTouchEnd=\{onVoiceSheetTouchEnd\}/);
+});

@@ -290,6 +290,32 @@
       overflow: hidden;
     }
 
+    /* 设置页隐藏全局顶栏（选电脑 / 新建对话等），给 iOS 设置大标题和二级页留出清爽全屏空间 */
+    body.tab-settings-active .top-bar {
+      display: none;
+    }
+
+    body.tab-settings-active .primary-pane,
+    body.tab-settings-active .main-viewport {
+      background: #F2F2F7;
+    }
+
+    body.tab-settings-active .primary-pane {
+      padding-top: var(--safe-top);
+    }
+
+    :root[data-theme="dark"] body.tab-settings-active .primary-pane,
+    :root[data-theme="dark"] body.tab-settings-active .main-viewport {
+      background: #000000;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) body.tab-settings-active .primary-pane,
+      :root:not([data-theme="light"]) body.tab-settings-active .main-viewport {
+        background: #000000;
+      }
+    }
+
     .top-bar-left {
       display: flex;
       align-items: center;

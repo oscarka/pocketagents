@@ -1568,6 +1568,7 @@ export function initHubController() {
     }
 
     const searchBox = document.getElementById('searchAndFilterBox');
+    document.body.classList.toggle('tab-settings-active', currentTab === 'settings');
     const normalizedSessions = getNormalizedSessions();
     if (currentTab === 'chats') {
       searchBox.style.display = hosts.length === 0 ? 'none' : 'block';
@@ -8950,12 +8951,19 @@ export function initHubController() {
     }
   });
 
+  function rawCloseSettingsSubpage() {
+    settingsPanel.closeSubpage();
+  }
+
   function openSettingsSubpage(page, param = '') {
     settingsPanel.openSubpage(page, param);
+    if (settingsPanel.getActiveSubpage() !== 'home') {
+      trackOverlay('settings-subpage', rawCloseSettingsSubpage);
+    }
   }
 
   function closeSettingsSubpage() {
-    settingsPanel.closeSubpage();
+    dismissOverlay('settings-subpage', rawCloseSettingsSubpage);
   }
 
   function renderSettingsTab() {
@@ -9560,10 +9568,14 @@ export function initHubController() {
 
   function switchTab(tab) {
     if (tab === 'settings' && currentTab === 'settings' && settingsPanel.getActiveSubpage() !== 'home') {
-      settingsPanel.closeSubpage();
+      closeSettingsSubpage();
       return;
     }
+    if (currentTab === 'settings' && tab !== 'settings' && settingsPanel.getActiveSubpage() !== 'home') {
+      closeSettingsSubpage();
+    }
     currentTab = tab;
+    document.body.classList.toggle('tab-settings-active', currentTab === 'settings');
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
     document.getElementById('tab-' + tab).classList.add('active');
     if (tab === 'files') {
@@ -10194,6 +10206,198 @@ export function initHubController() {
     window.addEventListener('touchcancel', finishSwipe);
   }
 
+  function setupSettingsSubpageSwipeBack() {
+    const vp = document.getElementById('mainViewport');
+    if (!vp) return;
+    let tracking = false;
+    let decided = null;
+    let startX = 0;
+    let startY = 0;
+    let startRelX = 0;
+    let lastX = 0;
+    let lastY = 0;
+    let startedAt = 0;
+    let width = 0;
+    let activePageEl = null;
+    let originTarget = null;
+    let lastHandledMoveEvt = null;
+    let lastHandledEndEvt = null;
+
+    const resetPageStyle = (el = activePageEl) => {
+      if (!el) return;
+      el.style.transition = '';
+      el.style.transform = '';
+      el.style.willChange = '';
+      el.style.boxShadow = '';
+    };
+
+    const isInteractiveExcluded = (target) => {
+      if (!target || typeof target.closest !== 'function') return false;
+      return Boolean(target.closest('textarea, input, select, video, audio, [data-no-back-swipe]'));
+    };
+
+    const canScrollHorizontally = (target, dx) => {
+      if (startRelX <= 28) return false;
+      let node = target;
+      while (node && node !== vp && node.nodeType === 1) {
+        const overflowX = window.getComputedStyle(node).overflowX;
+        if (/(auto|scroll)/.test(overflowX) && node.scrollWidth > node.clientWidth + 8) {
+          if (dx > 0 && node.scrollLeft > 2) return true;
+        }
+        node = node.parentElement;
+      }
+      return false;
+    };
+
+    const detachOriginListeners = () => {
+      if (!originTarget || originTarget === window || typeof originTarget.removeEventListener !== 'function') {
+        originTarget = null;
+        return;
+      }
+      try {
+        originTarget.removeEventListener('touchmove', onMove);
+        originTarget.removeEventListener('touchend', finishSwipe);
+        originTarget.removeEventListener('touchcancel', finishSwipe);
+      } catch { }
+      originTarget = null;
+    };
+
+    const onMove = (event) => {
+      if (!tracking || !activePageEl) return;
+      if (event === lastHandledMoveEvt) return;
+      lastHandledMoveEvt = event;
+      if (!event.touches || event.touches.length !== 1) {
+        tracking = false;
+        decided = null;
+        detachOriginListeners();
+        resetPageStyle();
+        activePageEl = null;
+        return;
+      }
+      const touch = event.touches[0];
+      const dx = touch.clientX - startX;
+      const dy = touch.clientY - startY;
+      lastX = touch.clientX;
+      lastY = touch.clientY;
+      if (decided === null) {
+        if (Math.abs(dx) < 9 && Math.abs(dy) < 9) return;
+        if (Date.now() - startedAt > 400) {
+          tracking = false;
+          detachOriginListeners();
+          activePageEl = null;
+          return;
+        }
+        if (dx <= -8 || (Math.abs(dy) >= 12 && Math.abs(dy) > Math.abs(dx) * 1.12)) {
+          tracking = false;
+          detachOriginListeners();
+          activePageEl = null;
+          return;
+        }
+        if (dx >= 10 && dx >= Math.abs(dy) * 1.1) {
+          if (canScrollHorizontally(originTarget || event.target, dx)) {
+            tracking = false;
+            detachOriginListeners();
+            activePageEl = null;
+            return;
+          }
+          decided = true;
+          activePageEl.style.transition = 'none';
+          activePageEl.style.willChange = 'transform';
+        } else if (Math.hypot(dx, dy) > 26) {
+          tracking = false;
+          detachOriginListeners();
+          activePageEl = null;
+          return;
+        } else {
+          return;
+        }
+      }
+      const clampedX = Math.max(0, Math.min(dx, width));
+      if (event.cancelable) event.preventDefault();
+      activePageEl.style.transform = `translate3d(${clampedX}px, 0, 0)`;
+      activePageEl.style.boxShadow = clampedX > 0 ? '-10px 0 28px rgba(15, 23, 42, 0.14)' : '';
+    };
+
+    const finishSwipe = (event) => {
+      if (event && event === lastHandledEndEvt) return;
+      lastHandledEndEvt = event || null;
+      if (!tracking) return;
+      tracking = false;
+      detachOriginListeners();
+      const pageEl = activePageEl;
+      activePageEl = null;
+      const wasDecided = decided === true;
+      decided = null;
+      if (!wasDecided || !pageEl) return;
+
+      const effDx = Math.max(0, lastX - startX);
+      const absDy = Math.abs(lastY - startY);
+      const durationMs = Math.max(1, Date.now() - startedAt);
+      const velocity = effDx / durationMs;
+      const distThreshold = Math.min(Math.max(60, width * 0.17), 115);
+      const dismiss =
+        absDy <= effDx * 1.15 &&
+        (effDx >= distThreshold ||
+          (effDx >= 30 && velocity >= 0.3) ||
+          shouldDismissHorizontalSwipe({ dx: effDx, dy: absDy, width, durationMs }));
+      if (dismiss) {
+        pageEl.style.transition = 'transform 0.14s cubic-bezier(0.22, 1, 0.36, 1)';
+        pageEl.style.transform = `translate3d(${width}px, 0, 0)`;
+        setTimeout(() => {
+          resetPageStyle(pageEl);
+          closeSettingsSubpage();
+        }, 145);
+      } else {
+        pageEl.style.transition = 'transform 0.22s cubic-bezier(0.22, 1, 0.36, 1)';
+        pageEl.style.transform = 'translate3d(0px, 0, 0)';
+        setTimeout(() => {
+          resetPageStyle(pageEl);
+        }, 230);
+      }
+    };
+
+    vp.addEventListener('touchstart', (event) => {
+      if (event.touches.length !== 1) return;
+      if (currentTab !== 'settings' || settingsPanel.getActiveSubpage() === 'home') return;
+      if (document.body.classList.contains('mobile-chat-open')) return;
+      if (document.querySelector('.sheet-backdrop.open, #triageDeckOverlay.open')) return;
+      if (isInteractiveExcluded(event.target)) return;
+      const pageEl = vp.querySelector('.ios-subpage-wrap');
+      if (!pageEl) return;
+      detachOriginListeners();
+      const touch = event.touches[0];
+      const rect = vp.getBoundingClientRect();
+      width = vp.offsetWidth || rect.width || window.innerWidth || 375;
+      startRelX = touch.clientX - rect.left;
+      if (!isWithinLeftSwipeBackZone(startRelX, width)) return;
+      startedAt = Date.now();
+      tracking = true;
+      decided = null;
+      activePageEl = pageEl;
+      startX = touch.clientX;
+      startY = touch.clientY;
+      lastX = startX;
+      lastY = startY;
+      originTarget = event.target;
+      if (
+        originTarget &&
+        originTarget !== window &&
+        originTarget !== vp &&
+        typeof originTarget.addEventListener === 'function'
+      ) {
+        try {
+          originTarget.addEventListener('touchmove', onMove, { passive: false });
+          originTarget.addEventListener('touchend', finishSwipe);
+          originTarget.addEventListener('touchcancel', finishSwipe);
+        } catch { }
+      }
+    }, { passive: true });
+
+    window.addEventListener('touchmove', onMove, { passive: false });
+    window.addEventListener('touchend', finishSwipe);
+    window.addEventListener('touchcancel', finishSwipe);
+  }
+
   function setupSheetSwipeDismiss() {
     document.querySelectorAll('.sheet-backdrop').forEach(backdrop => {
       const panel = backdrop.querySelector('.sheet-panel');
@@ -10716,6 +10920,7 @@ export function initHubController() {
 
   function setupOverlayGestures() {
     setupChatSwipeBack();
+    setupSettingsSubpageSwipeBack();
     setupSheetSwipeDismiss();
     setupStandaloneImageLongPressSave();
     setupMainViewportPullRefresh();
