@@ -3572,6 +3572,25 @@ if (isMain) {
   const hub = new HubCore({ stateFile })
   await hub.init()
   const { server } = createHubServer({ hub, token: tokenCheck.token, requireToken: !allowInsecure })
+  let shuttingDown = false
+  const gracefulShutdown = async () => {
+    if (shuttingDown) return
+    shuttingDown = true
+    try {
+      await Promise.race([
+        hub.flushPersist(),
+        new Promise(r => setTimeout(r, 2500)),
+      ])
+    } catch { }
+    try {
+      server.close(() => process.exit(0))
+      setTimeout(() => process.exit(0), 1500).unref?.()
+    } catch {
+      process.exit(0)
+    }
+  }
+  process.once('SIGTERM', gracefulShutdown)
+  process.once('SIGINT', gracefulShutdown)
   server.listen(port, host, () => {
     console.log(
       formatStartupBanner({

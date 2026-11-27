@@ -28,6 +28,7 @@ export class HubCore {
     buildInfo = null,
     tokenSecret = '',
     deviceApprovalEnabled = false,
+    persistDebounceMs = 4000,
   } = {}) {
     this.stateFile = stateFile
     this.now = now
@@ -36,6 +37,8 @@ export class HubCore {
     this.apnsConfig = apnsConfig
     this.buildInfo = buildInfo
     this.tokenSecret = String(tokenSecret ?? '').trim()
+    this.persistDebounceMs = Math.max(0, Number(persistDebounceMs) || 0)
+    this._persistTimer = null
     this.mediaSeed = randomBytes(32).toString('hex')
     this.activeHostId = ''
     this.hosts = new Map()
@@ -1044,8 +1047,138 @@ export class HubCore {
     return { ok: true }
   }
 
+  compactBridgeStateForDisk(bridgeState) {
+    if (!bridgeState || typeof bridgeState !== 'object') {
+      return { tasks: [], approvals: [], workspaces: [] }
+    }
+    const rawTasks = Array.isArray(bridgeState.tasks) ? bridgeState.tasks : []
+    const tasks = rawTasks.map(task => {
+      if (!task || typeof task !== 'object') return task
+      const rawTr = Array.isArray(task.transcript) ? task.transcript : []
+      const totalCount = Math.max(Number(task.totalTranscriptCount) || 0, Number(task.messageCount) || 0, rawTr.length)
+      let slicedTr = rawTr.length > 4 ? rawTr.slice(-4) : rawTr
+      if (slicedTr.length > 0 && rawTr.some(m => m?.role === 'user') && !slicedTr.some(m => m?.role === 'user')) {
+        const lastUser = [...rawTr].reverse().find(m => m?.role === 'user')
+        if (lastUser) {
+          slicedTr = [
+            {
+              role: 'user',
+              text: typeof lastUser.text === 'string' ? lastUser.text.slice(0, 600) : '',
+              ...(lastUser.time ? { time: lastUser.time } : {}),
+              ...(typeof lastUser.stepIndex === 'number' && Number.isFinite(lastUser.stepIndex)
+                ? { stepIndex: lastUser.stepIndex }
+                : {}),
+            },
+            ...slicedTr.slice(-3),
+          ]
+        }
+      }
+      let lastAsstIdx = -1
+      for (let i = slicedTr.length - 1; i >= 0; i -= 1) {
+        if (slicedTr[i]?.role === 'assistant') {
+          lastAsstIdx = i
+          break
+        }
+      }
+      let diskTrimmed = slicedTr.length < rawTr.length
+      const transcript = slicedTr.map((m, idx) => {
+        if (!m || typeof m !== 'object') return m
+        const { toolCalls: _omitTc, ...mRest } = m
+        const isLatestAsst = idx === lastAsstIdx
+        const maxText = isLatestAsst ? 2000 : 600
+        let text = mRest.text
+        if (typeof text === 'string' && text.length > maxText) {
+          text = text.slice(0, maxText)
+          diskTrimmed = true
+        }
+        if (m.role !== 'assistant') {
+          return { ...mRest, text }
+        }
+        let thinking = mRest.thinking
+        if (typeof thinking === 'string') {
+          if (!isLatestAsst) {
+            if (thinking.length > 0) diskTrimmed = true
+            thinking = ''
+          } else if (thinking.length > 400) {
+            thinking = thinking.slice(0, 400)
+            diskTrimmed = true
+          }
+        }
+        const rawTools = Array.isArray(m.tools) ? m.tools : Array.isArray(m.toolCalls) ? m.toolCalls : []
+        const tools = rawTools.slice(0, 6).map(tl =>
+          typeof tl === 'string'
+            ? { name: tl, id: '', summary: '', commandLine: '' }
+            : {
+              name: tl?.name || 'tool',
+              id: tl?.id || '',
+              summary: tl?.summary ? String(tl.summary).slice(0, 140) : '',
+              commandLine: tl?.commandLine ? String(tl.commandLine).slice(0, 160) : '',
+            },
+        )
+        if (rawTools.length > 6) diskTrimmed = true
+        return {
+          ...mRest,
+          text,
+          thinking,
+          tools,
+        }
+      })
+      const changedFiles = Array.isArray(task.changedFiles) ? task.changedFiles.slice(0, 20) : task.changedFiles
+      const artifacts = Array.isArray(task.artifacts) ? task.artifacts.slice(0, 10) : task.artifacts
+      return {
+        ...task,
+        lastOutput: typeof task.lastOutput === 'string' && task.lastOutput.length > 1200
+          ? task.lastOutput.slice(0, 1200)
+          : task.lastOutput,
+        runningSummary: typeof task.runningSummary === 'string' && task.runningSummary.length > 300
+          ? task.runningSummary.slice(0, 300)
+          : task.runningSummary,
+        changedFiles,
+        artifacts,
+        totalTranscriptCount: totalCount,
+        ...(diskTrimmed ? { wireTruncated: true } : {}),
+        transcript,
+      }
+    })
+    return {
+      ...bridgeState,
+      tasks,
+    }
+  }
+
+  schedulePersist(delayMs = this.persistDebounceMs) {
+    if (!this.stateFile) return
+    const waitMs = Math.max(0, Number(delayMs) || 0)
+    if (waitMs === 0) {
+      void this.persist()
+      return
+    }
+    if (this._persistTimer) return
+    this._persistTimer = setTimeout(() => {
+      this._persistTimer = null
+      void this.persist()
+    }, waitMs)
+    this._persistTimer.unref?.()
+  }
+
+  async flushPersist() {
+    if (this._persistTimer) {
+      clearTimeout(this._persistTimer)
+      this._persistTimer = null
+      return this.persist()
+    }
+    if (this._persistInFlight) {
+      return this._persistInFlight
+    }
+    return undefined
+  }
+
   async persist() {
     if (!this.stateFile) return
+    if (this._persistTimer) {
+      clearTimeout(this._persistTimer)
+      this._persistTimer = null
+    }
     if (this._persistInFlight) {
       this._persistQueued = true
       return this._persistInFlight
@@ -1070,23 +1203,27 @@ export class HubCore {
             vapidKeys: this.vapidKeys,
             pushSubscriptions: [...this.pushSubscriptions.values()],
             apnsDevices: [...this.apnsDevices.values()],
-            hosts: [...this.hosts.values()].map(h => ({
-              ...h,
-              lastFilePreview: h.lastFilePreview ? this.sanitizeFilePreviewForState(h.hostId, h.lastFilePreview) : null,
-              commands: (h.commands ?? []).filter(c => c && (!c.expiresAt || now <= c.expiresAt)),
-              recentResults: (h.recentResults ?? []).slice(-15).map(r => {
-                if (
-                  r &&
-                  (r.dataBase64 ||
-                    Array.isArray(r.transcript) ||
-                    (typeof r.content === 'string' && r.content.length > INLINE_TEXT_PREVIEW_MAX_CHARS))
-                ) {
-                  const { dataBase64, content, transcript, ...rest } = r
-                  return { ...rest, hasBlob: true }
-                }
-                return r
-              }),
-            })),
+            hosts: [...this.hosts.values()].map(h => {
+              const { lastFsListing: _omitFsListing, ...hostRest } = h
+              return {
+                ...hostRest,
+                bridgeState: this.compactBridgeStateForDisk(h.bridgeState),
+                lastFilePreview: h.lastFilePreview ? this.sanitizeFilePreviewForState(h.hostId, h.lastFilePreview) : null,
+                commands: (h.commands ?? []).filter(c => c && (!c.expiresAt || now <= c.expiresAt)),
+                recentResults: (h.recentResults ?? []).slice(-15).map(r => {
+                  if (
+                    r &&
+                    (r.dataBase64 ||
+                      Array.isArray(r.transcript) ||
+                      (typeof r.content === 'string' && r.content.length > INLINE_TEXT_PREVIEW_MAX_CHARS))
+                  ) {
+                    const { dataBase64, content, transcript, ...rest } = r
+                    return { ...rest, hasBlob: true }
+                  }
+                  return r
+                }),
+              }
+            }),
             snapshots: [...this.snapshots.values()],
             shares: [...this.shares.values()],
             approvalLedger: [...this.approvalLedger.entries()],
@@ -2683,16 +2820,22 @@ export class HubCore {
     const livenessChanged = prevLivenessSig !== undefined && prevLivenessSig !== nextLivenessSig
     this.lastHostLivenessSig.set(hostId, nextLivenessSig)
     const nextFingerprint = this.computeHostFingerprint(record)
-    const stateChanged =
+    const urgentPersist =
       urgentStateTransition ||
       hasCommandActivity ||
       pinStateChangedByHarness ||
-      livenessChanged ||
-      nextFingerprint !== record._lastFingerprint
+      livenessChanged
+    const stateChanged = urgentPersist || nextFingerprint !== record._lastFingerprint
     if (stateChanged || now - (record._lastBroadcastAt || 0) >= 60_000) {
       record._lastFingerprint = nextFingerprint
       record._lastBroadcastAt = now
-      void this.persist()
+      if (urgentPersist) {
+        void this.persist()
+      } else if (stateChanged) {
+        // Routine streaming / progress heartbeat: debounce disk flush so multi-host traffic
+        // coalesces into one compact atomic write instead of thrashing e2-micro CPU.
+        this.schedulePersist()
+      }
       this.emitStateChange(urgentStateTransition ? 'task_concluded' : 'heartbeat')
     }
 

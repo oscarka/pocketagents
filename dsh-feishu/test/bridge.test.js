@@ -2319,6 +2319,93 @@ test('first-time user deployment & onboarding: stateFile fallback, LAN QR origin
   }
 })
 
+test('HubCore slim disk persistence & debounced heartbeat writes shrink state file without mutating in-memory transcript', async () => {
+  const { readFile, stat } = await import('node:fs/promises')
+  const { HubCore } = await import('../../hub/hub-core.js')
+  const root = await mkdtemp(join(tmpdir(), 'dsh-persist-slim-'))
+  const stateFile = join(root, 'hub-state.json')
+  try {
+    let now = 1_800_000_000_000
+    const hub = new HubCore({ stateFile, now: () => now, persistDebounceMs: 80 })
+    await hub.init()
+
+    const hugeText = 'A'.repeat(30_000)
+    const bigTranscript = []
+    for (let i = 0; i < 12; i += 1) {
+      bigTranscript.push({
+        role: i % 2 === 0 ? 'user' : 'assistant',
+        stepIndex: i % 2 === 0 ? i : undefined,
+        text: i === 11 ? hugeText : `msg-${i}-${'B'.repeat(4000)}`,
+        thinking: i % 2 === 1 ? 'T'.repeat(3000) : '',
+        tools: i % 2 === 1 ? Array.from({ length: 10 }, (_, k) => ({ name: `t${k}`, summary: 'S'.repeat(300), commandLine: 'C'.repeat(400) })) : [],
+        toolCalls: i % 2 === 1 ? [{ name: 'dup' }] : [],
+        time: now - (12 - i) * 1000,
+      })
+    }
+
+    // Routine streaming heartbeat uses debounced schedulePersist (not synchronous write on same tick)
+    hub.handleHeartbeat({
+      hostId: 'mac-slim-1',
+      hostName: 'Mac Slim',
+      bridgeState: {
+        tasks: [
+          {
+            id: 'agy-ide:conv-slim',
+            harness: 'antigravity-ide',
+            status: 'running',
+            title: '长对话压测',
+            lastOutput: 'L'.repeat(5000),
+            runningSummary: 'R'.repeat(1000),
+            transcript: bigTranscript,
+            messageCount: 12,
+          },
+        ],
+        approvals: [],
+        workspaces: ['/Users/dev/demo'],
+      },
+    })
+
+    // In-memory state remains 100% full & unmutated
+    const memTask = hub.hosts.get('mac-slim-1').bridgeState.tasks[0]
+    assert.equal(memTask.transcript.length, 12)
+    assert.equal(memTask.transcript[11].text.length, 30_000)
+
+    // Attach transient lastFsListing to confirm it is omitted from disk snapshot
+    hub.hosts.get('mac-slim-1').lastFsListing = { at: now, entries: Array.from({ length: 200 }, (_, i) => ({ name: `f${i}` })) }
+
+    // Flush debounced persist and inspect disk JSON
+    await hub.flushPersist()
+    const rawDisk = await readFile(stateFile, 'utf8')
+    assert.ok(rawDisk.length < 18_000, `disk state should be compact, got ${rawDisk.length} bytes`)
+    const parsed = JSON.parse(rawDisk)
+    const diskHost = parsed.hosts.find(h => h.hostId === 'mac-slim-1')
+    assert.equal(diskHost.lastFsListing, undefined, 'transient lastFsListing should be omitted on disk')
+    const diskTask = diskHost.bridgeState.tasks[0]
+    assert.equal(diskTask.transcript.length, 4, 'disk snapshot keeps last 4 messages')
+    assert.equal(diskTask.wireTruncated, true)
+    assert.equal(diskTask.totalTranscriptCount, 12)
+    assert.equal(diskTask.transcript[3].text.length, 2000)
+    assert.equal(diskTask.transcript[3].thinking.length, 400)
+    assert.equal(diskTask.transcript[3].tools.length, 6)
+    assert.equal(diskTask.transcript[3].toolCalls, undefined)
+    assert.ok(diskTask.transcript.some(m => m.role === 'user' && typeof m.stepIndex === 'number'))
+
+    // Idle 60s keepalive heartbeat with NO state change (after clearing transient fsListing) should NOT rewrite disk
+    delete hub.hosts.get('mac-slim-1').lastFsListing
+    const m0 = (await stat(stateFile)).mtimeMs
+    now += 65_000
+    hub.handleHeartbeat({
+      hostId: 'mac-slim-1',
+      hostName: 'Mac Slim',
+      bridgeState: hub.hosts.get('mac-slim-1').bridgeState,
+    })
+    assert.equal(hub._persistTimer, null, 'unchanged keepalive heartbeat must not schedule a disk persist')
+    assert.equal((await stat(stateFile)).mtimeMs, m0)
+  } finally {
+    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 25 })
+  }
+})
+
 
 
 
