@@ -1358,6 +1358,9 @@ export class HubCore {
                 role: 'user',
                 text: typeof lastUserMsg.text === 'string' ? lastUserMsg.text.slice(0, 600) : '',
                 ...(lastUserMsg.time ? { time: lastUserMsg.time } : {}),
+                ...(typeof lastUserMsg.stepIndex === 'number' && Number.isFinite(lastUserMsg.stepIndex)
+                  ? { stepIndex: lastUserMsg.stepIndex }
+                  : {}),
               },
               ...slicedTr.slice(-Math.max(1, maxMsgs - 1)),
             ]

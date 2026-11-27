@@ -9,6 +9,7 @@ import {
   revertAntigravityToStep,
 } from '../lib/antigravity-ide.js'
 import { translateZhStringToEn } from '../../hub/web/src/utils/i18n.js'
+import { HubCore } from '../../hub/hub-core.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(__dirname, '..', '..')
@@ -264,4 +265,30 @@ test('mobile revert sheet includes explicit Cancel button, Antigravity-only guar
   assert.equal(translateZhStringToEn('💬 仅撤回对话，保留已改代码'), '💬 Revert Chat Only (Keep Code)')
   assert.equal(translateZhStringToEn('📁 受影响的代码文件（共 3 个）'), '📁 Affected Code Files (3)')
   assert.equal(translateZhStringToEn('↩ 撤回对话并还原代码（3 个文件）'), '↩ Revert Chat & Code (3 files)')
+})
+
+test('HubCore.compactBridgeStateForWire preserves stepIndex even on synthetic preserved lastUserMsg', () => {
+  const hub = new HubCore({ now: () => 1_800_000_000_000 })
+  const bridgeState = {
+    tasks: [
+      {
+        id: 'agy-ide:conv-wire-1',
+        harness: 'antigravity-ide',
+        status: 'idle',
+        updatedAt: 1_800_000_000_000,
+        transcript: [
+          { role: 'user', text: '第一条指令', stepIndex: 0, time: 1_799_999_900_000 },
+          { role: 'assistant', text: '中间回复 1', time: 1_799_999_910_000 },
+          { role: 'assistant', text: '中间回复 2', time: 1_799_999_920_000 },
+          { role: 'assistant', text: '最终结论', time: 1_799_999_930_000 },
+        ],
+      },
+    ],
+    approvals: [],
+    workspaces: [],
+  }
+  const compactedLite = hub.compactBridgeStateForWire(bridgeState, 1_800_000_000_000, { lite: true })
+  const liteUser = compactedLite.tasks[0].transcript.find(m => m.role === 'user')
+  assert.ok(liteUser, 'synthetic lastUserMsg should be preserved in lite mode')
+  assert.equal(liteUser.stepIndex, 0, 'stepIndex must be preserved on synthetic lastUserMsg')
 })
