@@ -292,7 +292,7 @@ export class AntigravityAcpClient {
             clientCapabilities: {},
             clientInfo: {
               name: 'PocketAgents',
-              version: '0.9.47',
+              version: '0.9.48',
             },
           },
           12_000,

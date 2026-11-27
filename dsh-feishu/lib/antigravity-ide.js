@@ -1816,8 +1816,9 @@ const highConfidenceSessionStates = new Map()
 
 /**
  * 5-second hysteresis protection window:
- * Prevents a low-confidence heuristic (`ps-heuristic` / `mtime-decay`) from overriding a recent
- * high-confidence (`ls-rpc`) state observation within `windowMs` (default 5000ms).
+ * Prevents low-confidence heuristics (`ps-heuristic` / `mtime-decay`) OR transient medium-confidence
+ * `jsonl-tail` fallbacks (when `ls-rpc` briefly drops out while a session was running/waiting)
+ * from overriding a recent high-confidence (`ls-rpc`) state observation within `windowMs` (default 5000ms).
  */
 export function applyStateHysteresis(session, stateCache = highConfidenceSessionStates, now = Date.now(), windowMs = 5000) {
   if (!session || !session.id) return session
@@ -1829,6 +1830,8 @@ export function applyStateHysteresis(session, stateCache = highConfidenceSession
     stateCache.set(session.id, {
       status: session.status,
       turnState: session.turnState,
+      isMidTurn: Boolean(session.isMidTurn),
+      hasActiveBackgroundTask: Boolean(session.hasActiveBackgroundTask),
       statusLabel: session.statusLabel,
       pendingApproval: session.pendingApproval,
       stateMeta: { ...meta, observedAt: now },
@@ -1841,7 +1844,14 @@ export function applyStateHysteresis(session, stateCache = highConfidenceSession
     return session
   }
 
-  if (prev && curRank === 1 && now - prev.recordedAt <= windowMs) {
+  const prevWasActive = prev?.status === 'running' || prev?.status === 'approval'
+  const shouldProtectMediumIdleDrop =
+    curRank === 2 &&
+    prevWasActive &&
+    session.status === 'idle' &&
+    !session.hasLiveSummary
+
+  if (prev && (curRank === 1 || shouldProtectMediumIdleDrop) && now - prev.recordedAt <= windowMs) {
     const restoredApproval = prev.pendingApproval || null
     const restoredStatus = prev.status
     const restoredTurnState = prev.turnState
@@ -1850,6 +1860,8 @@ export function applyStateHysteresis(session, stateCache = highConfidenceSession
       ...session,
       status: restoredStatus,
       turnState: restoredTurnState,
+      isMidTurn: prev.isMidTurn,
+      hasActiveBackgroundTask: prev.hasActiveBackgroundTask,
       statusLabel: prev.statusLabel,
       pendingApproval: restoredApproval,
       sessionRev: restoredSessionRev,
@@ -2080,6 +2092,8 @@ export async function loadAntigravityIdeSessions({
   now = Date.now(),
   execImpl = execFileAsync,
   fetchImpl = globalThis.fetch,
+  readFileImpl = readFile,
+  homeDir = homedir(),
 } = {}) {
   let customTitles = {}
   if (dshHome) {
@@ -2159,7 +2173,7 @@ export async function loadAntigravityIdeSessions({
   const latestCandidateMtimeMs = topCandidates[0]?.mtimeMs || 0
   const [nativeMetaMap, liveSummariesMap] = await Promise.all([
     loadAntigravityMetadataForCandidates(brainDirs, topCandidates),
-    loadLiveTrajectorySummaries({ minFreshAt: latestCandidateMtimeMs, execImpl, fetchImpl }),
+    loadLiveTrajectorySummaries({ minFreshAt: latestCandidateMtimeMs, execImpl, fetchImpl, readFileImpl, homeDir }),
   ])
 
   const settledKey = settledApprovals ? [...settledApprovals].join(',') : ''
@@ -2599,8 +2613,14 @@ async function loadLiveTrajectorySummaries({
   minFreshAt = 0,
   execImpl = execFileAsync,
   fetchImpl = globalThis.fetch,
+  readFileImpl = readFile,
+  homeDir = homedir(),
 } = {}) {
-  const isDefaultRuntime = execImpl === execFileAsync && fetchImpl === globalThis.fetch
+  const isDefaultRuntime =
+    execImpl === execFileAsync &&
+    fetchImpl === globalThis.fetch &&
+    readFileImpl === readFile &&
+    homeDir === homedir()
   const now = Date.now()
   const hasWaitingInCache = Boolean(
     cachedLiveSummaries &&
@@ -2621,8 +2641,9 @@ async function loadLiveTrajectorySummaries({
   const map = new Map()
   if (typeof fetchImpl !== 'function') return map
   try {
-    const hubs = await discoverAntigravityHubInstances({ execImpl })
+    const hubs = await discoverAntigravityHubInstances({ execImpl, readFileImpl, homeDir })
     const bestByCid = new Map()
+    let succeededHubCount = 0
     await Promise.all(
       hubs.map(async hub => {
         const controller = new AbortController()
@@ -2645,6 +2666,7 @@ async function loadLiveTrajectorySummaries({
           const data = await resp.json().catch(() => null)
           const summaries = data?.trajectorySummaries
           if (!summaries || typeof summaries !== 'object') return
+          succeededHubCount += 1
           for (const [cid, sum] of Object.entries(summaries)) {
             if (!cid || !sum || typeof sum !== 'object') continue
             const candidate = { hub, sum }
@@ -2660,6 +2682,13 @@ async function loadLiveTrajectorySummaries({
         }
       }),
     )
+
+    if (isDefaultRuntime && hubs.length > 0 && succeededHubCount === 0) {
+      // Every cached hub failed (e.g. IDE restarted and rotated hub port / CSRF token):
+      // bust discovery cache immediately so the next poll re-discovers fresh credentials.
+      cachedRawHubInstances = null
+      cachedRawHubInstancesAt = 0
+    }
 
     const modelLookups = []
     for (const [cid, { hub, sum }] of bestByCid.entries()) {
@@ -2688,13 +2717,59 @@ let cachedRawHubInstances = null
 let cachedRawHubInstancesAt = 0
 
 /**
- * Discover running Antigravity IDE LanguageServer (`agy --hub --hub-port=<PORT> --csrf_token=<TOKEN>`
+ * Read Antigravity IDE v2.8.0+ hub daemon metadata (`~/.gemini/<appDataDir>/daemon/hub_<PORT>.json`),
+ * which stores `{ pid, httpPort, httpsPort, lsVersion, csrfToken }` instead of exposing `--csrf_token` in argv.
+ * Strictly validates that `meta.pid` (when present) matches the live process PID from `ps` so stale
+ * `hub_*.json` files from prior IDE launches are never trusted.
+ */
+async function readHubDaemonMetadata({
+  port,
+  appDataDir = 'antigravity',
+  expectedPid = 0,
+  readFileImpl = readFile,
+  homeDir = homedir(),
+} = {}) {
+  const numPort = Number(port)
+  if (!Number.isInteger(numPort) || numPort <= 0 || typeof readFileImpl !== 'function') return null
+  const cleanDir = /^[A-Za-z0-9._-]+$/.test(String(appDataDir || ''))
+    ? String(appDataDir)
+    : 'antigravity'
+  const candidateDirs = [...new Set([cleanDir, 'antigravity', 'antigravity-ide'])]
+  for (const dir of candidateDirs) {
+    const metaPath = join(homeDir, '.gemini', dir, 'daemon', `hub_${numPort}.json`)
+    try {
+      const raw = await readFileImpl(metaPath, 'utf8')
+      const meta = JSON.parse(String(raw || ''))
+      const csrfToken = String(meta?.csrfToken || '').trim()
+      if (!csrfToken) continue
+      const metaPid = Number(meta?.pid)
+      if (metaPid > 0 && Number(expectedPid) > 0 && metaPid !== Number(expectedPid)) {
+        continue
+      }
+      return {
+        csrfToken,
+        httpPort: Number(meta?.httpPort) || numPort,
+        httpsPort: Number(meta?.httpsPort) || 0,
+        lsVersion: String(meta?.lsVersion || ''),
+      }
+    } catch {
+      // try next candidate daemon directory
+    }
+  }
+  return null
+}
+
+/**
+ * Discover running Antigravity IDE LanguageServer (`agy --hub --hub-port=<PORT>` with inline
+ * `--csrf_token=<TOKEN>` or v2.8.0+ `~/.gemini/<appDataDir>/daemon/hub_<PORT>.json` metadata,
  * as well as standalone `Antigravity.app` `language_server --csrf_token <TOKEN>`) instances.
  * Prioritizes the instance whose `--add-dir` matches `preferredCwd`.
  */
 export async function discoverAntigravityHubInstances({
   execImpl = execFileAsync,
   preferredCwd = '',
+  readFileImpl = readFile,
+  homeDir = homedir(),
 } = {}) {
   const instances = []
   const seenAddresses = new Set()
@@ -2719,8 +2794,9 @@ export async function discoverAntigravityHubInstances({
   }
 
   const isDefaultExec = execImpl === execFileAsync
+  const isDefaultDiscovery = isDefaultExec && readFileImpl === readFile && homeDir === homedir()
   const now = Date.now()
-  if (isDefaultExec && cachedRawHubInstances && cachedRawHubInstances.length > 0 && now - cachedRawHubInstancesAt < 10_000) {
+  if (isDefaultDiscovery && cachedRawHubInstances && cachedRawHubInstances.length > 0 && now - cachedRawHubInstancesAt < 10_000) {
     for (const inst of cachedRawHubInstances) addInstance(inst)
   } else if (typeof execImpl === 'function') {
     try {
@@ -2742,22 +2818,41 @@ export async function discoverAntigravityHubInstances({
           continue
         }
 
-        if (cmdLine.includes('--hub') && cmdLine.includes('--hub-port=') && cmdLine.includes('--csrf_token=')) {
+        if (cmdLine.includes('--hub') && cmdLine.includes('--hub-port=')) {
           const portMatch = cmdLine.match(/--hub-port=(\d+)/)
           const csrfMatch = cmdLine.match(/--csrf_token=([^\s]+)/)
+          const appDataMatch = cmdLine.match(/--app_data_dir=([^\s]+)/)
           const dirs = [...cmdLine.matchAll(/--add-dir=([^\s]+)/g)].map(m => m[1])
           const binMatch = cmdLine.match(/^(\S+\/agy)\b/)
           const candidateBin = binMatch ? binMatch[1] : ''
-          if (portMatch && csrfMatch) {
-            addInstance({
-              address: `127.0.0.1:${portMatch[1]}`,
-              port: Number(portMatch[1]),
-              csrfToken: csrfMatch[1],
-              addDir: dirs[0] || '',
-              addDirs: dirs,
-              binPath: isTrustedAgyBinPath(candidateBin) ? candidateBin : '',
-              kind: 'agy-hub',
-            })
+          if (portMatch) {
+            const rawPort = Number(portMatch[1])
+            let resolvedPort = rawPort
+            let resolvedToken = csrfMatch ? csrfMatch[1] : ''
+            if (!resolvedToken) {
+              const meta = await readHubDaemonMetadata({
+                port: rawPort,
+                appDataDir: appDataMatch ? appDataMatch[1] : 'antigravity',
+                expectedPid: Number(pid),
+                readFileImpl,
+                homeDir,
+              })
+              if (meta?.csrfToken) {
+                resolvedToken = meta.csrfToken
+                resolvedPort = meta.httpPort || rawPort
+              }
+            }
+            if (resolvedToken && resolvedPort > 0) {
+              addInstance({
+                address: `127.0.0.1:${resolvedPort}`,
+                port: resolvedPort,
+                csrfToken: resolvedToken,
+                addDir: dirs[0] || '',
+                addDirs: dirs,
+                binPath: isTrustedAgyBinPath(candidateBin, homeDir) ? candidateBin : '',
+                kind: 'agy-hub',
+              })
+            }
           }
           continue
         }
@@ -2816,7 +2911,7 @@ export async function discoverAntigravityHubInstances({
           // ignore lsof failure
         }
       }
-      if (isDefaultExec && instances.length > 0) {
+      if (isDefaultDiscovery && instances.length > 0) {
         cachedRawHubInstances = instances.map(inst => ({ ...inst }))
         cachedRawHubInstancesAt = now
       }

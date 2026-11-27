@@ -345,8 +345,20 @@ function resolveBuildInfo(startedAt = Date.now()) {
   return { version, uiBuild, startedAt }
 }
 
+function resolveCompletionPushDebounceMs() {
+  const raw = process.env.COMPLETION_PUSH_DEBOUNCE_MS
+  if (raw !== undefined && raw !== '') {
+    const n = Number(raw)
+    if (Number.isFinite(n) && n >= 0) return n
+  }
+  return 4500
+}
+
 export function createHubServer({
-  hub = new HubCore({ stateFile: process.env.HUB_STATE_FILE || '' }),
+  hub = new HubCore({
+    stateFile: process.env.HUB_STATE_FILE || '',
+    completionPushDebounceMs: resolveCompletionPushDebounceMs(),
+  }),
   token = process.env.HUB_TOKEN || process.env.FEISHU_HUB_TOKEN || '',
   requireToken = false,
   trustProxy,
@@ -3612,7 +3624,10 @@ if (isMain) {
     console.error(tokenCheck.error)
     process.exit(1)
   }
-  const hub = new HubCore({ stateFile })
+  const hub = new HubCore({
+    stateFile,
+    completionPushDebounceMs: resolveCompletionPushDebounceMs(),
+  })
   await hub.init()
   const { server } = createHubServer({ hub, token: tokenCheck.token, requireToken: !allowInsecure })
   let shuttingDown = false

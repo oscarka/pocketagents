@@ -113,7 +113,11 @@ export async function startEmbeddedLocalHub({
     explicitToken,
   })
   const stateFile = join(homeDir, 'hub-state.json')
-  const hub = new HubCore({ stateFile })
+  const completionPushDebounceMs =
+    process.env.COMPLETION_PUSH_DEBOUNCE_MS !== undefined && process.env.COMPLETION_PUSH_DEBOUNCE_MS !== ''
+      ? Math.max(0, Number(process.env.COMPLETION_PUSH_DEBOUNCE_MS) || 0)
+      : 4500
+  const hub = new HubCore({ stateFile, completionPushDebounceMs })
   await hub.init()
 
   const targetPort = Number.isInteger(preferredPort) && preferredPort > 0 ? preferredPort : 8788

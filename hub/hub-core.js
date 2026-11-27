@@ -29,6 +29,7 @@ export class HubCore {
     tokenSecret = '',
     deviceApprovalEnabled = false,
     persistDebounceMs = 4000,
+    completionPushDebounceMs = 0,
   } = {}) {
     this.stateFile = stateFile
     this.now = now
@@ -38,6 +39,7 @@ export class HubCore {
     this.buildInfo = buildInfo
     this.tokenSecret = String(tokenSecret ?? '').trim()
     this.persistDebounceMs = Math.max(0, Number(persistDebounceMs) || 0)
+    this.completionPushDebounceMs = Math.max(0, Number(completionPushDebounceMs) || 0)
     this._persistTimer = null
     this.mediaSeed = randomBytes(32).toString('hex')
     this.activeHostId = ''
@@ -60,6 +62,7 @@ export class HubCore {
     this.unsubscribedEndpoints = new Set()
     this.pushedApprovalCodes = new Set()
     this.pendingApprovalPushTimers = new Map()
+    this.pendingCompletionPushTimers = new Map()
     this.pushedCompletionSigs = new Map()
     this.sessionReadState = new Map()
     this.sessionPinState = new Map()
@@ -2385,19 +2388,101 @@ export class HubCore {
     }
 
     // 2. Check for task completion or failure transitions (filtering out background subagents & internal stubs)
+    const cancelPendingCompletion = key => {
+      const pending = this.pendingCompletionPushTimers.get(key)
+      if (!pending) return
+      clearTimeout(pending.timer)
+      this.pendingCompletionPushTimers.delete(key)
+    }
+
+    const computeTaskEffectiveStatus = (t, curApprovals) => {
+      const curStatus = String(t?.status || 'unknown')
+      const hasPendingApprovalForTask = Array.isArray(curApprovals) && curApprovals.some(a => a?.agentId === t?.id)
+      const isStillMidTurn =
+        Boolean(t?.isMidTurn) ||
+        Boolean(t?.hasActiveBackgroundTask) ||
+        hasPendingApprovalForTask ||
+        t?.turnState === 'running' ||
+        t?.turnState === 'approval'
+      return {
+        curStatus,
+        isStillMidTurn,
+        effectiveStatus: curStatus === 'idle' && isStillMidTurn ? 'running' : curStatus,
+      }
+    }
+
+    const commitCompletionPush = (targetTask, targetHostName, targetApprovals, { fromTimer = false } = {}) => {
+      if (!targetTask || shouldSuppressTaskPush(targetTask)) return false
+      const key = `${hostId}:${targetTask.id}`
+      const { effectiveStatus: curEffectiveStatus } = computeTaskEffectiveStatus(targetTask, targetApprovals)
+      if (curEffectiveStatus !== 'idle' || targetTask.turnState === 'interrupted') return false
+      const completionSig = `${targetTask.lastStepIndex ?? ''}:${targetTask.lastConclusionAt || ''}:${String(targetTask.lastOutput || '').slice(0, 80)}`
+      if (completionSig && this.pushedCompletionSigs.get(key) === completionSig) return false
+      if (completionSig) {
+        this.pushedCompletionSigs.set(key, completionSig)
+        while (this.pushedCompletionSigs.size > 400) {
+          this.pushedCompletionSigs.delete(this.pushedCompletionSigs.keys().next().value)
+        }
+      }
+      const conclusionAt = Math.max(Number(targetTask.lastConclusionAt) || 0, Number(targetTask.updatedAt) || 0, this.now())
+      const existingRead = this.sessionReadState.get(targetTask.id)
+      const alreadyReadConclusion = Boolean(
+        existingRead &&
+        existingRead.unread === false &&
+        String(existingRead.sig || '').startsWith('conclusion:') &&
+        Number(existingRead.at) >= Math.max(Number(targetTask.lastConclusionAt) || 0, Number(targetTask.updatedAt) || 0),
+      )
+      if (!alreadyReadConclusion) {
+        this.sessionReadState.set(targetTask.id, {
+          unread: true,
+          sig: '',
+          at: conclusionAt,
+        })
+      }
+      const formatted = formatWebPushNotification({
+        kind: 'completed',
+        hosts: [...this.hosts.values()],
+        hostId,
+        hostName: targetHostName,
+        task: targetTask,
+      })
+      void this.broadcastWebPush({
+        title: formatted.title,
+        body: formatted.body,
+        tag: formatted.tag,
+        badgeCount: this.computeActionableBadgeCount(Array.isArray(targetApprovals) ? targetApprovals.length : 0),
+        data: {
+          type: 'completed',
+          hostId,
+          hostName: targetHostName,
+          agentId: targetTask.id,
+          url: `/?host=${encodeURIComponent(hostId)}&task=${encodeURIComponent(targetTask.id)}`,
+        },
+      })
+      try {
+        this.onTaskCompleted?.({ hostId, hostName: targetHostName, task: targetTask, approvals: targetApprovals })
+      } catch { }
+      if (fromTimer) {
+        void this.persist()
+        this.emitStateChange('task_concluded')
+      }
+      return true
+    }
+
     for (const task of tasks) {
-      if (shouldSuppressTaskPush(task)) continue
       const key = `${hostId}:${task.id}`
+      if (shouldSuppressTaskPush(task)) {
+        cancelPendingCompletion(key)
+        continue
+      }
       const prevStatus = this.hostTaskStates.get(key)
       const prevConclusionContentSig = this.lastObservedConclusionSigs.get(key)
-      const curStatus = String(task.status || 'unknown')
-      const isStillMidTurn =
-        Boolean(task.isMidTurn) ||
-        Boolean(task.hasActiveBackgroundTask) ||
-        task.turnState === 'running' ||
-        task.turnState === 'approval'
-      const effectiveStatus = curStatus === 'idle' && isStillMidTurn ? 'running' : curStatus
+      const { curStatus, effectiveStatus } = computeTaskEffectiveStatus(task, approvals)
       this.hostTaskStates.set(key, effectiveStatus)
+
+      if (effectiveStatus !== 'idle' || task.turnState === 'interrupted') {
+        cancelPendingCompletion(key)
+      }
 
       const isConcludedIdle = effectiveStatus === 'idle' && task.turnState === 'conclusion'
       const conclusionContentSig = isConcludedIdle
@@ -2421,45 +2506,35 @@ export class HubCore {
         conclusionContentSig !== prevConclusionContentSig,
       )
       if ((wasActiveTurn && effectiveStatus === 'idle') || fastIdleToIdleConclusion) {
-        if (task.turnState === 'interrupted') continue
+        if (task.turnState === 'interrupted') {
+          cancelPendingCompletion(key)
+          continue
+        }
         const completionSig = `${task.lastStepIndex ?? ''}:${task.lastConclusionAt || ''}:${String(task.lastOutput || '').slice(0, 80)}`
         if (completionSig && this.pushedCompletionSigs.get(key) === completionSig) continue
-        if (completionSig) {
-          this.pushedCompletionSigs.set(key, completionSig)
-          while (this.pushedCompletionSigs.size > 400) {
-            this.pushedCompletionSigs.delete(this.pushedCompletionSigs.keys().next().value)
-          }
+
+        if (this.completionPushDebounceMs > 0) {
+          cancelPendingCompletion(key)
+          const timer = setTimeout(() => {
+            this.pendingCompletionPushTimers.delete(key)
+            const curHost = this.hosts.get(hostId)
+            const curTasks = Array.isArray(curHost?.bridgeState?.tasks)
+              ? curHost.bridgeState.tasks
+              : []
+            const curTask = curTasks.find(t => t?.id === task.id) || null
+            if (!curTask) return
+            const curApprovals = Array.isArray(curHost?.bridgeState?.approvals)
+              ? curHost.bridgeState.approvals
+              : []
+            commitCompletionPush(curTask, curHost?.hostName || hostName, curApprovals, { fromTimer: true })
+          }, this.completionPushDebounceMs)
+          timer.unref?.()
+          this.pendingCompletionPushTimers.set(key, { hostId, taskId: task.id, completionSig, timer })
+        } else if (commitCompletionPush(task, hostName, approvals, { fromTimer: false })) {
+          triggeredUrgentEvent = true
         }
-        triggeredUrgentEvent = true
-        this.sessionReadState.set(task.id, {
-          unread: true,
-          sig: '',
-          at: Math.max(Number(task.lastConclusionAt) || 0, Number(task.updatedAt) || 0, this.now()),
-        })
-        const formatted = formatWebPushNotification({
-          kind: 'completed',
-          hosts: [...this.hosts.values()],
-          hostId,
-          hostName,
-          task,
-        })
-        void this.broadcastWebPush({
-          title: formatted.title,
-          body: formatted.body,
-          tag: formatted.tag,
-          badgeCount: this.computeActionableBadgeCount(approvals.length),
-          data: {
-            type: 'completed',
-            hostId,
-            hostName,
-            agentId: task.id,
-            url: `/?host=${encodeURIComponent(hostId)}&task=${encodeURIComponent(task.id)}`,
-          },
-        })
-        try {
-          this.onTaskCompleted?.({ hostId, hostName, task, approvals })
-        } catch { }
       } else if ((curStatus === 'error' || curStatus === 'failed') && prevStatus !== curStatus) {
+        cancelPendingCompletion(key)
         const formatted = formatWebPushNotification({
           kind: 'failed',
           hosts: [...this.hosts.values()],

@@ -1368,6 +1368,7 @@ var EXACT_ZH_TO_EN = {
 	"模型 ID": "Model ID",
 	"设为默认": "Set Default",
 	"已默认": "Default",
+	"默认": "Default",
 	"测试": "Test",
 	"编辑": "Edit",
 	"删除": "Delete",
@@ -3687,25 +3688,16 @@ function computeSelectionAfterDelete(deletedCredId, activeProfile, remainingCred
 /**
 * Ultra-concise right-side value for Apple-native single-line Settings row ("边走边听").
 */
-function formatVoiceCompactValue(voiceCfg) {
-	if (!voiceCfg || !voiceCfg.activeProfile) return "免费本机";
+function formatVoiceCompactValue(voiceCfg, opts = {}) {
+	if (opts?.walkActive) return "已开启";
+	if (!voiceCfg || !voiceCfg.activeProfile) return "默认";
 	const prof = voiceCfg.activeProfile;
 	const creds = Array.isArray(voiceCfg.credentials) ? voiceCfg.credentials : [];
-	if (prof.id === "native" || prof.stt?.provider === "native" && prof.brain?.provider === "native" && prof.tts?.provider === "native") return creds.length > 0 ? `免费本机 · ${creds.length} 个` : "免费本机";
-	const compactName = (label) => {
-		const raw = String(label || "").trim();
-		if (!raw) return "自定义";
-		if (/火山|豆包/i.test(raw)) return "豆包";
-		return raw.replace(/\s*\((ASR|TTS)\)\s*/gi, "").replace(/官方$/g, "").trim() || raw;
-	};
+	if (prof.id === "native" || prof.stt?.provider === "native" && prof.brain?.provider === "native" && prof.tts?.provider === "native") return "默认";
 	const sttCred = resolveStageCred(prof.stt, creds);
 	const brainCred = resolveStageCred(prof.brain, creds);
 	const ttsCred = resolveStageCred(prof.tts, creds);
-	if (sttCred && brainCred && ttsCred && sttCred.id === brainCred.id && brainCred.id === ttsCred.id) return compactName(sttCred.label);
-	const parts = [];
-	if (sttCred || ttsCred) parts.push(compactName((sttCred || ttsCred).label));
-	if (brainCred && (!parts.length || compactName(brainCred.label) !== parts[0])) parts.push(compactName(brainCred.label));
-	return parts.join(" · ") || "已配置";
+	return sttCred || brainCred || ttsCred ? "已配置" : "默认";
 }
 /**
 * Ultra-concise right-side value for global "AI 模型与供应商" row on Settings Home.
@@ -3735,25 +3727,12 @@ function formatChatVoiceCompactValue(voiceCfg) {
 	};
 	const sttTarget = resolveLegacyTarget(prefs.chatSttTarget || (prefs.useByokForChatStt ? "follow_walk" : "native"), "stt");
 	const ttsTarget = resolveLegacyTarget(prefs.chatTtsTarget || (prefs.useByokForChatTts ? "follow_walk" : "native"), "tts");
-	if (sttTarget === "native" && ttsTarget === "native") return "免费本机";
-	const labelFor = (target) => {
-		if (target === "native") return "";
-		if (target.startsWith("cred:")) {
-			const id = target.slice(5);
-			const found = creds.find((c) => c.id === id);
-			if (!found) return "";
-			const raw = String(found.label || "").trim();
-			if (/火山|豆包/i.test(raw)) return "豆包";
-			return raw.replace(/\s*\((ASR|TTS)\)\s*/gi, "").replace(/官方$/g, "").trim() || raw;
-		}
-		return "";
+	const hasValidCloudCred = (target) => {
+		if (!target || target === "native" || !target.startsWith("cred:")) return false;
+		const id = target.slice(5);
+		return creds.some((c) => c.id === id);
 	};
-	const parts = [];
-	const s = labelFor(sttTarget);
-	const t = labelFor(ttsTarget);
-	if (s) parts.push(s);
-	if (t && t !== s) parts.push(t);
-	return parts.join(" · ") || "免费本机";
+	return hasValidCloudCred(sttTarget) || hasValidCloudCred(ttsTarget) ? "已配置" : "默认";
 }
 /**
 * Resolve a concrete stageOverride config for an independent feature route (`'native' | 'follow_walk' | 'cred:<id>'`).
@@ -4332,7 +4311,7 @@ function VoiceProviderSheet(props) {
 		value: "multi_female_tuanzi_v3_uranus_bigtts"
 	}] : TTS_VOICE_OPTIONS[draft.provider] || [];
 	const isVolcDraft = draft.provider === "volcengine_asr" || draft.provider === "volcengine_tts";
-	const compactSummary = formatVoiceCompactValue(config);
+	const compactSummary = formatVoiceCompactValue(config, { walkActive: Boolean(typeof window !== "undefined" && window.__dshWalkModeOpen) });
 	const rawChatSttTarget = String(config.prefs.chatSttTarget || "native");
 	const rawChatTtsTarget = String(config.prefs.chatTtsTarget || "native");
 	const chatSttTargetVal = rawChatSttTarget === "follow_walk" ? sttVal.startsWith("cred:") ? sttVal : "native" : rawChatSttTarget;
@@ -7449,7 +7428,7 @@ function createSettingsPanel(deps) {
             >
               <span class="ios-ico indigo">${SVG_ICONS.headphones}</span>
               <span class="ios-row-title">边走边听 (Beta)</span>
-              <span class="ios-row-val" id="settingsVoiceSummaryText">${deps.esc(voiceCompact)}</span>
+              <span class="ios-row-val${voiceCompact === "已开启" ? " tone-green" : ""}" id="settingsVoiceSummaryText">${deps.esc(voiceCompact)}</span>
               <span class="ios-chev">${SVG_ICONS.chev}</span>
             </button>
 
@@ -8105,9 +8084,10 @@ function createSettingsPanel(deps) {
 		if (!viewport) return;
 		const state = deps.getState();
 		const voiceCfg = getVoiceConfig();
+		const walkActive = Boolean(state.walkActive ?? (typeof window !== "undefined" && window.__dshWalkModeOpen));
 		const voiceSummaries = {
 			modelsCompact: formatModelsCompactValue(voiceCfg),
-			voiceCompact: formatVoiceCompactValue(voiceCfg),
+			voiceCompact: formatVoiceCompactValue(voiceCfg, { walkActive }),
 			chatVoiceCompact: formatChatVoiceCompactValue(voiceCfg)
 		};
 		const signature = buildSignature(state, voiceSummaries);
@@ -22858,7 +22838,8 @@ function initHubController() {
 			upgradingHostMap,
 			installingAgyCliMap,
 			currentDeviceId: getOrCreateClientDeviceId(),
-			tokenTail: getToken().slice(-4)
+			tokenTail: getToken().slice(-4),
+			walkActive: Boolean(typeof window !== "undefined" && window.__dshWalkModeOpen)
 		}),
 		getViewport: () => document.getElementById("mainViewport"),
 		getCopilotSummaryText: () => goalCopilotUi.getPluginSummaryText(),
@@ -22878,6 +22859,11 @@ function initHubController() {
 		applyLangToDom
 	});
 	window.addEventListener("dsh:voice-config", () => {
+		lastRenderedSettingsKey = "";
+		settingsPanel.invalidate();
+		if (currentTab === "settings") renderSettingsTab();
+	});
+	window.addEventListener("dsh:walk-state", () => {
 		lastRenderedSettingsKey = "";
 		settingsPanel.invalidate();
 		if (currentTab === "settings") renderSettingsTab();
