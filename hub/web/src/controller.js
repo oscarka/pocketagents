@@ -5435,7 +5435,7 @@ export function initHubController() {
         return;
       }
       const cmdId = dispatchRes?.command?.id;
-      const result = await waitForHostCommandResult(cmdId, 9000);
+      const result = await waitForHostCommandResult(cmdId, 14000);
       if (!activeRevertState || activeRevertState.previewToken !== previewToken) return;
       activeRevertState.loadingPreview = false;
       if (result && result.ok !== false) {
@@ -5480,7 +5480,7 @@ export function initHubController() {
         return;
       }
       const cmdId = dispatchRes?.command?.id;
-      const result = await waitForHostCommandResult(cmdId, 12000);
+      const result = await waitForHostCommandResult(cmdId, 20000);
       if (!activeRevertState || activeRevertState.previewToken !== token) return;
       if (!result || result.ok === false) {
         st.reverting = false;

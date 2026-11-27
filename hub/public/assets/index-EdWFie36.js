@@ -19698,7 +19698,7 @@ function initHubController() {
 				return;
 			}
 			const cmdId = dispatchRes?.command?.id;
-			const result = await waitForHostCommandResult(cmdId, 9e3);
+			const result = await waitForHostCommandResult(cmdId, 14e3);
 			if (!activeRevertState || activeRevertState.previewToken !== previewToken) return;
 			activeRevertState.loadingPreview = false;
 			if (result && result.ok !== false) {
@@ -19741,7 +19741,7 @@ function initHubController() {
 				return;
 			}
 			const cmdId = dispatchRes?.command?.id;
-			const result = await waitForHostCommandResult(cmdId, 12e3);
+			const result = await waitForHostCommandResult(cmdId, 2e4);
 			if (!activeRevertState || activeRevertState.previewToken !== token) return;
 			if (!result || result.ok === false) {
 				st.reverting = false;

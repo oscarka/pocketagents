@@ -842,10 +842,11 @@ export class AntigravityAcpClient {
   async releaseSession(sessionId) {
     const rawId = String(sessionId || '').replace(/^agy-ide:/, '').trim()
     if (!rawId) return
+    const hadSession = this.loadedSessions.has(rawId) || this.activeTurns.has(rawId)
     this.loadedSessions.delete(rawId)
     this.activeTurns.delete(rawId)
-    if (this.isAlive()) {
-      await this._sendRequest('session/close', { sessionId: rawId }, 4000).catch(() => {})
+    if (hadSession && this.isAlive()) {
+      await this._sendRequest('session/close', { sessionId: rawId }, 1500).catch(() => {})
     }
   }
 

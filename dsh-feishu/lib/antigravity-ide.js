@@ -4755,7 +4755,12 @@ async function ensureEphemeralRevertHub({
 
     const csrfToken = randomUUID()
     const address = `127.0.0.1:${port}`
-    const env = withUtf8Env(buildCleanAgentApiEnv(null))
+    const env = {
+      ...withUtf8Env(buildCleanAgentApiEnv(null)),
+      // Required in headless macOS LaunchAgent environments (which lack IDE-inherited env vars):
+      // without AGY_ENABLE_HUB=1, `agy --hub` falls back to launching the interactive TUI and exits with code=0 on non-TTY stdin.
+      AGY_ENABLE_HUB: '1',
+    }
     let child
     try {
       child = spawnImpl(
@@ -4773,9 +4778,13 @@ async function ensureEphemeralRevertHub({
       }
     }
 
+    let stdoutBuf = ''
     let stderrBuf = ''
     let exitedEarly = false
     let exitCode = null
+    child.stdout?.on?.('data', chunk => {
+      if (stdoutBuf.length < 1000) stdoutBuf += String(chunk || '')
+    })
     child.stderr?.on?.('data', chunk => {
       if (stderrBuf.length < 1000) stderrBuf += String(chunk || '')
     })
@@ -4814,6 +4823,7 @@ async function ensureEphemeralRevertHub({
           method: 'POST',
           headers,
           body: '{}',
+          ...(typeof AbortSignal?.timeout === 'function' ? { signal: AbortSignal.timeout(1500) } : {}),
         })
         if (resp?.ok) {
           ready = true
@@ -4830,13 +4840,14 @@ async function ensureEphemeralRevertHub({
       } catch {
         // ignore
       }
-      const detail = redactText(stderrBuf.trim()).slice(0, 140)
+      const rawOut = (stderrBuf.trim() || stdoutBuf.replace(/\x1b\[[0-9;?<>]*[A-Za-z]|\x1b\][^\x07]*\x07/g, '').trim())
+      const detail = redactText(rawOut).slice(0, 140)
       return {
         hub: null,
         error: detail
           ? `临时 agy 语言服务未能就绪（${detail}）`
           : exitedEarly
-            ? `临时 agy 语言服务提前退出（code=${exitCode ?? '?'}），请升级官方 agy CLI 或打开 Antigravity IDE`
+            ? `临时 agy 语言服务提前退出（code=${exitCode ?? '?'}，${basename(binPath)}），请升级官方 agy CLI 或打开 Antigravity IDE`
             : '临时 agy 语言服务启动超时，请稍后重试或打开 Antigravity IDE',
       }
     }

@@ -322,12 +322,13 @@ test('standalone Antigravity 2.0 / ACP host falls back to on-demand ephemeral ag
 
     const spawnedCalls = []
     let killed = false
-    const spawnImpl = (bin, args) => {
-      spawnedCalls.push({ bin, args })
+    const spawnImpl = (bin, args, opts = {}) => {
+      spawnedCalls.push({ bin, args, env: opts?.env || {} })
       const child = new EventEmitter()
       child.pid = 77889
       child.killed = false
       child.exitCode = null
+      child.stdout = new EventEmitter()
       child.stderr = new EventEmitter()
       child.kill = () => {
         killed = true
@@ -403,6 +404,7 @@ test('standalone Antigravity 2.0 / ACP host falls back to on-demand ephemeral ag
     assert.equal(spawnedCalls.length, 1)
     assert.ok(spawnedCalls[0].args.includes('--hub'))
     assert.ok(spawnedCalls[0].args.includes('--app_data_dir=antigravity'))
+    assert.equal(spawnedCalls[0].env.AGY_ENABLE_HUB, '1', 'must set AGY_ENABLE_HUB=1 for headless macOS LaunchAgent')
 
     // 2. Normal IDE hub discovery MUST ignore our ephemeral revert hub PID & address
     const discovered = await discoverAntigravityHubInstances({ execImpl: emptyPsExec })
