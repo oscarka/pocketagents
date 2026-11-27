@@ -1,12 +1,18 @@
 import assert from 'node:assert/strict'
-import { readFile } from 'node:fs/promises'
-import { dirname, resolve } from 'node:path'
+import { EventEmitter } from 'node:events'
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { dirname, join, resolve } from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 import {
+  clearLocalAntigravityRevertCeilings,
+  discoverAntigravityHubInstances,
+  loadAntigravityIdeSessions,
   parseAntigravityTranscript,
   previewAntigravityRevert,
   revertAntigravityToStep,
+  shutdownEphemeralRevertHub,
 } from '../lib/antigravity-ide.js'
 import { translateZhStringToEn } from '../../hub/web/src/utils/i18n.js'
 import { HubCore } from '../../hub/hub-core.js'
@@ -291,4 +297,179 @@ test('HubCore.compactBridgeStateForWire preserves stepIndex even on synthetic pr
   const liteUser = compactedLite.tasks[0].transcript.find(m => m.role === 'user')
   assert.ok(liteUser, 'synthetic lastUserMsg should be preserved in lite mode')
   assert.equal(liteUser.stepIndex, 0, 'stepIndex must be preserved on synthetic lastUserMsg')
+})
+
+test('standalone Antigravity 2.0 / ACP host falls back to on-demand ephemeral agy --hub, hides it from IDE discovery, and syncs local revert ceiling', async () => {
+  shutdownEphemeralRevertHub()
+  clearLocalAntigravityRevertCeilings()
+  const prevLsAddr = process.env.ANTIGRAVITY_LS_ADDRESS
+  const prevLsCsrf = process.env.ANTIGRAVITY_CSRF_TOKEN
+  delete process.env.ANTIGRAVITY_LS_ADDRESS
+  delete process.env.ANTIGRAVITY_CSRF_TOKEN
+  const tmpBrain = await mkdtemp(join(tmpdir(), 'pa-agy-eph-revert-'))
+  try {
+    const convId = '12345678-aaaa-bbbb-cccc-1234567890ab'
+    const logsDir = join(tmpBrain, convId, '.system_generated', 'logs')
+    await mkdir(logsDir, { recursive: true })
+    const transcriptPath = join(logsDir, 'transcript.jsonl')
+    const initialJsonl = [
+      JSON.stringify({ step_index: 0, type: 'USER_INPUT', content: '<USER_REQUEST>第一步</USER_REQUEST>', created_at: '2026-11-27T01:00:00Z' }),
+      JSON.stringify({ step_index: 1, type: 'PLANNER_RESPONSE', content: '已完成第一步', status: 'DONE', created_at: '2026-11-27T01:00:05Z' }),
+      JSON.stringify({ step_index: 4, type: 'USER_INPUT', content: '<USER_REQUEST>继续 2b</USER_REQUEST>', created_at: '2026-11-27T01:01:00Z' }),
+      JSON.stringify({ step_index: 5, type: 'PLANNER_RESPONSE', content: '已完成 2b', status: 'DONE', created_at: '2026-11-27T01:01:05Z' }),
+    ].join('\n')
+    await writeFile(transcriptPath, initialJsonl, 'utf8')
+
+    const spawnedCalls = []
+    let killed = false
+    const spawnImpl = (bin, args) => {
+      spawnedCalls.push({ bin, args })
+      const child = new EventEmitter()
+      child.pid = 77889
+      child.killed = false
+      child.exitCode = null
+      child.stderr = new EventEmitter()
+      child.kill = () => {
+        killed = true
+        child.killed = true
+        child.exitCode = 0
+        child.emit('exit', 0)
+      }
+      return child
+    }
+
+    const emptyPsExec = async (cmd) => {
+      if (cmd === 'ps') {
+        // Before spawn: no running hub. After spawn: ps shows our ephemeral hub PID 77889,
+        // which discoverAntigravityHubInstances MUST exclude.
+        if (spawnedCalls.length > 0 && !killed) {
+          return {
+            stdout: '77889 /Users/tester/.gemini/bin/agy --hub --hub-port=54321 --app_data_dir=antigravity --csrf_token=fake-tok\n',
+            stderr: '',
+          }
+        }
+        return { stdout: '', stderr: '' }
+      }
+      return { stdout: '', stderr: '' }
+    }
+
+    const rpcCalls = []
+    const fetchImpl = async (url, opts = {}) => {
+      const body = opts.body ? JSON.parse(opts.body) : {}
+      rpcCalls.push({ url, body })
+      if (url.endsWith('/GetAllCascadeTrajectories')) {
+        return { ok: true, status: 200, json: async () => ({ trajectorySummaries: {} }) }
+      }
+      if (url.endsWith('/LoadTrajectory') || url.endsWith('/CancelCascadeInvocation')) {
+        return { ok: true, status: 200, json: async () => ({}) }
+      }
+      if (url.endsWith('/GetRevertPreview')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            codeEditPreviews: [
+              { fileUri: 'file:///Users/tester/blender/leaf.py', actionType: 'CODE_REVERT_ACTION_TYPE_MODIFY' },
+            ],
+          }),
+        }
+      }
+      if (url.endsWith('/RevertToCascadeStep')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            metadata: { revertedUris: ['file:///Users/tester/blender/leaf.py'] },
+          }),
+        }
+      }
+      return { ok: true, status: 200, json: async () => ({}) }
+    }
+
+    // 1. Preview spins up ephemeral agy --hub and returns real file diff
+    const prevRes = await previewAntigravityRevert(`agy-ide:${convId}`, 4, {
+      preferredCwd: '/Users/tester/blender',
+      execImpl: emptyPsExec,
+      fetchImpl,
+      spawnImpl,
+      cliPath: '/Users/tester/.gemini/bin/agy',
+      home: '/Users/tester',
+      portAllocator: async () => 54321,
+    })
+    assert.equal(prevRes.ok, true)
+    assert.equal(prevRes.engine, 'agy-ephemeral-hub')
+    assert.equal(prevRes.fileCount, 1)
+    assert.equal(prevRes.files[0].relPath, 'leaf.py')
+    assert.equal(spawnedCalls.length, 1)
+    assert.ok(spawnedCalls[0].args.includes('--hub'))
+    assert.ok(spawnedCalls[0].args.includes('--app_data_dir=antigravity'))
+
+    // 2. Normal IDE hub discovery MUST ignore our ephemeral revert hub PID & address
+    const discovered = await discoverAntigravityHubInstances({ execImpl: emptyPsExec })
+    assert.equal(discovered.length, 0, 'ephemeral revert hub must never leak into IDE discovery')
+
+    // 3. Revert reuses warm ephemeral hub (no second spawn!) and records local revert ceiling
+    const revRes = await revertAntigravityToStep(`agy-ide:${convId}`, 4, {
+      conversationOnly: false,
+      preferredCwd: '/Users/tester/blender',
+      brainDirs: [tmpBrain],
+      execImpl: emptyPsExec,
+      fetchImpl,
+      spawnImpl,
+      cliPath: '/Users/tester/.gemini/bin/agy',
+      home: '/Users/tester',
+      portAllocator: async () => 54321,
+    })
+    assert.equal(revRes.ok, true)
+    assert.equal(revRes.engine, 'agy-ephemeral-hub')
+    assert.equal(revRes.revertedCount, 1)
+    assert.equal(spawnedCalls.length, 1, 'should reuse warm ephemeral hub without respawning')
+
+    // 4. Immediately after revert (before transcript.jsonl is appended), ACP-only loadAntigravityIdeSessions trims step >= 4
+    //    AND keeps hasLiveSummary === false so host stays truthfully in ACP mode
+    const afterRevertSessions = await loadAntigravityIdeSessions({
+      brainDirs: [tmpBrain],
+      execImpl: emptyPsExec,
+      fetchImpl,
+    })
+    const sessAfter = afterRevertSessions.find(s => s.id === `agy-ide:${convId}`)
+    assert.ok(sessAfter)
+    assert.equal(sessAfter.hasLiveSummary, false)
+    assert.deepEqual(
+      sessAfter.transcript.filter(m => m.role === 'user').map(m => ({ text: m.text, stepIndex: m.stepIndex })),
+      [{ text: '第一步', stepIndex: 0 }],
+    )
+
+    // 5. Once user sends a new replacement prompt (appending step_index=4 to transcript.jsonl), ceiling auto-expires cleanly
+    await writeFile(
+      transcriptPath,
+      `${initialJsonl}\n${JSON.stringify({ step_index: 4, type: 'USER_INPUT', content: '<USER_REQUEST>改小一点分步做</USER_REQUEST>', created_at: '2026-11-27T01:02:00Z' })}\n`,
+      'utf8',
+    )
+    const afterNewPrompt = await loadAntigravityIdeSessions({
+      brainDirs: [tmpBrain],
+      execImpl: emptyPsExec,
+      fetchImpl,
+    })
+    const sessNext = afterNewPrompt.find(s => s.id === `agy-ide:${convId}`)
+    assert.ok(sessNext)
+    assert.deepEqual(
+      sessNext.transcript.filter(m => m.role === 'user').map(m => ({ text: m.text, stepIndex: m.stepIndex })),
+      [
+        { text: '第一步', stepIndex: 0 },
+        { text: '改小一点分步做', stepIndex: 4 },
+      ],
+    )
+
+    shutdownEphemeralRevertHub()
+    assert.equal(killed, true, 'shutdownEphemeralRevertHub must terminate child cleanly')
+  } finally {
+    if (prevLsAddr === undefined) delete process.env.ANTIGRAVITY_LS_ADDRESS
+    else process.env.ANTIGRAVITY_LS_ADDRESS = prevLsAddr
+    if (prevLsCsrf === undefined) delete process.env.ANTIGRAVITY_CSRF_TOKEN
+    else process.env.ANTIGRAVITY_CSRF_TOKEN = prevLsCsrf
+    shutdownEphemeralRevertHub()
+    clearLocalAntigravityRevertCeilings()
+    await rm(tmpBrain, { recursive: true, force: true })
+  }
 })

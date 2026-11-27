@@ -1,14 +1,20 @@
 import { execFile, spawn } from 'node:child_process'
-import { randomBytes } from 'node:crypto'
+import { randomBytes, randomUUID } from 'node:crypto'
 import { access, mkdir, open, readdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
+import { createServer } from 'node:net'
 import { homedir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { promisify } from 'node:util'
 import { fastScanBrainDirs, sendNativeKeystroke } from '../../dsh-turbo/index.js'
+import { findOfficialAgyCliPath } from './antigravity-acp.js'
 import { cleanForChat, redactText } from './redact.js'
 
 const execFileAsync = promisify(execFile)
 const sessionParseCache = new Map()
+const localRevertCeilingByConvId = new Map()
+const EPHEMERAL_REVERT_HUB_IDLE_MS = 60_000
+let ephemeralRevertHub = null
+let ephemeralRevertHubStarting = null
 const UTF8_CHILD_ENV = {
   LANG: 'en_US.UTF-8',
   LC_ALL: 'en_US.UTF-8',
@@ -34,6 +40,7 @@ function isTrustedAgyBinPath(binPath = '', home = homedir()) {
   const normHome = resolve(home || homedir())
   const allowedPrefixes = [
     `${join(normHome, '.gemini')}/`,
+    `${join(normHome, '.local', 'bin')}/`,
     `${join(normHome, 'Applications')}/`,
     '/Applications/',
     '/opt/homebrew/',
@@ -772,6 +779,7 @@ export function parseAntigravityTranscript(jsonlText, {
   runningSubagents = [],
   fullContentByStepIndex = null,
   diskArtifacts = [],
+  localRevertStepCount = null,
 } = {}) {
   const rawLines = String(jsonlText ?? '')
     .split('\n')
@@ -812,7 +820,20 @@ export function parseAntigravityTranscript(jsonlText, {
   // is older than `transcript.jsonl` on disk.
   const isSummaryOlderThanDisk = liveLastModifiedMs > 0 && mtimeMs > 0 && mtimeMs - liveLastModifiedMs > 5000
   let revertedToEmpty = false
-  if (liveStatus !== 'CASCADE_RUN_STATUS_RUNNING' && !isSummaryOlderThanDisk) {
+  if (typeof localRevertStepCount === 'number' && Number.isFinite(localRevertStepCount) && localRevertStepCount >= 0) {
+    if (localRevertStepCount === 0) {
+      lines.length = 0
+      revertedToEmpty = true
+    } else {
+      while (
+        lines.length > 0
+        && typeof lines[lines.length - 1].step_index === 'number'
+        && lines[lines.length - 1].step_index >= localRevertStepCount
+      ) {
+        lines.pop()
+      }
+    }
+  } else if (liveStatus !== 'CASCADE_RUN_STATUS_RUNNING' && !isSummaryOlderThanDisk) {
     if (typeof liveStepCount === 'number' && Number.isFinite(liveStepCount) && liveStepCount >= 0) {
       if (liveStepCount === 0 && hasLiveSummary && liveLastModifiedMs > 0) {
         lines.length = 0
@@ -2262,7 +2283,19 @@ export async function loadAntigravityIdeSessions({
         .join('|')
       const sessionId = `${AGY_IDE_PREFIX}${item.convId}`
       const customTitle = extractCustomTitleValue(customTitles[sessionId]) || extractCustomTitleValue(customTitles[item.convId]) || ''
-      const cacheKey = `${item.convId}:${item.mtimeMs}:${item.size || 0}:${maxMessages}:${customTitle}:${effectiveNativeTitle}:${effectivePinned ? 1 : 0}:${settledKey}:${liveStepCount ?? ''}:${liveLastUserInputStepIndex ?? ''}:${liveStatus}:${liveModel}:${liveLastModifiedMs}:${hasLiveSummary ? 1 : 0}:${waitingKey}:${blockedSubKey}:${runningSubKey}`
+      let localRevertStepCount = null
+      const localRevertEntry = localRevertCeilingByConvId.get(item.convId)
+      if (localRevertEntry) {
+        const transcriptAdvanced =
+          (localRevertEntry.baselineMtimeMs > 0 && item.mtimeMs > localRevertEntry.baselineMtimeMs + 100)
+          || (localRevertEntry.baselineSize > 0 && Number(item.size || 0) !== localRevertEntry.baselineSize)
+        if (transcriptAdvanced) {
+          localRevertCeilingByConvId.delete(item.convId)
+        } else if (!hasLiveSummary || (liveLastModifiedMs > 0 && liveLastModifiedMs < localRevertEntry.revertedAt)) {
+          localRevertStepCount = localRevertEntry.stepCount
+        }
+      }
+      const cacheKey = `${item.convId}:${item.mtimeMs}:${item.size || 0}:${maxMessages}:${customTitle}:${effectiveNativeTitle}:${effectivePinned ? 1 : 0}:${settledKey}:${liveStepCount ?? ''}:${liveLastUserInputStepIndex ?? ''}:${liveStatus}:${liveModel}:${liveLastModifiedMs}:${hasLiveSummary ? 1 : 0}:${localRevertStepCount ?? ''}:${waitingKey}:${blockedSubKey}:${runningSubKey}`
       const cached = sessionParseCache.get(item.convId)
       if (cached && cached.cacheKey === cacheKey && cached.session) {
         if (cached.session.isSubagent) continue
@@ -2333,6 +2366,7 @@ export async function loadAntigravityIdeSessions({
         runningSubagents,
         fullContentByStepIndex,
         diskArtifacts,
+        localRevertStepCount,
       })
       if (parsed) {
         parsed.pinned = effectivePinned
@@ -2670,6 +2704,7 @@ export async function discoverAntigravityHubInstances({
     const normAddr = rawAddr.replace(/^localhost:/i, '127.0.0.1:')
     const token = String(csrfToken || '').trim()
     if (!normAddr || !token || seenAddresses.has(normAddr)) return
+    if (ephemeralRevertHub?.address && normAddr === ephemeralRevertHub.address) return
     seenAddresses.add(normAddr)
     const cleanDirs = [...new Set([...(Array.isArray(addDirs) ? addDirs : []), addDir].map(d => String(d || '').trim()).filter(Boolean))]
     instances.push({
@@ -2700,6 +2735,12 @@ export async function discoverAntigravityHubInstances({
         const pidMatch = line.match(/^(\d+)\s+(.*)$/)
         const pid = pidMatch ? pidMatch[1] : '0'
         const cmdLine = pidMatch ? pidMatch[2] : line
+
+        // Never treat our own on-demand ephemeral revert hub as a persistent IDE hub,
+        // so Antigravity 2.0 ACP hosts never flip `hasLiveRpc` or hijack prompt routing.
+        if (ephemeralRevertHub?.pid && Number(pid) === ephemeralRevertHub.pid) {
+          continue
+        }
 
         if (cmdLine.includes('--hub') && cmdLine.includes('--hub-port=') && cmdLine.includes('--csrf_token=')) {
           const portMatch = cmdLine.match(/--hub-port=(\d+)/)
@@ -4570,14 +4611,283 @@ function normalizeRevertPreviewItem(item, preferredCwd = '') {
   }
 }
 
+function allocateLoopbackPort() {
+  return new Promise((resolvePort, rejectPort) => {
+    const srv = createServer()
+    srv.unref?.()
+    srv.on('error', rejectPort)
+    srv.listen(0, '127.0.0.1', () => {
+      const addr = srv.address()
+      const port = addr && typeof addr === 'object' ? addr.port : 0
+      srv.close(err => {
+        if (err || !port) rejectPort(err || new Error('Failed to allocate loopback port'))
+        else resolvePort(port)
+      })
+    })
+  })
+}
+
+export function clearLocalAntigravityRevertCeilings() {
+  localRevertCeilingByConvId.clear()
+}
+
+export function shutdownEphemeralRevertHub() {
+  const cur = ephemeralRevertHub
+  ephemeralRevertHub = null
+  if (!cur) return
+  if (cur.idleTimer) {
+    clearTimeout(cur.idleTimer)
+    cur.idleTimer = null
+  }
+  if (cur.proc && !cur.proc.killed && cur.proc.exitCode === null) {
+    try {
+      cur.proc.kill('SIGTERM')
+    } catch {
+      // ignore kill error
+    }
+  }
+}
+
+function touchEphemeralRevertHubIdleTimer(idleMs = EPHEMERAL_REVERT_HUB_IDLE_MS) {
+  if (!ephemeralRevertHub) return
+  if (ephemeralRevertHub.idleTimer) {
+    clearTimeout(ephemeralRevertHub.idleTimer)
+  }
+  ephemeralRevertHub.idleTimer = setTimeout(() => {
+    shutdownEphemeralRevertHub()
+  }, idleMs)
+  ephemeralRevertHub.idleTimer.unref?.()
+}
+
+async function recordLocalRevertCeiling(rawConvId, stepCount, brainDirs = undefined) {
+  const dirs = Array.isArray(brainDirs) && brainDirs.length > 0
+    ? brainDirs
+    : getDefaultAntigravityBrainDirs()
+  let baselineMtimeMs = 0
+  let baselineSize = 0
+  for (const dir of dirs) {
+    const transcriptPath = join(dir, rawConvId, '.system_generated', 'logs', 'transcript.jsonl')
+    try {
+      const st = await stat(transcriptPath)
+      if (st.isFile()) {
+        baselineMtimeMs = Number(st.mtimeMs) || 0
+        baselineSize = Number(st.size) || 0
+        break
+      }
+    } catch {
+      // try next brain dir
+    }
+  }
+  localRevertCeilingByConvId.set(rawConvId, {
+    stepCount,
+    baselineMtimeMs,
+    baselineSize,
+    revertedAt: Date.now(),
+  })
+  if (localRevertCeilingByConvId.size > 64) {
+    const oldestKey = localRevertCeilingByConvId.keys().next().value
+    localRevertCeilingByConvId.delete(oldestKey)
+  }
+}
+
+/**
+ * Spin up an on-demand ephemeral `agy --hub` process for revert preview / execution on
+ * standalone Antigravity 2.0 / ACP hosts where no persistent IDE Connect-RPC hub is running.
+ * Automatically terminates after 60s of inactivity and is excluded from `discoverAntigravityHubInstances`
+ * so it never disrupts ACP routing or `hasLiveRpc` detection.
+ */
+async function ensureEphemeralRevertHub({
+  execImpl = execFileAsync,
+  fetchImpl = globalThis.fetch,
+  spawnImpl = spawn,
+  accessImpl = access,
+  cliPath = '',
+  home = homedir(),
+  portAllocator = allocateLoopbackPort,
+  idleMs = EPHEMERAL_REVERT_HUB_IDLE_MS,
+} = {}) {
+  if (
+    ephemeralRevertHub
+    && ephemeralRevertHub.proc
+    && !ephemeralRevertHub.proc.killed
+    && ephemeralRevertHub.proc.exitCode === null
+  ) {
+    touchEphemeralRevertHubIdleTimer(idleMs)
+    return {
+      hub: {
+        address: ephemeralRevertHub.address,
+        port: ephemeralRevertHub.port,
+        csrfToken: ephemeralRevertHub.csrfToken,
+        binPath: ephemeralRevertHub.binPath,
+        kind: 'agy-ephemeral-revert',
+      },
+    }
+  }
+  if (ephemeralRevertHubStarting) {
+    return ephemeralRevertHubStarting
+  }
+
+  ephemeralRevertHubStarting = (async () => {
+    const binPath = String(cliPath || '').trim()
+      || await findOfficialAgyCliPath({ home, execImpl, accessImpl })
+    if (!binPath) {
+      return {
+        hub: null,
+        error: '未检测到运行中的 Antigravity IDE 语言服务，也未找到官方 agy CLI（请在设置页一键安装 agy CLI 或打开 Antigravity IDE）',
+      }
+    }
+    if (spawnImpl === spawn && !isTrustedAgyBinPath(binPath, home)) {
+      return {
+        hub: null,
+        error: '检测到的 agy CLI 路径不受信任，已拒绝启动临时语言服务',
+      }
+    }
+
+    let port
+    try {
+      port = await portAllocator()
+    } catch (err) {
+      return {
+        hub: null,
+        error: `无法分配本地临时端口启动 agy 服务：${err?.message || '未知错误'}`,
+      }
+    }
+
+    const csrfToken = randomUUID()
+    const address = `127.0.0.1:${port}`
+    const env = withUtf8Env(buildCleanAgentApiEnv(null))
+    let child
+    try {
+      child = spawnImpl(
+        binPath,
+        ['--hub', `--hub-port=${port}`, '--app_data_dir=antigravity', `--csrf_token=${csrfToken}`],
+        {
+          stdio: ['ignore', 'pipe', 'pipe'],
+          env,
+        },
+      )
+    } catch (err) {
+      return {
+        hub: null,
+        error: `启动临时 agy 服务失败：${err?.message || '未知错误'}`,
+      }
+    }
+
+    let stderrBuf = ''
+    let exitedEarly = false
+    let exitCode = null
+    child.stderr?.on?.('data', chunk => {
+      if (stderrBuf.length < 1000) stderrBuf += String(chunk || '')
+    })
+    child.on?.('error', err => {
+      exitedEarly = true
+      if (!stderrBuf) stderrBuf = err?.message || 'spawn error'
+      if (ephemeralRevertHub?.proc === child) {
+        shutdownEphemeralRevertHub()
+      }
+    })
+    child.on?.('exit', code => {
+      exitedEarly = true
+      exitCode = code
+      if (ephemeralRevertHub?.proc === child) {
+        if (ephemeralRevertHub.idleTimer) clearTimeout(ephemeralRevertHub.idleTimer)
+        ephemeralRevertHub = null
+      }
+    })
+
+    const headers = {
+      'Content-Type': 'application/json',
+      'x-codeium-csrf-token': csrfToken,
+    }
+    const probeUrl = `http://${address}/exa.language_server_pb.LanguageServerService/GetAllCascadeTrajectories`
+    let ready = false
+    const maxAttempts = spawnImpl === spawn ? 50 : 12
+    const pollDelayMs = spawnImpl === spawn ? 120 : 20
+    for (let i = 0; i < maxAttempts; i += 1) {
+      if (exitedEarly) break
+      if (i > 0) {
+        await new Promise(r => setTimeout(r, pollDelayMs))
+        if (exitedEarly) break
+      }
+      try {
+        const resp = await fetchImpl(probeUrl, {
+          method: 'POST',
+          headers,
+          body: '{}',
+        })
+        if (resp?.ok) {
+          ready = true
+          break
+        }
+      } catch {
+        // still starting up
+      }
+    }
+
+    if (!ready) {
+      try {
+        if (!child.killed && child.exitCode === null) child.kill('SIGTERM')
+      } catch {
+        // ignore
+      }
+      const detail = redactText(stderrBuf.trim()).slice(0, 140)
+      return {
+        hub: null,
+        error: detail
+          ? `临时 agy 语言服务未能就绪（${detail}）`
+          : exitedEarly
+            ? `临时 agy 语言服务提前退出（code=${exitCode ?? '?'}），请升级官方 agy CLI 或打开 Antigravity IDE`
+            : '临时 agy 语言服务启动超时，请稍后重试或打开 Antigravity IDE',
+      }
+    }
+
+    ephemeralRevertHub = {
+      proc: child,
+      pid: Number(child.pid) || 0,
+      port,
+      address,
+      csrfToken,
+      binPath,
+      idleTimer: null,
+    }
+    touchEphemeralRevertHubIdleTimer(idleMs)
+    return {
+      hub: {
+        address,
+        port,
+        csrfToken,
+        binPath,
+        kind: 'agy-ephemeral-revert',
+      },
+    }
+  })()
+
+  try {
+    return await ephemeralRevertHubStarting
+  } finally {
+    ephemeralRevertHubStarting = null
+  }
+}
+
 /**
  * Preview which workspace code files would be modified/deleted/recreated if an Antigravity IDE
  * conversation is reverted to `stepIndex` via Connect-RPC `GetRevertPreview`.
+ * Automatically falls back to an on-demand ephemeral `agy --hub` on standalone Antigravity 2.0 / ACP hosts.
  */
 export async function previewAntigravityRevert(
   sessionId,
   stepIndex,
-  { preferredCwd = '', execImpl = execFileAsync, fetchImpl = globalThis.fetch } = {},
+  {
+    preferredCwd = '',
+    execImpl = execFileAsync,
+    fetchImpl = globalThis.fetch,
+    spawnImpl = spawn,
+    accessImpl = access,
+    cliPath = '',
+    home = homedir(),
+    portAllocator = allocateLoopbackPort,
+    allowEphemeralHub = true,
+  } = {},
 ) {
   const rawConvId = toRawConversationId(sessionId)
   const cleanStepIndex = Number(stepIndex)
@@ -4591,7 +4901,23 @@ export async function previewAntigravityRevert(
     return { ok: false, error: '当前环境不支持 Antigravity RPC 查询' }
   }
 
-  const hubs = await discoverAntigravityHubInstances({ execImpl, preferredCwd })
+  let hubs = await discoverAntigravityHubInstances({ execImpl, preferredCwd })
+  if (hubs.length === 0 && allowEphemeralHub) {
+    const eph = await ensureEphemeralRevertHub({
+      execImpl,
+      fetchImpl,
+      spawnImpl,
+      accessImpl,
+      cliPath,
+      home,
+      portAllocator,
+    })
+    if (eph.hub) {
+      hubs = [eph.hub]
+    } else {
+      return { ok: false, error: eph.error || '未检测到运行中的 Antigravity IDE 语言服务，请先打开 Antigravity IDE 或安装官方 agy CLI' }
+    }
+  }
   if (hubs.length === 0) {
     return { ok: false, error: '未检测到运行中的 Antigravity IDE 语言服务，请先在电脑上打开 Antigravity IDE' }
   }
@@ -4634,6 +4960,7 @@ export async function previewAntigravityRevert(
       )
       const data = await resp.json().catch(() => ({}))
       if (resp.ok && !data?.error && !data?.code) {
+        if (hub.kind === 'agy-ephemeral-revert') touchEphemeralRevertHubIdleTimer()
         const rawList = Array.isArray(data?.codeEditPreviews) ? data.codeEditPreviews : []
         const files = rawList
           .map(it => normalizeRevertPreviewItem(it, preferredCwd))
@@ -4643,6 +4970,7 @@ export async function previewAntigravityRevert(
           agentId: `${AGY_IDE_PREFIX}${rawConvId}`,
           cascadeId: rawConvId,
           stepIndex: cleanStepIndex,
+          engine: hub.kind === 'agy-ephemeral-revert' ? 'agy-ephemeral-hub' : 'connect-rpc',
           files,
           fileCount: files.length,
         }
@@ -4662,11 +4990,24 @@ export async function previewAntigravityRevert(
  * Revert an Antigravity IDE conversation to `stepIndex` via Connect-RPC `RevertToCascadeStep`.
  * Supports both full revert (`conversationOnly: false`, restoring code files) and chat-only revert
  * (`conversationOnly: true`, keeping code changes intact).
+ * Automatically falls back to an on-demand ephemeral `agy --hub` on standalone Antigravity 2.0 / ACP hosts.
  */
 export async function revertAntigravityToStep(
   sessionId,
   stepIndex,
-  { conversationOnly = false, preferredCwd = '', execImpl = execFileAsync, fetchImpl = globalThis.fetch } = {},
+  {
+    conversationOnly = false,
+    preferredCwd = '',
+    execImpl = execFileAsync,
+    fetchImpl = globalThis.fetch,
+    spawnImpl = spawn,
+    accessImpl = access,
+    cliPath = '',
+    home = homedir(),
+    brainDirs = undefined,
+    portAllocator = allocateLoopbackPort,
+    allowEphemeralHub = true,
+  } = {},
 ) {
   const rawConvId = toRawConversationId(sessionId)
   const cleanStepIndex = Number(stepIndex)
@@ -4681,7 +5022,23 @@ export async function revertAntigravityToStep(
     return { ok: false, error: '当前环境不支持 Antigravity RPC 撤回' }
   }
 
-  const hubs = await discoverAntigravityHubInstances({ execImpl, preferredCwd })
+  let hubs = await discoverAntigravityHubInstances({ execImpl, preferredCwd })
+  if (hubs.length === 0 && allowEphemeralHub) {
+    const eph = await ensureEphemeralRevertHub({
+      execImpl,
+      fetchImpl,
+      spawnImpl,
+      accessImpl,
+      cliPath,
+      home,
+      portAllocator,
+    })
+    if (eph.hub) {
+      hubs = [eph.hub]
+    } else {
+      return { ok: false, error: eph.error || '未检测到运行中的 Antigravity IDE 语言服务，请先打开 Antigravity IDE 或安装官方 agy CLI' }
+    }
+  }
   if (hubs.length === 0) {
     return { ok: false, error: '未检测到运行中的 Antigravity IDE 语言服务，请先在电脑上打开 Antigravity IDE' }
   }
@@ -4736,8 +5093,10 @@ export async function revertAntigravityToStep(
       )
       const data = await resp.json().catch(() => ({}))
       if (resp.ok && !data?.error && !data?.code) {
+        if (hub.kind === 'agy-ephemeral-revert') touchEphemeralRevertHubIdleTimer()
         cachedLiveSummariesAt = 0
         sessionParseCache.delete(rawConvId)
+        await recordLocalRevertCeiling(rawConvId, cleanStepIndex, brainDirs)
         const rawUris = Array.isArray(data?.metadata?.revertedUris) ? data.metadata.revertedUris : []
         const revertedFiles = rawUris.map(u => normalizeRevertFilePath(u, preferredCwd)).filter(f => f.fileUri)
         return {
@@ -4746,6 +5105,7 @@ export async function revertAntigravityToStep(
           cascadeId: rawConvId,
           stepIndex: cleanStepIndex,
           conversationOnly: onlyChat,
+          engine: hub.kind === 'agy-ephemeral-revert' ? 'agy-ephemeral-hub' : 'connect-rpc',
           revertedFiles,
           revertedCount: revertedFiles.length,
           message: onlyChat

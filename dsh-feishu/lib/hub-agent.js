@@ -30,6 +30,7 @@ import {
   revertAntigravityToStep,
   setAntigravityConversationPinned,
   setAntigravityConversationTitle,
+  shutdownEphemeralRevertHub,
   toggleAntigravityPlugin,
   toRawConversationId,
 } from './antigravity-ide.js'
@@ -460,6 +461,7 @@ export class HubAgent {
     if (this.agyAcpClient) {
       this.agyAcpClient.shutdown()
     }
+    shutdownEphemeralRevertHub()
     stopAllHlsEncoders()
     for (const entry of this.inflightFsUploads.values()) {
       try {
@@ -1910,13 +1912,16 @@ export class HubAgent {
             return { ok: false, error: '当前仅支持 Antigravity IDE 会话撤回' }
           }
           const agySess = (this.cachedAgySessions || []).find(s => s.id === targetId)
+          await this.agyAcpClient?.releaseSession?.(targetId).catch(() => {})
           const res = await revertAntigravityToStep(targetId, cmd.stepIndex, {
             conversationOnly: Boolean(cmd.conversationOnly),
             preferredCwd: cmd.cwd || agySess?.cwd || '',
+            brainDirs: this.config.antigravityBrainDirs || undefined,
             execImpl: this.execImpl,
             fetchImpl: this.fetch,
           })
           if (res?.ok) {
+            await this.agyAcpClient?.releaseSession?.(targetId).catch(() => {})
             this.pendingUserPrompts.delete(targetId)
             this.lastFullHeartbeatAt = 0
             this.lastAckedBridgeStateSig = ''

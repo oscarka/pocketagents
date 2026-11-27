@@ -839,6 +839,16 @@ export class AntigravityAcpClient {
     }
   }
 
+  async releaseSession(sessionId) {
+    const rawId = String(sessionId || '').replace(/^agy-ide:/, '').trim()
+    if (!rawId) return
+    this.loadedSessions.delete(rawId)
+    this.activeTurns.delete(rawId)
+    if (this.isAlive()) {
+      await this._sendRequest('session/close', { sessionId: rawId }, 4000).catch(() => {})
+    }
+  }
+
   hasPendingPermission(code = '', sessionId = '') {
     const upper = String(code || '').trim().toUpperCase()
     if (upper && this.pendingPermissions.has(upper)) return true

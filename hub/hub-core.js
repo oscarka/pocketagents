@@ -3666,6 +3666,9 @@ export class HubCore {
   onCommandResult(hostId, res = {}) {
     const now = this.now()
     const host = this.hosts.get(hostId)
+    if (res.type === 'revert_to_step' && res.ok && res.agentId) {
+      this.fullTranscriptCache.delete(`${hostId}:${res.agentId}`)
+    }
     if (res.type === 'load_full_transcript' && res.ok && res.agentId && Array.isArray(res.transcript)) {
       const liveTask = (host?.bridgeState?.tasks || []).find(t => t?.id === res.agentId)
       this.fullTranscriptCache.set(`${hostId}:${res.agentId}`, {
