@@ -32,7 +32,7 @@ npx pocketagents
   </p>
 
   <p align="center">
-    <strong>🇺🇸 English</strong> · <a href="./README.zh-CN.md">🇨🇳 简体中文</a> · <a href="https://pocketagents.agentrun.vip/?demo=1&amp;lang=en">✨ Live Demo</a> · <a href="#get-started-in-3-steps">24/7 Cloud Setup</a> · <a href="#supported-ai-coding-tools">Supported Tools</a> · <a href="#whats-new">What's New</a> · <a href="#faq">FAQ</a>
+    <strong>🇺🇸 English</strong> · <a href="./README.zh-CN.md">🇨🇳 简体中文</a> · <a href="https://pocketagents.agentrun.vip/?demo=1&amp;lang=en">✨ Live Demo</a> · <a href="./firmware/folotoy-passport/README.md">🪪 FoloToy Hardware</a> · <a href="#get-started-in-3-steps">24/7 Cloud Setup</a> · <a href="#supported-ai-coding-tools">Supported Tools</a> · <a href="#whats-new">What's New</a> · <a href="#faq">FAQ</a>
   </p>
 </div>
 
@@ -73,6 +73,8 @@ When you kick off a long refactoring, test suite, or deployment in **Claude Code
 - **Multiple computers**: You have both an office Mac and home workstations running tasks and want one unified mobile view.
 
 **PocketAgents** puts all of your computers' AI coding sessions into a clean mobile web app (with **WeChat-style Hold-to-Talk voice input + smart punctuation**, **1-tap `🔊 Listen` algorithmic reply playback (`⚡ Summary` / `📖 Full` + seamless mid-stream speed control)**, iOS 16.4+ Home Screen lock-screen push notifications, and automatic English/Chinese UI detection).
+
+> **🪪 Optional Pocket Hardware Remote**: PocketAgents also ships an open-source companion firmware for **FoloToy AI Passport** — see [firmware/folotoy-passport/README.md](./firmware/folotoy-passport/README.md).
 
 ---
 

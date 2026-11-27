@@ -123,7 +123,7 @@ static const char PORTAL_HTML[] =
     "<h2 style='margin-top:18px'>② PocketAgents 电脑/云端地址（选填）</h2>"
     "<div class='sub'>还没开电脑可先留空，连好 Wi-Fi 后随时长按设备 ↑ 键再补填。</div>"
     "<label>服务器地址</label>"
-    "<input id='hub' name='hub' placeholder='例如 https://harness.agentrun.vip 或 http://192.168.1.25:8788'/>"
+    "<input id='hub' name='hub' placeholder='例如 http://192.168.1.25:8788 或你的云端 Hub 地址'/>"
     "<label>6 位配对码 或 设备令牌</label>"
     "<input id='token' name='token' placeholder='电脑终端里的 6 位配对码，如 MF9AJP'/>"
     "<div id='msg' class='msg'></div>"

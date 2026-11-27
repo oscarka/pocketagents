@@ -32,7 +32,7 @@ npx pocketagents
   </p>
 
   <p align="center">
-    <strong>🇺🇸 English</strong> · <a href="./README.zh-CN.md">🇨🇳 简体中文</a> · <a href="https://pocketagents.agentrun.vip/?demo=1&amp;lang=en">✨ Live Demo</a> · <a href="#get-started-in-3-steps">24/7 Cloud Setup</a> · <a href="#supported-ai-coding-tools">Supported Tools</a> · <a href="#ai-capabilities-and-beta-features">AI &amp; Beta</a> · <a href="#whats-new">What's New</a> · <a href="#faq">FAQ</a>
+    <strong>🇺🇸 English</strong> · <a href="./README.zh-CN.md">🇨🇳 简体中文</a> · <a href="https://pocketagents.agentrun.vip/?demo=1&amp;lang=en">✨ Live Demo</a> · <a href="./firmware/folotoy-passport/README.md">🪪 FoloToy Hardware</a> · <a href="#get-started-in-3-steps">24/7 Cloud Setup</a> · <a href="#supported-ai-coding-tools">Supported Tools</a> · <a href="#ai-capabilities-and-beta-features">AI &amp; Beta</a> · <a href="#whats-new">What's New</a> · <a href="#faq">FAQ</a>
   </p>
 </div>
 
@@ -73,6 +73,8 @@ When you kick off a long refactoring, test suite, or deployment in **Claude Code
 - **Multiple computers**: You have both an office Mac and home workstations running tasks and want one unified mobile view.
 
 **PocketAgents** puts all of your computers' AI coding sessions into a clean mobile web app — complete with **WeChat-style Hold-to-Talk voice &amp; 1-tap `🔊 Listen` reply playback** (with independent **Chat Voice** model selection), a shared BYOK **AI Models &amp; Providers** pool (Gemini / Volcengine Seed-ASR 2.0 &amp; Seed-TTS 3.0 / DeepSeek / OpenAI-compatible), an optional **`🎧 Walk Mode (Beta)`** with a collapsible Floating Mini Bar &amp; 1ms 3-digit PIN guard on destructive commands, optional **`🎯 Goal Copilot (Beta)`**, **Zero-Trust Phone-Approved device/computer access**, iOS 16.4+ lock-screen push notifications, and automatic English/Chinese UI detection.
+
+> **🪪 Optional Pocket Hardware Remote**: PocketAgents also ships an open-source companion firmware for **FoloToy AI Passport** (1-click approvals, multi-choice, 3-digit PIN safety lock &amp; push-to-talk voice right from a badge) — see [firmware/folotoy-passport/README.md](./firmware/folotoy-passport/README.md).
 
 ---
 

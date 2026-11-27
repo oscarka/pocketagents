@@ -8,10 +8,11 @@ Turn your **FoloToy AI Passport** into a pocket remote control for Claude Code, 
 
 ## Phone Hotspot Wi-Fi Setup (Recommended — No Computer Needed to Connect Wi-Fi)
 
-1. Boot the flashed device: if no Wi-Fi is saved (after ~4.5s), or anytime you **long-press `UP`**, AI Passport opens an open temporary hotspot **`PocketAgents-Setup`** and displays setup steps on screen.
-2. Connect your phone to **`PocketAgents-Setup`** and open **`http://192.168.4.1`** (usually auto-pops as a captive portal).
+1. Boot the flashed device: if no Wi-Fi is saved (or saved Wi-Fi fails after retries), or anytime you **long-press `UP`**, AI Passport opens an open temporary hotspot **`PocketAgents-XXXX`** (e.g. `PocketAgents-A1B2`, exact name shown on screen) and displays setup steps.
+2. Connect your phone to **`PocketAgents-XXXX`** and open **`http://192.168.4.1`** (usually auto-pops as a captive portal).
 3. Tap your **2.4 GHz Wi-Fi** from the live scan list, enter its password, and optionally enter your PocketAgents hub URL (e.g. `http://192.168.1.25:8788`) plus the **6-character pairing code** (e.g. `MF9AJP`) shown in your terminal (automatically exchanged for a revocable `dev_` token!).
-4. Don't have PocketAgents running on a computer yet? Press **`DOWN`** on the setup screen to try the **built-in interactive offline demo** immediately!
+4. Tap **Verify & Connect Wi-Fi** — the device tests the Wi-Fi credentials live (up to 15s) and shows the exact reason inline if the password is wrong or a 5 GHz SSID was chosen; once connected, the temporary hotspot closes automatically.
+5. Don't have PocketAgents running on a computer yet? Press **`DOWN`** on the setup screen to try the **built-in interactive offline demo** immediately!
 
 ## Alternative: 3-Step Quick Start via Computer USB (`/device-setup`)
 
@@ -21,13 +22,13 @@ Turn your **FoloToy AI Passport** into a pocket remote control for Claude Code, 
 
 ### Step 2: Start PocketAgents on Your Computer
 ```bash
-# On the hardware preview branch (before main release):
-git clone -b feat/folotoy-passport https://github.com/oscarka/pocketagents.git
+# Recommended (Node.js 20+):
+npx pocketagents
+
+# Or run directly from source:
+git clone https://github.com/oscarka/pocketagents.git
 cd pocketagents
 node scripts/cli.mjs
-
-# Once merged to main / npm:
-npx pocketagents
 ```
 The terminal automatically prints a 1-click hardware pairing URL:
 ```text

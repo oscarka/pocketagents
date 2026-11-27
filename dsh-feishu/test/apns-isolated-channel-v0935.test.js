@@ -22,7 +22,7 @@ test('v0.9.35 APNs provider JWT (ES256), sandbox/prod routing, payload, and HTTP
 
   const cfg = resolveApnsConfig({
     keyId: 'ABCD123456',
-    teamId: 'H7Y6N5S3Q3',
+    teamId: 'TEAM123456',
     bundleId: 'vip.agentrun.pocketagents.shell',
     privateKey: privateKeyPem,
   })
@@ -35,7 +35,7 @@ test('v0.9.35 APNs provider JWT (ES256), sandbox/prod routing, payload, and HTTP
     kid: 'ABCD123456',
   })
   assert.deepEqual(JSON.parse(Buffer.from(p, 'base64url').toString('utf8')), {
-    iss: 'H7Y6N5S3Q3',
+    iss: 'TEAM123456',
     iat: 1_800_000_000,
   })
   const sigValid = verify('sha256', Buffer.from(`${h}.${p}`, 'utf8'), {

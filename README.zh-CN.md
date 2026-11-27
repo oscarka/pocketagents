@@ -32,7 +32,7 @@ npx pocketagents
   </p>
 
   <p align="center">
-    <a href="./README.md">🇺🇸 English</a> · <strong>🇨🇳 简体中文</strong> · <a href="https://pocketagents.agentrun.vip/?demo=1&amp;lang=zh">✨ 在线 Demo</a> · <a href="#三步快速上手">4G/5G 跨网部署</a> · <a href="#支持的-ai-编程工具">支持工具</a> · <a href="#ai-能力架构与-beta-功能说明">AI 与 Beta 说明</a> · <a href="#最近版本更新记录">版本更新</a> · <a href="#常见问题">常见问题</a>
+    <a href="./README.md">🇺🇸 English</a> · <strong>🇨🇳 简体中文</strong> · <a href="https://pocketagents.agentrun.vip/?demo=1&amp;lang=zh">✨ 在线 Demo</a> · <a href="./firmware/folotoy-passport/README.zh_CN.md">🪪 FoloToy 随身硬件</a> · <a href="#三步快速上手">4G/5G 跨网部署</a> · <a href="#支持的-ai-编程工具">支持工具</a> · <a href="#ai-能力架构与-beta-功能说明">AI 与 Beta 说明</a> · <a href="#最近版本更新记录">版本更新</a> · <a href="#常见问题">常见问题</a>
   </p>
 </div>
 
@@ -73,6 +73,8 @@ npx pocketagents
 - **多台电脑来回切**：公司一台 Mac、家里两台 Mac mini 都在跑任务，想在一个手机页面里统一看管。
 
 **PocketAgents** 把你电脑上正在跑的 AI 编程会话装进手机浏览器里 —— 内置**微信同款「按住说话」语音转文字与 `🔊 播报` 听回复**（支持**聊天语音**独立选配模型）、统一的 BYOK **「AI 模型与供应商」** 全局池（自由接入火山豆包 ASR 2.0 / TTS 3.0、Gemini、DeepSeek、OpenAI 兼容接口）、可选 **`🎧 边走边听 (Beta)`**（带可收起悬浮迷你条与高危命令 1ms 3 位语音确认码护栏）与 **`🎯 目标副驾插件 (Beta)`**、**零信任手机审批门禁与入侵推送告警**，支持 iOS 16.4+ 添加到主屏幕开启原生锁屏推送与中英文自动切换。
+
+> **🪪 随身实体硬件遥控器（可选）**：已内置开源 **FoloToy AI Passport** 专属固件（无需掏手机，抬手按三键即可看进度、审批、选中文多选题、高危 3 位码拦截与语音对讲），详细刷机与配网教程见 [firmware/folotoy-passport/README.zh_CN.md](./firmware/folotoy-passport/README.zh_CN.md)。
 
 ---
 

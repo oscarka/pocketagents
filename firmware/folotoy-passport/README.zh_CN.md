@@ -25,14 +25,14 @@
 ## 二、新手 30 秒配网（方式 A 最推荐：手机直接配 Wi-Fi，免插电脑！）
 
 ### 第 1 步：开机自动放出免密配网热点
-1. 刷好固件开机后，若尚未配过 Wi-Fi（约 4.5 秒后）——或**在任意界面长按 `↑` 键 1 秒**——设备会自动放出免密临时热点 **`PocketAgents-Setup`**，屏幕上会直接显示配网步骤。
+1. 刷好固件开机后，若尚未配过 Wi-Fi（或已存 Wi-Fi 多次重连失败）——或**在任意界面长按 `↑` 键 1 秒**——设备会自动放出免密临时热点 **`PocketAgents-XXXX`**（后 4 位为设备标识，如 `PocketAgents-A1B2`，具体名称直接看小屏），屏幕上会直接显示配网步骤。
 2. 此时如果还没开电脑控制台，也可以**直接按一下 `↓` 键进入「内置离线演示」**，立刻在真机上完整体验中文审批、多选题、L2 高危拦截出 3 位确认码与长按 `↓` 拒绝！
 
 ### 第 2 步：手机连热点，一页配好 Wi-Fi + PocketAgents
-1. 手机 Wi-Fi 搜索并连接免密热点 **`PocketAgents-Setup`**（提示“无互联网连接”请选保留连接）。
+1. 手机 Wi-Fi 搜索并连接屏幕上显示的免密热点 **`PocketAgents-XXXX`**（提示“无互联网连接”请选保留连接）。
 2. 手机通常会自动弹出中文配网页；没自动弹就在手机浏览器打开 **`http://192.168.4.1`**。
 3. 在网页上点选你的 **2.4GHz Wi-Fi**（不支持 5GHz）并输入密码；如果电脑已跑起 PocketAgents，顺手填入 **电脑局域网地址**（如 `http://192.168.1.25:8788`）和终端里显示的 **6 位配对码**（如 `MF9AJP`，无需抄长密码，设备连网后会自动换成专属 `dev_` 通行证！）。
-4. 点 **`保存并连接 Wi-Fi`**，3～5 秒后小工牌自动连上网并关闭临时热点。以后想换 Wi-Fi 或补填电脑地址，**随时长按 `↑` 键**重开热点修改即可。
+4. 点 **`验证并连接 Wi-Fi`**，小工牌会实时实测连网（最多 15 秒）：如果密码输错或选成 5GHz 会直接在手机页面提示具体原因；连网成功后临时热点自动关闭。以后想换 Wi-Fi 或补填电脑地址，**随时长按 `↑` 键**重开热点修改即可。
 
 ---
 
@@ -42,7 +42,7 @@
 
 1. 用**支持数据传输的 USB-C 数据线**把开机的 AI Passport 插到电脑上。
 2. 打开 FoloToy 社区的「口袋代理」作品页点击一键刷机，或者打开 [FoloToy 网页刷机工具](https://ai-passport.folotoy.cn/tools/web-flasher/)，选择串口（通常显示 `USB JTAG/serial debug unit`），从 `0x0` 刷入合并固件 `pocketagents-passport-merged.bin`。
-3. 刷完重启后，小屏顶部显示 **`口袋代理`**，中间提示 **`正在连接 Wi-Fi...`**。
+3. 刷完重启后，小屏顶部显示 **`口袋代理`**，未配网时会自动进入配网热点页。
 
 ---
 
@@ -52,13 +52,13 @@
 
 打开电脑终端（Mac 的「终端」或 Windows 的「PowerShell」）：
 
-- **方式 A（推荐，正式版发布后一行即起）**：
+- **方式 A（推荐，一行即起）**：
   ```bash
   npx pocketagents
   ```
-- **方式 B（当前体验最新 `feat/folotoy-passport` 硬件预览分支）**：
+- **方式 B（从源码直接运行）**：
   ```bash
-  git clone -b feat/folotoy-passport https://github.com/oscarka/pocketagents.git
+  git clone https://github.com/oscarka/pocketagents.git
   cd pocketagents
   node scripts/cli.mjs
   ```
@@ -66,7 +66,7 @@
 启动成功后，终端会打印类似下面这样的画面（**注意看最后那一行 `🪪 AI Passport` 链接**）：
 
 ```text
-🚀 PocketAgents v0.9.19 — Ready on port 8788
+🚀 PocketAgents v0.9.46 — Ready on port 8788
    💻 Host: MacBook Pro (macbook-pro)
    🔌 Synced: Claude Code (2) · Codex (1)
 
