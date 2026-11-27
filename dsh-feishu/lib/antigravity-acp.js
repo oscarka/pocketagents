@@ -292,7 +292,7 @@ export class AntigravityAcpClient {
             clientCapabilities: {},
             clientInfo: {
               name: 'PocketAgents',
-              version: '0.9.38',
+              version: '0.9.47',
             },
           },
           12_000,
@@ -653,7 +653,8 @@ export class AntigravityAcpClient {
     }
 
     const effectiveCwd = String(cwd || this.home || process.cwd()).trim()
-    if (!this.loadedSessions.has(rawId)) {
+    const wasAlreadyLoaded = this.loadedSessions.has(rawId)
+    if (!wasAlreadyLoaded) {
       try {
         const res = await this._sendRequest(
           'session/resume',
@@ -692,44 +693,63 @@ export class AntigravityAcpClient {
       model,
     })
 
-    const releaseLoadedSession = () => {
-      const latest = this.activeTurns.get(rawId)
-      if (latest && latest.turnToken !== turnToken) return
-      this.loadedSessions.delete(rawId)
-      if (this.isAlive()) {
-        this._sendRequest('session/close', { sessionId: rawId }, 4000).catch(() => {})
-      }
-    }
-
-    // Dispatch `session/prompt` asynchronously (a full agent turn can run for minutes)
-    this._sendRequest('session/prompt', { sessionId: rawId, prompt: promptBlocks }, 30 * 60_000)
-      .then(() => {
+    // Keep the ACP session loaded across turns: Antigravity's `session/close` calls
+    // ForceStopCascadeTree(kill_background_tasks=true), which kills dev servers, tunnels,
+    // timers, and subagents right after a normal reply. Only explicit teardown paths like
+    // `revert_to_step` (`releaseSession()`) should send `session/close`.
+    const dispatchPrompt = async canRetryStaleSession => {
+      try {
+        await this._sendRequest('session/prompt', { sessionId: rawId, prompt: promptBlocks }, 30 * 60_000)
         const cur = this.activeTurns.get(rawId)
         if (cur && cur.turnToken === turnToken) {
           cur.status = 'done'
           cur.updatedAt = Date.now()
         }
-        releaseLoadedSession()
         setTimeout(() => {
           const latest = this.activeTurns.get(rawId)
           if (latest && latest.turnToken === turnToken && latest.status === 'done') this.activeTurns.delete(rawId)
         }, 4000).unref?.()
         this.onStateChange?.('turn_done', { sessionId: rawId })
-      })
-      .catch(err => {
+      } catch (err) {
+        const errMsg = String(err?.message || '')
+        const isSessionStale = /session.*(?:not found|not loaded|closed|expired|invalid)|unknown session/i.test(errMsg)
+        if (isSessionStale) {
+          // Drop stale client-side cache only (never send `session/close`)
+          this.loadedSessions.delete(rawId)
+          const latest = this.activeTurns.get(rawId)
+          if (canRetryStaleSession && latest && latest.turnToken === turnToken && this.isAlive()) {
+            try {
+              const res = await this._sendRequest(
+                'session/resume',
+                { sessionId: rawId, cwd: effectiveCwd, mcpServers: [] },
+                15_000,
+              )
+              this.authenticated = true
+              this.loadedSessions.add(rawId)
+              this._captureModelsFromSessionResult(res)
+              if (model) await this._applySessionModel(rawId, model)
+              return await dispatchPrompt(false)
+            } catch (retryErr) {
+              err = retryErr
+            }
+          }
+        }
         const cur = this.activeTurns.get(rawId)
         if (cur && cur.turnToken === turnToken) {
           cur.status = 'error'
           cur.error = err?.message || '执行中断'
           cur.updatedAt = Date.now()
         }
-        releaseLoadedSession()
         setTimeout(() => {
           const latest = this.activeTurns.get(rawId)
           if (latest && latest.turnToken === turnToken && latest.status === 'error') this.activeTurns.delete(rawId)
         }, 6000).unref?.()
         this.onStateChange?.('turn_error', { sessionId: rawId, error: err?.message })
-      })
+      }
+    }
+
+    // Dispatch `session/prompt` asynchronously (a full agent turn can run for minutes)
+    void dispatchPrompt(wasAlreadyLoaded)
 
     return {
       ok: true,

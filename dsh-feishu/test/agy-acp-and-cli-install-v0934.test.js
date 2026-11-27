@@ -342,3 +342,121 @@ test('v0.9.34 mobile UI wiring and English i18n cover degraded-mode banners and 
     assert.equal(/[\u4e00-\u9fa5]/.test(en), false, `Leftover Chinese in EN translation for "${s}" -> "${en}"`)
   }
 })
+
+test('v0.9.47 AntigravityAcpClient never sends session/close after normal turns or errors, reuses loaded session, auto-resumes stale session, and still closes on explicit releaseSession', async () => {
+  let promptCalls = 0
+  let failStaleOnce = false
+  let failGenericOnce = false
+  const events = []
+
+  const { proc, received } = createFakeAcpProcess((msg, child) => {
+    if (msg.method === 'initialize') {
+      child.pushStdout({
+        jsonrpc: '2.0',
+        id: msg.id,
+        result: { protocolVersion: 1, agentCapabilities: { loadSession: true } },
+      })
+      return
+    }
+    if (msg.method === 'session/resume') {
+      child.pushStdout({
+        jsonrpc: '2.0',
+        id: msg.id,
+        result: { sessionId: msg.params.sessionId },
+      })
+      return
+    }
+    if (msg.method === 'session/new') {
+      child.pushStdout({
+        jsonrpc: '2.0',
+        id: msg.id,
+        result: { sessionId: 'fresh-conv-001' },
+      })
+      return
+    }
+    if (msg.method === 'session/close') {
+      child.pushStdout({ jsonrpc: '2.0', id: msg.id, result: {} })
+      return
+    }
+    if (msg.method === 'session/prompt') {
+      promptCalls += 1
+      if (failStaleOnce) {
+        failStaleOnce = false
+        child.pushStdout({
+          jsonrpc: '2.0',
+          id: msg.id,
+          error: { code: -32000, message: 'Session not found' },
+        })
+        return
+      }
+      if (failGenericOnce) {
+        failGenericOnce = false
+        child.pushStdout({
+          jsonrpc: '2.0',
+          id: msg.id,
+          error: { code: -32000, message: 'Upstream timeout' },
+        })
+        return
+      }
+      child.pushStdout({ jsonrpc: '2.0', id: msg.id, result: { stopReason: 'end_turn' } })
+    }
+  })
+
+  const client = new AntigravityAcpClient({
+    cliPath: '/mock/agy',
+    spawnImpl: () => proc,
+    onStateChange: (ev, meta) => events.push({ ev, sessionId: meta?.sessionId }),
+  })
+  client.resolveCliPath = async () => '/mock/agy'
+
+  // Turn 1: resumes session once and completes WITHOUT sending session/close
+  const r1 = await client.sendPrompt({ sessionId: 'agy-ide:bg-keep-alive', text: '启动 dev server', cwd: '/Users/cc/app' })
+  assert.equal(r1.ok, true)
+  await new Promise(r => setTimeout(r, 35))
+
+  assert.equal(received.filter(m => m.method === 'session/resume' && m.params.sessionId === 'bg-keep-alive').length, 1)
+  assert.equal(received.filter(m => m.method === 'session/close').length, 0)
+  assert.equal(client.loadedSessions.has('bg-keep-alive'), true)
+
+  // Turn 2: reuses already-loaded session (no extra session/resume, still zero session/close)
+  const r2 = await client.sendPrompt({ sessionId: 'agy-ide:bg-keep-alive', text: '查一下状态', cwd: '/Users/cc/app' })
+  assert.equal(r2.ok, true)
+  await new Promise(r => setTimeout(r, 35))
+
+  assert.equal(received.filter(m => m.method === 'session/resume' && m.params.sessionId === 'bg-keep-alive').length, 1)
+  assert.equal(received.filter(m => m.method === 'session/close').length, 0)
+
+  // Generic turn error: MUST NOT send session/close (do not kill running background tasks)
+  failGenericOnce = true
+  const r3 = await client.sendPrompt({ sessionId: 'agy-ide:bg-keep-alive', text: '触发普通报错', cwd: '/Users/cc/app' })
+  assert.equal(r3.ok, true)
+  await new Promise(r => setTimeout(r, 35))
+  assert.equal(received.filter(m => m.method === 'session/close').length, 0)
+  assert.equal(client.loadedSessions.has('bg-keep-alive'), true)
+  assert.ok(events.some(e => e.ev === 'turn_error' && e.sessionId === 'bg-keep-alive'))
+
+  // Stale session evicted on server: auto-resumes once and retries prompt cleanly with ZERO session/close
+  failStaleOnce = true
+  const doneBeforeStale = events.filter(e => e.ev === 'turn_done' && e.sessionId === 'bg-keep-alive').length
+  const r4 = await client.sendPrompt({ sessionId: 'agy-ide:bg-keep-alive', text: '恢复并重试', cwd: '/Users/cc/app' })
+  assert.equal(r4.ok, true)
+  await new Promise(r => setTimeout(r, 45))
+  assert.equal(received.filter(m => m.method === 'session/resume' && m.params.sessionId === 'bg-keep-alive').length, 2)
+  assert.equal(received.filter(m => m.method === 'session/close').length, 0)
+  assert.equal(events.filter(e => e.ev === 'turn_done' && e.sessionId === 'bg-keep-alive').length, doneBeforeStale + 1)
+
+  // createSession with initial prompt: also keeps session open after first turn completes
+  const created = await client.createSession({ prompt: '启动临时隧道', cwd: '/Users/cc/app' })
+  assert.equal(created.ok, true)
+  await new Promise(r => setTimeout(r, 35))
+  assert.equal(received.filter(m => m.method === 'session/close').length, 0)
+  assert.equal(client.loadedSessions.has('fresh-conv-001'), true)
+
+  // Explicit releaseSession (used by revert_to_step): STILL sends session/close
+  await client.releaseSession('agy-ide:bg-keep-alive')
+  assert.equal(received.filter(m => m.method === 'session/close' && m.params.sessionId === 'bg-keep-alive').length, 1)
+  assert.equal(client.loadedSessions.has('bg-keep-alive'), false)
+  assert.ok(promptCalls >= 6)
+
+  client.shutdown()
+})
