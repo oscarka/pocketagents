@@ -156,6 +156,7 @@ export class HubAgent {
     bootId = `boot-${randomBytes(6).toString('hex')}`,
     bootEpochMs = Date.now(),
     harnessRouter = undefined,
+    heartbeatTimeoutMs = 12_000,
   }) {
     this.config = config
     this.bridge = bridge
@@ -166,6 +167,7 @@ export class HubAgent {
     this.execImpl = execImpl
     this.bootId = bootId
     this.bootEpochMs = bootEpochMs
+    this.heartbeatTimeoutMs = Math.max(100, Number(heartbeatTimeoutMs) || 12_000)
     this.heartbeatSeq = 0
     this.agyAcpClient = !this.execImpl
       ? new AntigravityAcpClient({
@@ -1043,6 +1045,8 @@ export class HubAgent {
     let resolveInflight = null
     this.inflightTick = new Promise(resolve => { resolveInflight = resolve })
     let executedAny = false
+    let resultsToSend = []
+    let resultsCommitted = false
     try {
       // Stamp snapshot capture time & monotonic sequence BEFORE reading disk/RPC so out-of-order slow captures are detected
       const capturedAt = Date.now()
@@ -1365,7 +1369,7 @@ export class HubAgent {
         && this.lastAckedBridgeStateSig === bridgeStateSig
         && capturedAt - this.lastFullHeartbeatAt < 60_000,
       )
-      const resultsToSend = this.pendingResults.splice(0)
+      resultsToSend = this.pendingResults.splice(0)
       const prewarmedFiles = isLiteHeartbeat
         ? []
         : await this.collectPrewarmedWalkthroughs(bridgeState.tasks)
@@ -1405,19 +1409,39 @@ export class HubAgent {
       const reqBody = shouldGzip ? gzipSync(Buffer.from(rawBody, 'utf8')) : rawBody
       const reqHeaders = shouldGzip ? this.headers({ 'content-encoding': 'gzip' }) : this.headers()
       const hbReqStart = Date.now()
-      const response = await this.fetch(`${this.config.hubUrl}/api/heartbeat`, {
-        method: 'POST',
-        headers: reqHeaders,
-        body: reqBody,
-      })
-      if (!response.ok) {
-        if (resultsToSend.length > 0) this.pendingResults.unshift(...resultsToSend)
-        return
+      const hbAbort = new AbortController()
+      const hbTimeout = setTimeout(() => {
+        hbAbort.abort(new Error(`heartbeat timeout after ${this.heartbeatTimeoutMs}ms`))
+      }, this.heartbeatTimeoutMs)
+      hbTimeout.unref?.()
+      let data
+      try {
+        const response = await this.fetch(`${this.config.hubUrl}/api/heartbeat`, {
+          method: 'POST',
+          headers: reqHeaders,
+          body: reqBody,
+          signal: hbAbort.signal,
+        })
+        if (!response.ok) {
+          if (resultsToSend.length > 0) this.pendingResults.unshift(...resultsToSend)
+          resultsCommitted = true
+          return
+        }
+        this.lastHeartbeatRttMs = Math.max(1, Date.now() - hbReqStart)
+        data = await response.json()
+        resultsCommitted = true
+      } finally {
+        clearTimeout(hbTimeout)
       }
-      this.lastHeartbeatRttMs = Math.max(1, Date.now() - hbReqStart)
-      const data = await response.json()
       if (Array.isArray(data.fsRequests) && data.fsRequests.length > 0) {
-        await Promise.all(data.fsRequests.map(r => this.handleFastFsRequest(r)))
+        if (this.timer) {
+          // Live daemon mode: dispatch fallback fs-tunnel transfers without blocking the heartbeat loop
+          for (const r of data.fsRequests) {
+            void this.handleFastFsRequest(r)
+          }
+        } else {
+          await Promise.all(data.fsRequests.map(r => this.handleFastFsRequest(r)))
+        }
       }
       if (data.needFullSync) {
         this.lastAckedBridgeStateSig = ''
@@ -1469,6 +1493,12 @@ export class HubAgent {
         // without waiting for a second full disk & RPC scan tick (~500ms saved).
         if (this.timer && hasFastReadCmd && this.pendingResults.length > 0) {
           const fastResults = this.pendingResults.splice(0)
+          const fastAbort = new AbortController()
+          const fastTimeoutMs = Math.min(this.heartbeatTimeoutMs, 8_000)
+          const fastTimeout = setTimeout(() => {
+            fastAbort.abort(new Error(`fast heartbeat flush timeout after ${fastTimeoutMs}ms`))
+          }, fastTimeoutMs)
+          fastTimeout.unref?.()
           try {
             const fastRes = await this.fetch(`${this.config.hubUrl}/api/heartbeat`, {
               method: 'POST',
@@ -1481,6 +1511,7 @@ export class HubAgent {
                 identity,
                 commandResults: fastResults,
               }),
+              signal: fastAbort.signal,
             })
             if (!fastRes.ok) {
               this.pendingResults.unshift(...fastResults)
@@ -1489,10 +1520,15 @@ export class HubAgent {
             }
           } catch {
             this.pendingResults.unshift(...fastResults)
+          } finally {
+            clearTimeout(fastTimeout)
           }
         }
       }
     } catch (error) {
+      if (!resultsCommitted && resultsToSend.length > 0) {
+        this.pendingResults.unshift(...resultsToSend)
+      }
       this.logger?.warn?.(`dsh-feishu: hub heartbeat error: ${safeError(error)}`)
     } finally {
       this.polling = false

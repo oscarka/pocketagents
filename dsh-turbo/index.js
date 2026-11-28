@@ -311,7 +311,18 @@ export class TurboController {
     const url = `${this.hubUrl}/api/events?${qp.toString()}`
 
     ;(async () => {
+      let sseWatchdog = null
+      const armSseWatchdog = (ms, reason) => {
+        if (sseWatchdog) clearTimeout(sseWatchdog)
+        sseWatchdog = setTimeout(() => {
+          try {
+            abortController.abort(new Error(reason))
+          } catch {}
+        }, ms)
+        sseWatchdog.unref?.()
+      }
       try {
+        armSseWatchdog(15_000, 'host SSE connect timeout')
         const res = await this.fetch(url, {
           method: 'GET',
           headers: this.hubToken
@@ -332,6 +343,8 @@ export class TurboController {
         const decoder = new TextDecoder()
         let buf = ''
         while (!this.disposed && !rotatedGracefully) {
+          // Hub emits `event: ping` every 20s; 55s of silence indicates a half-open socket after a proxy/Wi-Fi switch
+          armSseWatchdog(55_000, 'host SSE idle read timeout')
           const { done, value } = await reader.read()
           if (done) break
           buf += decoder.decode(value, { stream: true })
@@ -374,6 +387,10 @@ export class TurboController {
         // Reconnect on disconnect
         this._lastSseRotated = false
       } finally {
+        if (sseWatchdog) {
+          clearTimeout(sseWatchdog)
+          sseWatchdog = null
+        }
         this.sseConnected = false
         if (!this.disposed) {
           const delayMs = this._lastSseRotated ? 150 : 3000

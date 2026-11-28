@@ -20,6 +20,16 @@ if (!process.env.LANG || !/utf-?8/i.test(process.env.LANG)) {
 if (!process.env.LC_CTYPE || !/utf-?8/i.test(process.env.LC_CTYPE)) {
   process.env.LC_CTYPE = 'UTF-8'
 }
+import { setDefaultResultOrder } from 'node:dns'
+import { setDefaultAutoSelectFamilyAttemptTimeout } from 'node:net'
+try {
+  // Prefer IPv4 over lossy cross-border IPv6 routes and fail over Happy Eyeballs quickly
+  // so macOS proxy toggles never stall heartbeat sockets for minutes.
+  setDefaultResultOrder?.('ipv4first')
+} catch {}
+try {
+  setDefaultAutoSelectFamilyAttemptTimeout?.(1500)
+} catch {}
 import { resolveConfig, loadSettings } from './lib/config.js'
 import { acquireDaemonLock } from './lib/daemon-lock.js'
 import { FeishuBridge } from './lib/bridge.js'

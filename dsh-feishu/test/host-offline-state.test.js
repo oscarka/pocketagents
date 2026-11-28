@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict'
-import { readFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 import { HubCore } from '../../hub/hub-core.js'
+import { HubAgent } from '../lib/hub-agent.js'
 import { isHostLiveOnline } from '../../hub/web/src/utils/session-labels.js'
 import { isTriageEligibleSession, buildTriageCardViewModel } from '../../hub/web/src/triage-deck.js'
 
@@ -132,4 +134,108 @@ test('Web UI offline state contracts: in-place dimmed grey rows, chat offline ba
   assert.match(ctrlSrc, /renderHostSheetList\(\)/, 'Host switcher sheet must refresh live and display both offline timestamp and Feishu primary badge')
   assert.match(cssSrc, /\.session-row\.row-host-offline/, 'CSS must define light & dark styling for .row-host-offline')
   assert.match(cssSrc, /\.chat-offline-banner/, 'CSS must define styling for .chat-offline-banner')
+})
+
+test('HubAgent heartbeat anti-hang guard: aborts stalled TCP/body sockets at heartbeatTimeoutMs, preserves pendingResults, and recovers immediately on next tick', async () => {
+  const tempHome = await mkdtemp(join(tmpdir(), 'dsh-hb-timeout-'))
+  try {
+    let callCount = 0
+    const receivedCommandResults = []
+    const warnings = []
+    const mockFetch = async (url, init) => {
+      if (!String(url || '').endsWith('/api/heartbeat')) {
+        return { ok: false, status: 404, json: async () => ({}) }
+      }
+      callCount += 1
+      if (callCount === 1) {
+        // Simulate a hung half-open IPv6 / proxy-switched TCP socket that never responds until aborted
+        return await new Promise((_resolve, reject) => {
+          assert.ok(init?.signal, 'POST /api/heartbeat must pass an AbortSignal')
+          init.signal.addEventListener('abort', () => {
+            reject(init.signal.reason || new Error('aborted'))
+          })
+        })
+      }
+      if (callCount === 2) {
+        // Simulate headers returned ok, then body stalled mid-read until aborted
+        return {
+          ok: true,
+          status: 200,
+          json: () =>
+            new Promise((_resolve, reject) => {
+              init.signal.addEventListener('abort', () => {
+                reject(init.signal.reason || new Error('body aborted'))
+              })
+            }),
+        }
+      }
+      const parsed = JSON.parse(String(init?.body || '{}'))
+      receivedCommandResults.push(...(parsed.commandResults || []))
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true, shouldConnectFeishu: false, commands: [] }),
+      }
+    }
+
+    const agent = new HubAgent({
+      config: {
+        hubUrl: 'https://hub.example.test',
+        hubToken: 'test-token',
+        hostId: 'mac-air-test',
+        hostName: 'Air Test',
+        dshHome: tempHome,
+        enableAntigravityIde: false,
+        enableExternalHarnesses: false,
+      },
+      bridge: {
+        getSnapshotState: () => ({ tasks: [], approvals: [], workspaces: [] }),
+      },
+      fetchImpl: mockFetch,
+      execImpl: async () => ({ stdout: '', stderr: '' }),
+      logger: { warn: msg => warnings.push(String(msg)) },
+      heartbeatTimeoutMs: 120,
+    })
+
+    agent.pendingResults.push({ id: 'cmd-preserve-1', type: 'prompt', ok: true, at: Date.now() })
+
+    // 1st tick: hung TCP connect -> must abort cleanly ~120ms, release polling lock, and keep pendingResults
+    const t1 = Date.now()
+    await agent.tick()
+    const elapsed1 = Date.now() - t1
+    assert.ok(elapsed1 >= 90 && elapsed1 < 1500, `hung connect must abort near 120ms (took ${elapsed1}ms)`)
+    assert.equal(agent.polling, false, 'polling lock must be released after timeout')
+    assert.equal(agent.pendingResults.length, 1, 'pendingResults must be restored after connect timeout')
+    assert.equal(agent.pendingResults[0].id, 'cmd-preserve-1')
+
+    // 2nd tick: hung JSON body -> must ALSO abort cleanly and keep pendingResults
+    const t2 = Date.now()
+    await agent.tick()
+    const elapsed2 = Date.now() - t2
+    assert.ok(elapsed2 >= 90 && elapsed2 < 1500, `hung body must abort near 120ms (took ${elapsed2}ms)`)
+    assert.equal(agent.polling, false, 'polling lock must be released after body timeout')
+    assert.equal(agent.pendingResults.length, 1, 'pendingResults must be restored after body timeout')
+
+    // 3rd tick: healthy IPv4 path -> recovers immediately and delivers preserved commandResults
+    await agent.tick()
+    assert.equal(callCount, 3)
+    assert.equal(agent.polling, false)
+    assert.equal(agent.pendingResults.length, 0, 'pendingResults must be flushed once heartbeat succeeds')
+    assert.deepEqual(
+      receivedCommandResults.map(r => r.id),
+      ['cmd-preserve-1'],
+    )
+    assert.ok(warnings.some(w => /heartbeat timeout after 120ms/.test(w)))
+  } finally {
+    await rm(tempHome, { recursive: true, force: true })
+  }
+})
+
+test('Host daemon network resilience contracts: IPv4-first DNS order, Happy Eyeballs 1500ms timeout, and SSE watchdog', async () => {
+  const daemonSrc = await readFile(join(process.cwd(), 'dsh-feishu/daemon.mjs'), 'utf8')
+  const turboSrc = await readFile(join(process.cwd(), 'dsh-turbo/index.js'), 'utf8')
+  assert.match(daemonSrc, /setDefaultResultOrder\?\.\('ipv4first'\)/, 'daemon.mjs must prefer IPv4 over lossy IPv6')
+  assert.match(daemonSrc, /setDefaultAutoSelectFamilyAttemptTimeout\?\.\(1500\)/, 'daemon.mjs must cap Happy Eyeballs attempt timeout to 1500ms')
+  assert.match(turboSrc, /host SSE connect timeout/, 'TurboController SSE must guard against hung connect sockets')
+  assert.match(turboSrc, /host SSE idle read timeout/, 'TurboController SSE must abort zombie silent sockets')
 })
