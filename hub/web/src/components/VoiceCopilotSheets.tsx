@@ -1448,9 +1448,14 @@ export function VoiceCopilotSheets() {
     return () => window.removeEventListener('dsh:hub-state', onHubState);
   }, []);
 
-  const stopAllListening = () => {
+  const stopAllListening = (reason = 'abort') => {
     bargeInMonitorRef.current?.stop();
     if (recorderRef.current?.isRecording()) {
+      const st = recorderRef.current.getLastStats();
+      postNativeVoiceDiag(
+        'listen_aborted',
+        `reason=${reason} dur=${st.durMs} frames=${st.frames} min=${st.minLvl} max=${st.maxLvl} floor=${st.noiseFloor} jsSpeech=${st.jsHadSpeech ? 1 : 0}`,
+      );
       recorderRef.current.stop();
     }
     if (nativeRecRef.current) {
@@ -1458,6 +1463,7 @@ export function VoiceCopilotSheets() {
       nativeRecRef.current = null;
     }
     setMicLevel(0);
+    if (walkPhaseRef.current === 'listening') setWalkPhase('idle');
   };
 
   const handleVerifiedBargeInCandidate = async (rec: { wavBase64: string; byteLength: number }) => {
@@ -1845,12 +1851,16 @@ export function VoiceCopilotSheets() {
   };
 
   const handleWalkWavReady = async (
-    rec: { wavBase64: string; byteLength: number; hadSpeech: boolean; silentTimeout?: boolean },
+    rec: { wavBase64: string; byteLength: number; hadSpeech: boolean; silentTimeout?: boolean; stopReason?: string },
     isAutoFollowUp = false,
   ) => {
     setMicLevel(0);
     const duckMusic = configRef.current?.prefs?.duckMusicMode !== false;
-    postNativeVoiceDiag('wav_ready', `auto=${isAutoFollowUp ? 1 : 0} timeout=${rec.silentTimeout ? 1 : 0} speech=${rec.hadSpeech ? 1 : 0} bytes=${rec.byteLength}`);
+    const st = recorderRef.current?.getLastStats();
+    postNativeVoiceDiag(
+      'wav_ready',
+      `auto=${isAutoFollowUp ? 1 : 0} reason=${rec.stopReason || '-'} timeout=${rec.silentTimeout ? 1 : 0} speech=${rec.hadSpeech ? 1 : 0} bytes=${rec.byteLength} frames=${st?.frames ?? 0} floor=${st?.noiseFloor ?? 0} max=${st?.maxLvl ?? 0}`,
+    );
     if (rec.silentTimeout || (isAutoFollowUp && !rec.hadSpeech)) {
       // User stayed silent during auto-listen window -> quietly restore background music!
       postNativeVoiceDiag('auto_listen_silent_exit', `timeout=${rec.silentTimeout ? 1 : 0} hadSpeech=${rec.hadSpeech ? 1 : 0} bytes=${rec.byteLength}`);
@@ -2029,9 +2039,18 @@ export function VoiceCopilotSheets() {
       }
       await recorderRef.current!.start({
         autoVad: effectiveAutoVad,
-        vadSilenceMs: configRef.current.prefs.vadSilenceMs || 850,
+        vadSilenceMs: configRef.current.prefs.vadSilenceMs || 900,
         noSpeechTimeoutMs: effectiveNoSpeechMs,
         onLevel: lvl => setMicLevel(lvl),
+        onMicProbe: st => {
+          postNativeVoiceDiag(
+            'mic_probe',
+            `frames=${st.frames} min=${st.minLvl} max=${st.maxLvl} floor=${st.noiseFloor} jsSpeech=${st.jsHadSpeech ? 1 : 0} dead=${st.deadTap ? 1 : 0}`,
+          );
+          if (st.deadTap && walkPhaseRef.current === 'listening') {
+            setLastActionBadge('⚠️ 未收到麦克风音频流，请轻点圆球重试');
+          }
+        },
         onAutoStop: res => {
           void handleWalkWavReady(res, isAutoFollowUp);
         },
@@ -2059,11 +2078,17 @@ export function VoiceCopilotSheets() {
     }
     if (walkPhaseRef.current === 'listening') {
       if (recorderRef.current?.isRecording()) {
+        const st = recorderRef.current.getLastStats();
         const res = await recorderRef.current.stopAsync();
-        if (res && res.hadSpeech) {
-          void handleWalkWavReady(res, false);
+        postNativeVoiceDiag(
+          'manual_stop',
+          `dur=${res?.durationMs ?? st.durMs} bytes=${res?.byteLength ?? 0} hadSpeech=${res?.hadSpeech ? 1 : 0} frames=${st.frames} max=${st.maxLvl} floor=${st.noiseFloor}`,
+        );
+        // Never discard real spoken audio (>900ms or speech detected) when user taps red orb manually!
+        if (res && res.byteLength >= 1600 && (res.hadSpeech || st.jsHadSpeech || (res.durationMs || st.durMs) >= 900)) {
+          void handleWalkWavReady({ ...res, hadSpeech: true, stopReason: 'manual_tap' }, false);
         } else {
-          // Tapping orb before speaking cleanly pauses hands-free listening instead of showing a silence error
+          // Quick tap before speaking cleanly pauses hands-free listening
           userPausedHandsFreeRef.current = true;
           setMicLevel(0);
           setWalkPhase('idle');
@@ -2775,8 +2800,8 @@ export function VoiceCopilotSheets() {
             <div class={`walk-mic-caption phase-${walkPhase}`}>
               {walkPhase === 'listening'
                 ? (config.prefs.autoVad
-                    ? '正在听你说… 说完停顿自动发送（轻点暂停）'
-                    : '正在录音… 说完轻点红色方块发送')
+                    ? `正在听你说…（音量 ${Math.round(micLevel * 100)}%）说完停顿自动发`
+                    : `正在录音…（音量 ${Math.round(micLevel * 100)}%）轻点红色方块发送`)
                 : walkPhase === 'speaking'
                   ? '轻点圆麦随时插话 · 点字幕静音'
                   : walkPhase === 'transcribing' || walkPhase === 'thinking'

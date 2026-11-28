@@ -390,6 +390,18 @@ export interface WavRecordingResult {
   sampleRate: number;
   hadSpeech: boolean;
   silentTimeout?: boolean;
+  stopReason?: string;
+}
+
+export interface WalkMicStats {
+  frames: number;
+  minLvl: number;
+  maxLvl: number;
+  noiseFloor: number;
+  jsHadSpeech: boolean;
+  jsPeakLvl: number;
+  durMs: number;
+  deadTap?: boolean;
 }
 
 export interface WalkRecorderOptions {
@@ -398,7 +410,135 @@ export interface WalkRecorderOptions {
   noSpeechTimeoutMs?: number;
   maxDurationMs?: number;
   onLevel?: (level: number) => void;
+  onMicProbe?: (stats: WalkMicStats) => void;
   onAutoStop?: (result: WavRecordingResult) => void;
+}
+
+export class AdaptiveLevelVad {
+  private readonly autoVad: boolean;
+  private readonly vadSilenceMs: number;
+  private startedAt: number;
+  frames = 0;
+  minLvl = 1;
+  maxLvl = 0;
+  noiseFloor = 0.08;
+  jsHadSpeech = false;
+  jsPeakLvl = 0;
+  private initSamples: number[] = [];
+  private calibrated = false;
+  private speechStreak = 0;
+  private lastSpeechAt = 0;
+  private recentWindow: Array<{ t: number; lvl: number }> = [];
+
+  constructor({ autoVad = true, vadSilenceMs = 900, now = Date.now() } = {}) {
+    this.autoVad = Boolean(autoVad);
+    this.vadSilenceMs = Math.max(450, Number(vadSilenceMs) || 900);
+    this.startedAt = now;
+  }
+
+  getStats(now = Date.now()): WalkMicStats {
+    return {
+      frames: this.frames,
+      minLvl: this.frames > 0 ? Math.round(this.minLvl * 1000) / 1000 : 0,
+      maxLvl: Math.round(this.maxLvl * 1000) / 1000,
+      noiseFloor: Math.round(this.noiseFloor * 1000) / 1000,
+      jsHadSpeech: this.jsHadSpeech,
+      jsPeakLvl: Math.round(this.jsPeakLvl * 1000) / 1000,
+      durMs: Math.max(0, Math.round(now - this.startedAt)),
+    };
+  }
+
+  push(rawLvl: number, now = Date.now()): { shouldStop: boolean; reason: string } {
+    const lvl = Math.max(0, Math.min(1, Number(rawLvl) || 0));
+    this.frames += 1;
+    if (lvl < this.minLvl) this.minLvl = lvl;
+    if (lvl > this.maxLvl) this.maxLvl = lvl;
+
+    const elapsed = now - this.startedAt;
+    this.recentWindow.push({ t: now, lvl });
+    const windowKeepMs = this.vadSilenceMs + 250;
+    while (this.recentWindow.length > 0 && now - this.recentWindow[0].t > windowKeepMs) {
+      this.recentWindow.shift();
+    }
+
+    // Ignore first 120ms earcon tail; calibrate ambient / Apple .voiceChat AGC noise floor over 120-280ms
+    if (elapsed < 120) {
+      return { shouldStop: false, reason: '' };
+    }
+    if (!this.calibrated && elapsed < 280) {
+      this.initSamples.push(lvl);
+      if (lvl >= 0.55) {
+        // User started speaking immediately at high volume — don't pollute noise floor
+        this.calibrated = true;
+        this.jsHadSpeech = true;
+        this.jsPeakLvl = Math.max(this.jsPeakLvl, lvl);
+        this.lastSpeechAt = now;
+      }
+      return { shouldStop: false, reason: '' };
+    }
+    if (!this.calibrated) {
+      this.calibrated = true;
+      if (this.initSamples.length > 0) {
+        const sorted = [...this.initSamples].sort((a, b) => a - b);
+        const lowSample = sorted[Math.floor(sorted.length * 0.35)] ?? sorted[0];
+        this.noiseFloor = Math.min(0.28, Math.max(0.01, lowSample));
+      }
+    }
+
+    const speechStartThr = Math.min(0.45, Math.max(0.11, this.noiseFloor * 1.9 + 0.055));
+    const speechKeepThr = Math.min(0.36, Math.max(0.085, this.noiseFloor * 1.45 + 0.035));
+
+    if (!this.jsHadSpeech) {
+      if (lvl < speechStartThr) {
+        this.speechStreak = 0;
+        this.noiseFloor = lvl < this.noiseFloor
+          ? this.noiseFloor * 0.72 + lvl * 0.28
+          : Math.min(0.28, this.noiseFloor * 0.94 + lvl * 0.06);
+      } else {
+        this.speechStreak += 1;
+        this.jsPeakLvl = Math.max(this.jsPeakLvl, lvl);
+        if (this.speechStreak >= 2 || lvl >= speechStartThr + 0.1) {
+          this.jsHadSpeech = true;
+          this.lastSpeechAt = now;
+        }
+      }
+      return { shouldStop: false, reason: '' };
+    }
+
+    // Active speech phase: detect return to noise floor OR flat post-speech AGC plateau
+    if (lvl > this.jsPeakLvl) this.jsPeakLvl = lvl;
+    const activeKeepThr = Math.max(speechKeepThr, Math.min(0.22, this.jsPeakLvl * 0.24));
+    if (lvl >= activeKeepThr) {
+      this.lastSpeechAt = now;
+    }
+
+    if (!this.autoVad || elapsed < 650) {
+      return { shouldStop: false, reason: '' };
+    }
+
+    if (now - this.lastSpeechAt >= this.vadSilenceMs) {
+      return { shouldStop: true, reason: 'js_vad_silence' };
+    }
+
+    // Apple .voiceChat AGC ramp-up guard: after user finishes speaking (peak >= 0.35),
+    // AGC can boost steady room noise above initial speechKeepThr, creating a flat low-variance plateau.
+    if (this.jsPeakLvl >= 0.35 && this.recentWindow.length >= 8) {
+      const spanMs = this.recentWindow[this.recentWindow.length - 1].t - this.recentWindow[0].t;
+      if (spanMs >= this.vadSilenceMs) {
+        let wMin = 1;
+        let wMax = 0;
+        for (const p of this.recentWindow) {
+          if (p.lvl < wMin) wMin = p.lvl;
+          if (p.lvl > wMax) wMax = p.lvl;
+        }
+        if (wMax <= this.jsPeakLvl * 0.45 && (wMax - wMin) <= 0.075) {
+          return { shouldStop: true, reason: 'js_vad_agc_plateau' };
+        }
+      }
+    }
+
+    return { shouldStop: false, reason: '' };
+  }
 }
 
 export class WalkWavRecorder {
@@ -413,13 +553,29 @@ export class WalkWavRecorder {
   private hadSpeech = false;
   private lastVoiceAt = 0;
   private active = false;
+  private stoppingNative = false;
   private nativeMode = false;
   private nativeUnsubs: Array<() => void> = [];
+  private nativeVad: AdaptiveLevelVad | null = null;
+  private nativeProbeTimer: any = null;
+  private nativeNoSpeechTimer: any = null;
   private maxTimer: any = null;
   private noSpeechTimer: any = null;
   private onAutoStop: ((res: WavRecordingResult) => void) | null = null;
 
+  private clearNativeTimers(): void {
+    if (this.nativeProbeTimer) {
+      clearTimeout(this.nativeProbeTimer);
+      this.nativeProbeTimer = null;
+    }
+    if (this.nativeNoSpeechTimer) {
+      clearTimeout(this.nativeNoSpeechTimer);
+      this.nativeNoSpeechTimer = null;
+    }
+  }
+
   private clearNativeListeners(): void {
+    this.clearNativeTimers();
     for (const fn of this.nativeUnsubs) {
       try { fn(); } catch {}
     }
@@ -430,47 +586,132 @@ export class WalkWavRecorder {
     return this.active;
   }
 
+  getLastStats(): WalkMicStats {
+    if (this.nativeVad) return this.nativeVad.getStats();
+    return {
+      frames: this.chunks.length,
+      minLvl: 0,
+      maxLvl: 0,
+      noiseFloor: 0,
+      jsHadSpeech: this.hadSpeech,
+      jsPeakLvl: 0,
+      durMs: this.startedAt ? Math.max(0, Date.now() - this.startedAt) : 0,
+    };
+  }
+
   async start(opts: WalkRecorderOptions = {}): Promise<void> {
     if (this.active) return;
 
     const nativeBridge = getNativeAudioBridge();
     if (nativeBridge?.startRecording) {
       this.active = true;
+      this.stoppingNative = false;
       this.nativeMode = true;
+      this.startedAt = Date.now();
       this.onAutoStop = opts.onAutoStop || null;
       this.clearNativeListeners();
-      if (nativeBridge.on) {
-        if (opts.onLevel) {
-          this.nativeUnsubs.push(
-            nativeBridge.on('level', detail => {
-              if (!this.active) return;
-              const lvl = typeof detail === 'number' ? detail : Number(detail?.level || 0);
-              opts.onLevel?.(lvl);
-            }),
-          );
+
+      const autoVad = Boolean(opts.autoVad);
+      const vadSilenceMs = Math.max(450, Number(opts.vadSilenceMs) || 900);
+      const noSpeechTimeoutMs = Number(opts.noSpeechTimeoutMs) || 0;
+      const vad = new AdaptiveLevelVad({ autoVad, vadSilenceMs });
+      this.nativeVad = vad;
+
+      let delivered = false;
+      const deliverOnce = (res: WavRecordingResult | null, reason: string, silentTimeout = false) => {
+        if (delivered) return;
+        delivered = true;
+        this.active = false;
+        this.stoppingNative = false;
+        this.nativeMode = false;
+        this.clearNativeListeners();
+        if (res && this.onAutoStop) {
+          this.onAutoStop({
+            ...res,
+            hadSpeech: Boolean(res.hadSpeech || vad.jsHadSpeech),
+            silentTimeout: Boolean(res.silentTimeout || silentTimeout),
+            stopReason: res.stopReason || reason,
+          });
         }
-        this.nativeUnsubs.push(
-          nativeBridge.on('recordingAutoStop', detail => {
-            if (!this.active) return;
+      };
+
+      const triggerNativeAdaptiveStop = async (reason: string, silentTimeout = false) => {
+        if (!this.active || this.stoppingNative || delivered) return;
+        this.stoppingNative = true;
+        this.clearNativeTimers();
+        try {
+          const res = nativeBridge.stopRecording ? await nativeBridge.stopRecording() : null;
+          if (!delivered) {
+            if (res && typeof res === 'object' && res.wavBase64) {
+              deliverOnce(res as WavRecordingResult, reason, silentTimeout);
+            } else {
+              // If Swift returned null (e.g. already stopped), make sure UI leaves listening cleanly
+              deliverOnce(
+                { wavBase64: '', byteLength: 0, durationMs: vad.getStats().durMs, sampleRate: 16000, hadSpeech: false, silentTimeout: true, stopReason: reason },
+                reason,
+                true,
+              );
+            }
+          }
+        } catch {
+          if (!delivered) {
             this.active = false;
+            this.stoppingNative = false;
             this.nativeMode = false;
             this.clearNativeListeners();
-            if (detail && this.onAutoStop) {
-              this.onAutoStop(detail as WavRecordingResult);
+          }
+        }
+      };
+
+      if (nativeBridge.on) {
+        this.nativeUnsubs.push(
+          nativeBridge.on('level', detail => {
+            if (!this.active || this.stoppingNative) return;
+            const lvl = typeof detail === 'number' ? detail : Number(detail?.level || 0);
+            opts.onLevel?.(lvl);
+            const decision = vad.push(lvl);
+            if (decision.shouldStop) {
+              void triggerNativeAdaptiveStop(decision.reason, false);
             }
           }),
         );
+        this.nativeUnsubs.push(
+          nativeBridge.on('recordingAutoStop', detail => {
+            if (delivered) return;
+            deliverOnce(detail as WavRecordingResult, detail?.silentTimeout ? 'native_no_speech_timeout' : 'native_vad', Boolean(detail?.silentTimeout));
+          }),
+        );
       }
+
+      // 2.5s live mic probe: reports exact iOS RMS floor/peak to diagnostics and detects dead audio taps
+      this.nativeProbeTimer = setTimeout(() => {
+        if (!this.active || this.stoppingNative) return;
+        const st = vad.getStats();
+        const deadTap = st.frames === 0;
+        opts.onMicProbe?.({ ...st, deadTap });
+      }, 2500);
+
+      // JS-side no-speech safety fallback (fires even if Apple AGC caused Swift's fixed 0.011 recHadSpeech to falsely flip true!)
+      if (noSpeechTimeoutMs >= 1500) {
+        this.nativeNoSpeechTimer = setTimeout(() => {
+          if (!this.active || this.stoppingNative) return;
+          if (!vad.jsHadSpeech) {
+            void triggerNativeAdaptiveStop('js_no_speech_timeout', true);
+          }
+        }, noSpeechTimeoutMs + 350);
+      }
+
       try {
         await nativeBridge.startRecording({
-          autoVad: Boolean(opts.autoVad),
-          vadSilenceMs: Math.max(400, Number(opts.vadSilenceMs) || 850),
-          noSpeechTimeoutMs: Number(opts.noSpeechTimeoutMs) || 0,
+          autoVad,
+          vadSilenceMs,
+          noSpeechTimeoutMs,
           maxDurationMs: Math.max(3000, Number(opts.maxDurationMs) || 25000),
         });
         return;
       } catch (err) {
         this.active = false;
+        this.stoppingNative = false;
         this.nativeMode = false;
         this.clearNativeListeners();
         throw err;

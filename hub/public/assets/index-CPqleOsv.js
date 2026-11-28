@@ -2971,6 +2971,123 @@ function uint8ToBase64(bytes) {
 	}
 	return btoa(binary);
 }
+var AdaptiveLevelVad = class {
+	autoVad;
+	vadSilenceMs;
+	startedAt;
+	frames = 0;
+	minLvl = 1;
+	maxLvl = 0;
+	noiseFloor = .08;
+	jsHadSpeech = false;
+	jsPeakLvl = 0;
+	initSamples = [];
+	calibrated = false;
+	speechStreak = 0;
+	lastSpeechAt = 0;
+	recentWindow = [];
+	constructor({ autoVad = true, vadSilenceMs = 900, now = Date.now() } = {}) {
+		this.autoVad = Boolean(autoVad);
+		this.vadSilenceMs = Math.max(450, Number(vadSilenceMs) || 900);
+		this.startedAt = now;
+	}
+	getStats(now = Date.now()) {
+		return {
+			frames: this.frames,
+			minLvl: this.frames > 0 ? Math.round(this.minLvl * 1e3) / 1e3 : 0,
+			maxLvl: Math.round(this.maxLvl * 1e3) / 1e3,
+			noiseFloor: Math.round(this.noiseFloor * 1e3) / 1e3,
+			jsHadSpeech: this.jsHadSpeech,
+			jsPeakLvl: Math.round(this.jsPeakLvl * 1e3) / 1e3,
+			durMs: Math.max(0, Math.round(now - this.startedAt))
+		};
+	}
+	push(rawLvl, now = Date.now()) {
+		const lvl = Math.max(0, Math.min(1, Number(rawLvl) || 0));
+		this.frames += 1;
+		if (lvl < this.minLvl) this.minLvl = lvl;
+		if (lvl > this.maxLvl) this.maxLvl = lvl;
+		const elapsed = now - this.startedAt;
+		this.recentWindow.push({
+			t: now,
+			lvl
+		});
+		const windowKeepMs = this.vadSilenceMs + 250;
+		while (this.recentWindow.length > 0 && now - this.recentWindow[0].t > windowKeepMs) this.recentWindow.shift();
+		if (elapsed < 120) return {
+			shouldStop: false,
+			reason: ""
+		};
+		if (!this.calibrated && elapsed < 280) {
+			this.initSamples.push(lvl);
+			if (lvl >= .55) {
+				this.calibrated = true;
+				this.jsHadSpeech = true;
+				this.jsPeakLvl = Math.max(this.jsPeakLvl, lvl);
+				this.lastSpeechAt = now;
+			}
+			return {
+				shouldStop: false,
+				reason: ""
+			};
+		}
+		if (!this.calibrated) {
+			this.calibrated = true;
+			if (this.initSamples.length > 0) {
+				const sorted = [...this.initSamples].sort((a, b) => a - b);
+				const lowSample = sorted[Math.floor(sorted.length * .35)] ?? sorted[0];
+				this.noiseFloor = Math.min(.28, Math.max(.01, lowSample));
+			}
+		}
+		const speechStartThr = Math.min(.45, Math.max(.11, this.noiseFloor * 1.9 + .055));
+		const speechKeepThr = Math.min(.36, Math.max(.085, this.noiseFloor * 1.45 + .035));
+		if (!this.jsHadSpeech) {
+			if (lvl < speechStartThr) {
+				this.speechStreak = 0;
+				this.noiseFloor = lvl < this.noiseFloor ? this.noiseFloor * .72 + lvl * .28 : Math.min(.28, this.noiseFloor * .94 + lvl * .06);
+			} else {
+				this.speechStreak += 1;
+				this.jsPeakLvl = Math.max(this.jsPeakLvl, lvl);
+				if (this.speechStreak >= 2 || lvl >= speechStartThr + .1) {
+					this.jsHadSpeech = true;
+					this.lastSpeechAt = now;
+				}
+			}
+			return {
+				shouldStop: false,
+				reason: ""
+			};
+		}
+		if (lvl > this.jsPeakLvl) this.jsPeakLvl = lvl;
+		if (lvl >= Math.max(speechKeepThr, Math.min(.22, this.jsPeakLvl * .24))) this.lastSpeechAt = now;
+		if (!this.autoVad || elapsed < 650) return {
+			shouldStop: false,
+			reason: ""
+		};
+		if (now - this.lastSpeechAt >= this.vadSilenceMs) return {
+			shouldStop: true,
+			reason: "js_vad_silence"
+		};
+		if (this.jsPeakLvl >= .35 && this.recentWindow.length >= 8) {
+			if (this.recentWindow[this.recentWindow.length - 1].t - this.recentWindow[0].t >= this.vadSilenceMs) {
+				let wMin = 1;
+				let wMax = 0;
+				for (const p of this.recentWindow) {
+					if (p.lvl < wMin) wMin = p.lvl;
+					if (p.lvl > wMax) wMax = p.lvl;
+				}
+				if (wMax <= this.jsPeakLvl * .45 && wMax - wMin <= .075) return {
+					shouldStop: true,
+					reason: "js_vad_agc_plateau"
+				};
+			}
+		}
+		return {
+			shouldStop: false,
+			reason: ""
+		};
+	}
+};
 var WalkWavRecorder = class {
 	stream = null;
 	audioCtx = null;
@@ -2983,12 +3100,27 @@ var WalkWavRecorder = class {
 	hadSpeech = false;
 	lastVoiceAt = 0;
 	active = false;
+	stoppingNative = false;
 	nativeMode = false;
 	nativeUnsubs = [];
+	nativeVad = null;
+	nativeProbeTimer = null;
+	nativeNoSpeechTimer = null;
 	maxTimer = null;
 	noSpeechTimer = null;
 	onAutoStop = null;
+	clearNativeTimers() {
+		if (this.nativeProbeTimer) {
+			clearTimeout(this.nativeProbeTimer);
+			this.nativeProbeTimer = null;
+		}
+		if (this.nativeNoSpeechTimer) {
+			clearTimeout(this.nativeNoSpeechTimer);
+			this.nativeNoSpeechTimer = null;
+		}
+	}
 	clearNativeListeners() {
+		this.clearNativeTimers();
 		for (const fn of this.nativeUnsubs) try {
 			fn();
 		} catch {}
@@ -2997,38 +3129,115 @@ var WalkWavRecorder = class {
 	isRecording() {
 		return this.active;
 	}
+	getLastStats() {
+		if (this.nativeVad) return this.nativeVad.getStats();
+		return {
+			frames: this.chunks.length,
+			minLvl: 0,
+			maxLvl: 0,
+			noiseFloor: 0,
+			jsHadSpeech: this.hadSpeech,
+			jsPeakLvl: 0,
+			durMs: this.startedAt ? Math.max(0, Date.now() - this.startedAt) : 0
+		};
+	}
 	async start(opts = {}) {
 		if (this.active) return;
 		const nativeBridge = getNativeAudioBridge();
 		if (nativeBridge?.startRecording) {
 			this.active = true;
+			this.stoppingNative = false;
 			this.nativeMode = true;
+			this.startedAt = Date.now();
 			this.onAutoStop = opts.onAutoStop || null;
 			this.clearNativeListeners();
+			const autoVad = Boolean(opts.autoVad);
+			const vadSilenceMs = Math.max(450, Number(opts.vadSilenceMs) || 900);
+			const noSpeechTimeoutMs = Number(opts.noSpeechTimeoutMs) || 0;
+			const vad = new AdaptiveLevelVad({
+				autoVad,
+				vadSilenceMs
+			});
+			this.nativeVad = vad;
+			let delivered = false;
+			const deliverOnce = (res, reason, silentTimeout = false) => {
+				if (delivered) return;
+				delivered = true;
+				this.active = false;
+				this.stoppingNative = false;
+				this.nativeMode = false;
+				this.clearNativeListeners();
+				if (res && this.onAutoStop) this.onAutoStop({
+					...res,
+					hadSpeech: Boolean(res.hadSpeech || vad.jsHadSpeech),
+					silentTimeout: Boolean(res.silentTimeout || silentTimeout),
+					stopReason: res.stopReason || reason
+				});
+			};
+			const triggerNativeAdaptiveStop = async (reason, silentTimeout = false) => {
+				if (!this.active || this.stoppingNative || delivered) return;
+				this.stoppingNative = true;
+				this.clearNativeTimers();
+				try {
+					const res = nativeBridge.stopRecording ? await nativeBridge.stopRecording() : null;
+					if (!delivered) {
+						if (res && typeof res === "object" && res.wavBase64) deliverOnce(res, reason, silentTimeout);
+						else deliverOnce({
+							wavBase64: "",
+							byteLength: 0,
+							durationMs: vad.getStats().durMs,
+							sampleRate: 16e3,
+							hadSpeech: false,
+							silentTimeout: true,
+							stopReason: reason
+						}, reason, true);
+					}
+				} catch {
+					if (!delivered) {
+						this.active = false;
+						this.stoppingNative = false;
+						this.nativeMode = false;
+						this.clearNativeListeners();
+					}
+				}
+			};
 			if (nativeBridge.on) {
-				if (opts.onLevel) this.nativeUnsubs.push(nativeBridge.on("level", (detail) => {
-					if (!this.active) return;
+				this.nativeUnsubs.push(nativeBridge.on("level", (detail) => {
+					if (!this.active || this.stoppingNative) return;
 					const lvl = typeof detail === "number" ? detail : Number(detail?.level || 0);
 					opts.onLevel?.(lvl);
+					const decision = vad.push(lvl);
+					if (decision.shouldStop) triggerNativeAdaptiveStop(decision.reason, false);
 				}));
 				this.nativeUnsubs.push(nativeBridge.on("recordingAutoStop", (detail) => {
-					if (!this.active) return;
-					this.active = false;
-					this.nativeMode = false;
-					this.clearNativeListeners();
-					if (detail && this.onAutoStop) this.onAutoStop(detail);
+					if (delivered) return;
+					deliverOnce(detail, detail?.silentTimeout ? "native_no_speech_timeout" : "native_vad", Boolean(detail?.silentTimeout));
 				}));
 			}
+			this.nativeProbeTimer = setTimeout(() => {
+				if (!this.active || this.stoppingNative) return;
+				const st = vad.getStats();
+				const deadTap = st.frames === 0;
+				opts.onMicProbe?.({
+					...st,
+					deadTap
+				});
+			}, 2500);
+			if (noSpeechTimeoutMs >= 1500) this.nativeNoSpeechTimer = setTimeout(() => {
+				if (!this.active || this.stoppingNative) return;
+				if (!vad.jsHadSpeech) triggerNativeAdaptiveStop("js_no_speech_timeout", true);
+			}, noSpeechTimeoutMs + 350);
 			try {
 				await nativeBridge.startRecording({
-					autoVad: Boolean(opts.autoVad),
-					vadSilenceMs: Math.max(400, Number(opts.vadSilenceMs) || 850),
-					noSpeechTimeoutMs: Number(opts.noSpeechTimeoutMs) || 0,
+					autoVad,
+					vadSilenceMs,
+					noSpeechTimeoutMs,
 					maxDurationMs: Math.max(3e3, Number(opts.maxDurationMs) || 25e3)
 				});
 				return;
 			} catch (err) {
 				this.active = false;
+				this.stoppingNative = false;
 				this.nativeMode = false;
 				this.clearNativeListeners();
 				throw err;
@@ -6665,9 +6874,13 @@ function VoiceCopilotSheets() {
 		window.addEventListener("dsh:hub-state", onHubState);
 		return () => window.removeEventListener("dsh:hub-state", onHubState);
 	}, []);
-	const stopAllListening = () => {
+	const stopAllListening = (reason = "abort") => {
 		bargeInMonitorRef.current?.stop();
-		if (recorderRef.current?.isRecording()) recorderRef.current.stop();
+		if (recorderRef.current?.isRecording()) {
+			const st = recorderRef.current.getLastStats();
+			postNativeVoiceDiag("listen_aborted", `reason=${reason} dur=${st.durMs} frames=${st.frames} min=${st.minLvl} max=${st.maxLvl} floor=${st.noiseFloor} jsSpeech=${st.jsHadSpeech ? 1 : 0}`);
+			recorderRef.current.stop();
+		}
 		if (nativeRecRef.current) {
 			try {
 				nativeRecRef.current.stop();
@@ -6675,6 +6888,7 @@ function VoiceCopilotSheets() {
 			nativeRecRef.current = null;
 		}
 		setMicLevel(0);
+		if (walkPhaseRef.current === "listening") setWalkPhase("idle");
 	};
 	const handleVerifiedBargeInCandidate = async (rec) => {
 		if (!walkOpenRef.current || walkPhaseRef.current !== "speaking" || bargeInTriggeredRef.current || bargeInVerifyingRef.current) return;
@@ -6952,7 +7166,8 @@ function VoiceCopilotSheets() {
 	const handleWalkWavReady = async (rec, isAutoFollowUp = false) => {
 		setMicLevel(0);
 		const duckMusic = configRef.current?.prefs?.duckMusicMode !== false;
-		postNativeVoiceDiag("wav_ready", `auto=${isAutoFollowUp ? 1 : 0} timeout=${rec.silentTimeout ? 1 : 0} speech=${rec.hadSpeech ? 1 : 0} bytes=${rec.byteLength}`);
+		const st = recorderRef.current?.getLastStats();
+		postNativeVoiceDiag("wav_ready", `auto=${isAutoFollowUp ? 1 : 0} reason=${rec.stopReason || "-"} timeout=${rec.silentTimeout ? 1 : 0} speech=${rec.hadSpeech ? 1 : 0} bytes=${rec.byteLength} frames=${st?.frames ?? 0} floor=${st?.noiseFloor ?? 0} max=${st?.maxLvl ?? 0}`);
 		if (rec.silentTimeout || isAutoFollowUp && !rec.hadSpeech) {
 			postNativeVoiceDiag("auto_listen_silent_exit", `timeout=${rec.silentTimeout ? 1 : 0} hadSpeech=${rec.hadSpeech ? 1 : 0} bytes=${rec.byteLength}`);
 			setWalkPhase("idle");
@@ -7103,9 +7318,13 @@ function VoiceCopilotSheets() {
 			if (!walkOpenRef.current || walkPhaseRef.current !== "listening") return;
 			await recorderRef.current.start({
 				autoVad: effectiveAutoVad,
-				vadSilenceMs: configRef.current.prefs.vadSilenceMs || 850,
+				vadSilenceMs: configRef.current.prefs.vadSilenceMs || 900,
 				noSpeechTimeoutMs: effectiveNoSpeechMs,
 				onLevel: (lvl) => setMicLevel(lvl),
+				onMicProbe: (st) => {
+					postNativeVoiceDiag("mic_probe", `frames=${st.frames} min=${st.minLvl} max=${st.maxLvl} floor=${st.noiseFloor} jsSpeech=${st.jsHadSpeech ? 1 : 0} dead=${st.deadTap ? 1 : 0}`);
+					if (st.deadTap && walkPhaseRef.current === "listening") setLastActionBadge("⚠️ 未收到麦克风音频流，请轻点圆球重试");
+				},
 				onAutoStop: (res) => {
 					handleWalkWavReady(res, isAutoFollowUp);
 				}
@@ -7124,8 +7343,14 @@ function VoiceCopilotSheets() {
 		if (walkPhaseRef.current === "speaking") playerRef.current?.stop();
 		if (walkPhaseRef.current === "listening") {
 			if (recorderRef.current?.isRecording()) {
+				const st = recorderRef.current.getLastStats();
 				const res = await recorderRef.current.stopAsync();
-				if (res && res.hadSpeech) handleWalkWavReady(res, false);
+				postNativeVoiceDiag("manual_stop", `dur=${res?.durationMs ?? st.durMs} bytes=${res?.byteLength ?? 0} hadSpeech=${res?.hadSpeech ? 1 : 0} frames=${st.frames} max=${st.maxLvl} floor=${st.noiseFloor}`);
+				if (res && res.byteLength >= 1600 && (res.hadSpeech || st.jsHadSpeech || (res.durationMs || st.durMs) >= 900)) handleWalkWavReady({
+					...res,
+					hadSpeech: true,
+					stopReason: "manual_tap"
+				}, false);
 				else {
 					userPausedHandsFreeRef.current = true;
 					setMicLevel(0);
@@ -7721,7 +7946,7 @@ function VoiceCopilotSheets() {
 		y1: "5",
 		x2: "19",
 		y2: "19"
-	}))), /* @__PURE__ */ k$1("span", { class: "walk-side-lbl" }, "汇报进度"))), /* @__PURE__ */ k$1("div", { class: `walk-mic-caption phase-${walkPhase}` }, walkPhase === "listening" ? config.prefs.autoVad ? "正在听你说… 说完停顿自动发送（轻点暂停）" : "正在录音… 说完轻点红色方块发送" : walkPhase === "speaking" ? "轻点圆麦随时插话 · 点字幕静音" : walkPhase === "transcribing" || walkPhase === "thinking" ? "正在处理你的语音指令…" : config.prefs.autoVad ? "待命中 · 轻点圆麦开启免提连续对话" : "轻点开始说话 · 戴耳机随时插话"), /* @__PURE__ */ k$1("div", { class: "walk-prefs-wrap" }, walkPrefsOpen && /* @__PURE__ */ k$1("div", {
+	}))), /* @__PURE__ */ k$1("span", { class: "walk-side-lbl" }, "汇报进度"))), /* @__PURE__ */ k$1("div", { class: `walk-mic-caption phase-${walkPhase}` }, walkPhase === "listening" ? config.prefs.autoVad ? `正在听你说…（音量 ${Math.round(micLevel * 100)}%）说完停顿自动发` : `正在录音…（音量 ${Math.round(micLevel * 100)}%）轻点红色方块发送` : walkPhase === "speaking" ? "轻点圆麦随时插话 · 点字幕静音" : walkPhase === "transcribing" || walkPhase === "thinking" ? "正在处理你的语音指令…" : config.prefs.autoVad ? "待命中 · 轻点圆麦开启免提连续对话" : "轻点开始说话 · 戴耳机随时插话"), /* @__PURE__ */ k$1("div", { class: "walk-prefs-wrap" }, walkPrefsOpen && /* @__PURE__ */ k$1("div", {
 		class: "walk-prefs-drawer",
 		role: "region",
 		"aria-label": "随行偏好设置"
