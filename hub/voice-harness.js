@@ -122,6 +122,9 @@ export function parsePlaybackControlFastPath(utter = '', currentRate = 1.0) {
   if (/^(?:再念一遍|重播|再说一遍|重复一遍|没听清再说一遍|再读一遍|重听|repeat|replay)[吧啊呀啦哦]*$/i.test(compact)) {
     return { kind: 'queue_repeat', spokenReply: '好的，再为你念一遍。' }
   }
+  if (/^(?:先不聊了|不聊了|挂断|结束通话|结束对话|停止监听|暂停监听|退下|先退下|休息一下|休息吧|好了不用听了|不用听我说了|待命吧|静音待命)[吧啊呀啦哦]*$/i.test(compact)) {
+    return { kind: 'handsfree_pause', spokenReply: '好的，我先静音待命，想聊时随时点我说话。' }
+  }
   if (/^(?:暂停播报|先暂停|暂停一下|暂停队列|先别念了|闭嘴|别念了|pause)[吧啊呀啦哦]*$/i.test(compact)) {
     return { kind: 'queue_pause', spokenReply: '好的，已暂停播报。' }
   }

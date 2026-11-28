@@ -3736,7 +3736,7 @@ function bindWalkMediaSession(handlers) {
 var PURE_VOCAL_FILLER_RE = /^(?:嗯+|啊+|哦+|喔+|噢+|呃+|额+|唉+|哎+|诶+|欸+|哈+|呵+|嘿+|喂+|唔+|啧+|咳+|呀+|嘛+|吧+|嗯哼|嗯嗯|啊啊|哦哦|哈哈|呵呵|那个|就是|什么|对对|是吗|uh+|um+|ah+|oh+|hmm+|huh+|mhm+)$/i;
 var CASUAL_NON_APPROVAL_FILLER_RE = /^(?:好吧|行吧|yeah|ok|okay)$/i;
 var SEMANTIC_APPROVAL_DECISION_RE = /^(?:嗯)?(?:可以[呀啊吧的啦]?|行[呀啊吧啦]?|好的|好吧|好[呀啊啦]|没问题|没啥问题|执行吧|跑吧|让它跑吧?|过吧?|准了?|ok|okay|yes|yep|sure|goahead|不行|不要|算了|先别|别跑|别执行|不让|不准|no|nope)$/i;
-var EXPLICIT_COMMAND_RE = /(放行|批准|同意|允许|通过|拒绝|驳回|不同意|别执行|不要执行|取消|跳过|停止|停一下|停下来|别说了|闭嘴|暂停|下一条|下一个|上一条|上一个|重说|再说一遍|重播|重听|加速|快一点|快点|提速|减速|慢一点|慢点|放慢|倍速|原速|继续|新建|确认码|选第|第[一二三四1234]|一号|二号|三号|四号|帮我|查看|汇报|进度|待审批|修改|改成|不要|\b(?:approve|allow|deny|reject|stop|skip|cancel|next|prev|pause|repeat|faster|slower)\b|\d{3})/i;
+var EXPLICIT_COMMAND_RE = /(放行|批准|同意|允许|通过|拒绝|驳回|不同意|别执行|不要执行|取消|跳过|停止|停一下|停下来|别说了|闭嘴|暂停|先不聊了|不聊了|挂断|结束对话|停止监听|暂停监听|退下|待命|下一条|下一个|上一条|上一个|重说|再说一遍|重播|重听|加速|快一点|快点|提速|减速|慢一点|慢点|放慢|倍速|原速|继续|新建|确认码|选第|第[一二三四1234]|一号|二号|三号|四号|帮我|查看|汇报|进度|待审批|修改|改成|不要|\b(?:approve|allow|deny|reject|stop|skip|cancel|next|prev|pause|repeat|faster|slower)\b|\d{3})/i;
 var STOP_ONLY_RE = /^(?:停|停下|停止|停一下|停下来|别说了|闭嘴|先停|暂停|跳过|下一条|不用说了|知道了|stop|skip|pause)$/i;
 function normalizeForEchoCompare(raw = "") {
 	return String(raw || "").toLowerCase().replace(/[\s`*_#>\-—~·.,，。！？!?：:;；、"'“”‘’()（）[\]【】]/g, "");
@@ -5632,7 +5632,7 @@ function VoiceCopilotSheets() {
 	const [micLevel, setMicLevel] = d(0);
 	const [wakeLocked, setWakeLocked] = d(false);
 	const [lastUserText, setLastUserText] = d("");
-	const [lastReplyText, setLastReplyText] = d("轻点下方圆麦说话：可核对新建任务、审批放行、查进度或操控任意电脑会话。");
+	const [lastReplyText, setLastReplyText] = d("我在听，直接说话就行：可核对新建任务、审批放行、查进度或操控任意电脑会话。");
 	const [lastActionBadge, setLastActionBadge] = d("");
 	const [lastLatencyBadge, setLastLatencyBadge] = d("");
 	const [walkReceipts, setWalkReceipts] = d([]);
@@ -5726,6 +5726,9 @@ function VoiceCopilotSheets() {
 	const drainingBriefingRef = T(false);
 	const walkOpenRef = T(false);
 	const walkPhaseRef = T(walkPhase);
+	const aiTabActiveRef = T(false);
+	const walkTextInputOpenRef = T(false);
+	const userPausedHandsFreeRef = T(false);
 	const configRef = T(config);
 	const configLoadedRef = T(false);
 	const setWalkOpen = (next) => {
@@ -5742,6 +5745,12 @@ function VoiceCopilotSheets() {
 	A(() => {
 		walkPhaseRef.current = walkPhase;
 	}, [walkPhase]);
+	A(() => {
+		aiTabActiveRef.current = aiTabActive;
+	}, [aiTabActive]);
+	A(() => {
+		walkTextInputOpenRef.current = walkTextInputOpen;
+	}, [walkTextInputOpen]);
 	A(() => {
 		configRef.current = config;
 	}, [config]);
@@ -5783,13 +5792,27 @@ function VoiceCopilotSheets() {
 	A(() => {
 		const onTabChange = (ev) => {
 			if (String(ev?.detail?.tab || "") === "ai") {
+				aiTabActiveRef.current = true;
+				userPausedHandsFreeRef.current = false;
+				playerRef.current?.unlockAudio();
 				setAiTabActive(true);
 				setWalkOpen(true);
 				setWalkExpanded(true);
-				refreshConfig(true);
+				(async () => {
+					if (!configLoadedRef.current) await refreshConfig(true);
+					else refreshConfig(true);
+					await new Promise((resolve) => setTimeout(resolve, 140));
+					if (aiTabActiveRef.current && walkOpenRef.current && walkPhaseRef.current === "idle" && configRef.current?.prefs?.autoVad && !userPausedHandsFreeRef.current && !walkTextInputOpenRef.current) startWalkListening({
+						isAutoFollowUp: true,
+						noSpeechTimeoutMs: 14e3,
+						silentOnNoMic: true
+					});
+				})();
 			} else {
+				aiTabActiveRef.current = false;
 				setAiTabActive(false);
 				setWalkExpanded(false);
+				if (walkPhaseRef.current === "listening") stopAllListening();
 			}
 		};
 		window.addEventListener("dsh:tab-change", onTabChange);
@@ -6332,6 +6355,12 @@ function VoiceCopilotSheets() {
 			toast(`⏩ 播报语速已调至 ${rate}x`);
 			return;
 		}
+		if (ctrl.kind === "handsfree_pause") {
+			playerRef.current?.stop();
+			setWalkPhase("idle");
+			toast("⏸️ 已静音待命，轻点圆麦可继续对话");
+			return;
+		}
 		if (ctrl.kind === "queue_pause") {
 			queuePausedRef.current = true;
 			setQueuePaused(true);
@@ -6387,6 +6416,7 @@ function VoiceCopilotSheets() {
 	};
 	const handleDraftCardAction = async (action) => {
 		if (draftSubmitting) return;
+		if (walkPhaseRef.current === "listening") stopAllListening();
 		setDraftSubmitting(true);
 		try {
 			const res = await apiCall("/api/voice/draft/action", {
@@ -6720,7 +6750,7 @@ function VoiceCopilotSheets() {
 			if (walkPhaseRef.current === "speaking") setWalkPhase("idle");
 		}
 	};
-	const handleWalkUserText = async (spokenText, sttMs = null, wavKb = null) => {
+	const handleWalkUserText = async (spokenText, sttMs = null, wavKb = null, fromTextInput = false) => {
 		const clean = String(spokenText || "").trim();
 		const duckMusic = configRef.current?.prefs?.duckMusicMode !== false;
 		if (!clean) {
@@ -6788,12 +6818,27 @@ function VoiceCopilotSheets() {
 			};
 			if (data.playbackControl && data.playbackControl.kind) {
 				const pc = data.playbackControl;
-				const pcBadge = pc.kind === "set_speed" ? `⏩ 语速 ${pc.speechRate}x` : pc.kind === "queue_next" ? "⏭️ 下一条" : pc.kind === "queue_prev" ? "⏮️ 上一条" : pc.kind === "queue_repeat" ? "🔁 重播" : pc.kind === "queue_pause" ? "⏸️ 已暂停播报" : "▶️ 继续播报";
+				const pcBadge = pc.kind === "set_speed" ? `⏩ 语速 ${pc.speechRate}x` : pc.kind === "queue_next" ? "⏭️ 下一条" : pc.kind === "queue_prev" ? "⏮️ 上一条" : pc.kind === "queue_repeat" ? "🔁 重播" : pc.kind === "handsfree_pause" ? "⏸️ 已静音待命" : pc.kind === "queue_pause" ? "⏸️ 已暂停播报" : "▶️ 继续播报";
 				setLastActionBadge(pcBadge);
 				pushReceipt(clean, pcBadge, true);
 				playEarcon("done");
+				if (pc.kind === "handsfree_pause" || pc.kind === "queue_pause") {
+					userPausedHandsFreeRef.current = true;
+					await applyPlaybackControl(pc);
+					await speakWalkReply(chunks);
+					return;
+				}
 				await applyPlaybackControl(pc);
-				if (pc.kind === "set_speed" || pc.kind === "queue_pause") await speakWalkReply(chunks);
+				if (pc.kind === "set_speed") {
+					const keepLoop = Boolean(!fromTextInput && aiTabActiveRef.current && walkOpenRef.current && configRef.current.prefs.autoVad && configRef.current.prefs.autoListenAfterBriefing && !userPausedHandsFreeRef.current && !walkTextInputOpenRef.current);
+					const keepAudio = keepLoop ? await canNativeAutoListenNow() : false;
+					await speakWalkReply(chunks, void 0, { keepAudioSessionAfter: keepAudio });
+					if (keepLoop && !bargeInTriggeredRef.current && walkOpenRef.current && walkPhaseRef.current === "idle") startWalkListening({
+						isAutoFollowUp: true,
+						noSpeechTimeoutMs: 14e3,
+						silentOnNoMic: true
+					});
+				}
 				return;
 			}
 			if (data.fastPath === "l2_pin_matched") {
@@ -6848,15 +6893,20 @@ function VoiceCopilotSheets() {
 			if (sttMs !== null) baseMetrics.push(`STT ${sttMs}ms`);
 			baseMetrics.push(`大脑 ${data.latencyMs ?? 0}ms${data.fastPath ? " ⚡" : ""}`);
 			setLastLatencyBadge(baseMetrics.join(" · "));
-			const wantsAutoListen = Boolean(data.expectReply && configRef.current.prefs.autoListenAfterBriefing && walkOpenRef.current);
+			const stayHandsFreeLoop = Boolean(!fromTextInput && aiTabActiveRef.current && walkOpenRef.current && configRef.current.prefs.autoVad && configRef.current.prefs.autoListenAfterBriefing && !userPausedHandsFreeRef.current && !walkTextInputOpenRef.current);
+			const wantsAutoListen = Boolean(!fromTextInput && !walkTextInputOpenRef.current && (data.expectReply || stayHandsFreeLoop) && configRef.current.prefs.autoListenAfterBriefing && walkOpenRef.current);
 			const shouldAutoListen = wantsAutoListen ? await canNativeAutoListenNow() : false;
 			await speakWalkReply(chunks, (ttsMs) => {
 				setLastLatencyBadge([...baseMetrics, `TTS ${ttsMs}ms`].join(" · "));
 			}, { keepAudioSessionAfter: shouldAutoListen });
 			if (bargeInTriggeredRef.current) return;
 			if ((wantsAutoListen ? shouldAutoListen || await canNativeAutoListenNow() : false) && walkOpenRef.current && walkPhaseRef.current === "idle") {
-				postNativeVoiceDiag("auto_listen_after_turn", `phase=${walkPhaseRef.current}`);
-				startWalkListening({ isAutoFollowUp: true });
+				postNativeVoiceDiag("auto_listen_after_turn", `phase=${walkPhaseRef.current} continuous=${stayHandsFreeLoop ? 1 : 0}`);
+				startWalkListening({
+					isAutoFollowUp: true,
+					noSpeechTimeoutMs: aiTabActiveRef.current ? 14e3 : 7e3,
+					silentOnNoMic: true
+				});
 			} else if (walkOpenRef.current && walkPhaseRef.current === "idle" && briefingQueueRef.current.length > 0) setTimeout(() => {
 				drainBriefingQueue();
 			}, 350);
@@ -6996,7 +7046,7 @@ function VoiceCopilotSheets() {
 			if (duckMusic) setWalkAudioSessionMode("ambient");
 		}
 	};
-	const startWalkListening = async ({ isAutoFollowUp = false } = {}) => {
+	const startWalkListening = async ({ isAutoFollowUp = false, noSpeechTimeoutMs, silentOnNoMic = false } = {}) => {
 		if (!walkOpenRef.current) return;
 		if (walkPhaseRef.current === "transcribing" || walkPhaseRef.current === "thinking" || walkPhaseRef.current === "listening") return;
 		if (isAutoFollowUp) {
@@ -7009,6 +7059,8 @@ function VoiceCopilotSheets() {
 			startNativeWalkSpeech(isAutoFollowUp);
 			return;
 		}
+		const effectiveAutoVad = isAutoFollowUp ? true : Boolean(configRef.current.prefs.autoVad);
+		const effectiveNoSpeechMs = typeof noSpeechTimeoutMs === "number" ? noSpeechTimeoutMs : isAutoFollowUp ? aiTabActiveRef.current ? 14e3 : 7e3 : effectiveAutoVad ? 14e3 : 0;
 		try {
 			setWalkAudioSessionMode("play-and-record");
 			setWalkPhase("listening");
@@ -7016,20 +7068,20 @@ function VoiceCopilotSheets() {
 			await new Promise((resolve) => setTimeout(resolve, 210));
 			if (!walkOpenRef.current || walkPhaseRef.current !== "listening") return;
 			await recorderRef.current.start({
-				autoVad: isAutoFollowUp ? true : configRef.current.prefs.autoVad,
+				autoVad: effectiveAutoVad,
 				vadSilenceMs: configRef.current.prefs.vadSilenceMs || 850,
-				noSpeechTimeoutMs: isAutoFollowUp ? 7e3 : 0,
+				noSpeechTimeoutMs: effectiveNoSpeechMs,
 				onLevel: (lvl) => setMicLevel(lvl),
 				onAutoStop: (res) => {
 					handleWalkWavReady(res, isAutoFollowUp);
 				}
 			});
-			postNativeVoiceDiag("listen_started", `auto=${isAutoFollowUp ? 1 : 0} vad=${isAutoFollowUp ? 1 : configRef.current.prefs.autoVad ? 1 : 0}`);
+			postNativeVoiceDiag("listen_started", `auto=${isAutoFollowUp ? 1 : 0} vad=${effectiveAutoVad ? 1 : 0} noSpeech=${effectiveNoSpeechMs}`);
 		} catch (err) {
 			setWalkPhase("idle");
 			postNativeVoiceDiag("listen_start_error", `auto=${isAutoFollowUp ? 1 : 0} err=${String(err?.message || "unknown").slice(0, 120)}`);
 			if (configRef.current?.prefs?.duckMusicMode !== false) setWalkAudioSessionMode("ambient");
-			if (!isAutoFollowUp) toast(err?.message || "无法打开麦克风，请检查浏览器权限");
+			if (!isAutoFollowUp && !silentOnNoMic) toast(err?.message || "无法打开麦克风，请检查浏览器权限");
 			else notifyNativeBackgroundWakeDone();
 		}
 	};
@@ -7039,14 +7091,21 @@ function VoiceCopilotSheets() {
 		if (walkPhaseRef.current === "listening") {
 			if (recorderRef.current?.isRecording()) {
 				const res = await recorderRef.current.stopAsync();
-				if (res) handleWalkWavReady(res, false);
-				else setWalkPhase("idle");
+				if (res && res.hadSpeech) handleWalkWavReady(res, false);
+				else {
+					userPausedHandsFreeRef.current = true;
+					setMicLevel(0);
+					setWalkPhase("idle");
+					if (configRef.current?.prefs?.duckMusicMode !== false) setWalkAudioSessionMode("ambient");
+					toast("⏸️ 已暂停聆听，轻点圆麦随时继续");
+				}
 			} else if (nativeRecRef.current) try {
 				nativeRecRef.current.stop();
 			} catch {}
 			return;
 		}
 		if (walkPhaseRef.current === "transcribing" || walkPhaseRef.current === "thinking") return;
+		userPausedHandsFreeRef.current = false;
 		await startWalkListening({ isAutoFollowUp: false });
 	};
 	const runBriefingTurn = async () => {
@@ -7516,7 +7575,7 @@ function VoiceCopilotSheets() {
 			if (e.key === "Enter" && walkTextDraft.trim()) {
 				const t = walkTextDraft.trim();
 				setWalkTextDraft("");
-				handleWalkUserText(t);
+				handleWalkUserText(t, null, null, true);
 			}
 		}
 	}), /* @__PURE__ */ k$1("button", {
@@ -7526,7 +7585,7 @@ function VoiceCopilotSheets() {
 			if (!walkTextDraft.trim()) return;
 			const t = walkTextDraft.trim();
 			setWalkTextDraft("");
-			handleWalkUserText(t);
+			handleWalkUserText(t, null, null, true);
 		}
 	}, "发送")), /* @__PURE__ */ k$1("div", { class: "walk-controls-row" }, /* @__PURE__ */ k$1("div", { class: "walk-side-btn-wrap" }, /* @__PURE__ */ k$1("button", {
 		type: "button",
@@ -7535,7 +7594,15 @@ function VoiceCopilotSheets() {
 		"aria-label": "静音打字",
 		onClick: () => {
 			setWalkPrefsOpen(false);
-			setWalkTextInputOpen((v) => !v);
+			setWalkTextInputOpen((v) => {
+				const next = !v;
+				walkTextInputOpenRef.current = next;
+				if (next) {
+					userPausedHandsFreeRef.current = true;
+					if (walkPhaseRef.current === "listening") stopAllListening();
+				}
+				return next;
+			});
 		}
 	}, /* @__PURE__ */ k$1("svg", {
 		width: "22",
@@ -7620,7 +7687,7 @@ function VoiceCopilotSheets() {
 		y1: "5",
 		x2: "19",
 		y2: "19"
-	}))), /* @__PURE__ */ k$1("span", { class: "walk-side-lbl" }, "汇报进度"))), /* @__PURE__ */ k$1("div", { class: `walk-mic-caption phase-${walkPhase}` }, walkPhase === "listening" ? "说完自动发送 · 或轻点红色方块停止" : walkPhase === "speaking" ? "轻点圆麦随时插话 · 点字幕静音" : walkPhase === "transcribing" || walkPhase === "thinking" ? "正在处理你的语音指令…" : "轻点开始说话 · 戴耳机随时插话"), /* @__PURE__ */ k$1("div", { class: "walk-prefs-wrap" }, walkPrefsOpen && /* @__PURE__ */ k$1("div", {
+	}))), /* @__PURE__ */ k$1("span", { class: "walk-side-lbl" }, "汇报进度"))), /* @__PURE__ */ k$1("div", { class: `walk-mic-caption phase-${walkPhase}` }, walkPhase === "listening" ? config.prefs.autoVad ? "正在听你说… 说完停顿自动发送（轻点暂停）" : "正在录音… 说完轻点红色方块发送" : walkPhase === "speaking" ? "轻点圆麦随时插话 · 点字幕静音" : walkPhase === "transcribing" || walkPhase === "thinking" ? "正在处理你的语音指令…" : config.prefs.autoVad ? "待命中 · 轻点圆麦开启免提连续对话" : "轻点开始说话 · 戴耳机随时插话"), /* @__PURE__ */ k$1("div", { class: "walk-prefs-wrap" }, walkPrefsOpen && /* @__PURE__ */ k$1("div", {
 		class: "walk-prefs-drawer",
 		role: "region",
 		"aria-label": "随行偏好设置"
@@ -7740,7 +7807,7 @@ function VoiceCopilotSheets() {
 		cx: "12",
 		cy: "12",
 		r: "9"
-	}), /* @__PURE__ */ k$1("path", { d: "M9 10v4M15 10v4" }))), /* @__PURE__ */ k$1("span", { class: "walk-pref-copy" }, /* @__PURE__ */ k$1("span", { class: "walk-pref-t1" }, "停顿发送"), /* @__PURE__ */ k$1("span", { class: "walk-pref-t2" }, config.prefs.autoVad ? "自动停顿发送" : "手动点停止")))), /* @__PURE__ */ k$1("button", {
+	}), /* @__PURE__ */ k$1("path", { d: "M9 10v4M15 10v4" }))), /* @__PURE__ */ k$1("span", { class: "walk-pref-copy" }, /* @__PURE__ */ k$1("span", { class: "walk-pref-t1" }, "免提连续对话"), /* @__PURE__ */ k$1("span", { class: "walk-pref-t2" }, config.prefs.autoVad ? "说完自动发 · 播完继续听" : "手动点开始/结束")))), /* @__PURE__ */ k$1("button", {
 		type: "button",
 		id: "walkPrefsToggleBtn",
 		class: `walk-prefs-capsule ${walkPrefsOpen ? "open" : ""}`,

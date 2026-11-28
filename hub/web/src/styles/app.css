@@ -6369,7 +6369,10 @@
     .walk-text-composer {
       display: flex;
       gap: 8px;
-      margin-top: 4px;
+      width: 100%;
+      max-width: 420px;
+      margin-top: 2px;
+      margin-bottom: 4px;
     }
 
     .walk-text-input {

@@ -41,6 +41,9 @@ test('Voice Harness v1: classifyVoiceReply & 0ms playback/queue fast-path resist
   assert.equal(parsePlaybackControlFastPath('再念一遍', 1.0)?.kind, 'queue_repeat')
   assert.equal(parsePlaybackControlFastPath('暂停播报', 1.0)?.kind, 'queue_pause')
   assert.equal(parsePlaybackControlFastPath('继续播报', 1.0)?.kind, 'queue_resume')
+  assert.equal(parsePlaybackControlFastPath('先不聊了', 1.0)?.kind, 'handsfree_pause')
+  assert.equal(parsePlaybackControlFastPath('挂断', 1.0)?.kind, 'handsfree_pause')
+  assert.equal(parsePlaybackControlFastPath('休息一下', 1.0)?.kind, 'handsfree_pause')
   // Normal task sentences must NOT trigger playback fast-path
   assert.equal(parsePlaybackControlFastPath('帮我给网站提速优化一下', 1.0), null)
   assert.equal(parsePlaybackControlFastPath('新建任务查日志', 1.0), null)
@@ -51,7 +54,7 @@ test('Voice Harness v1: classifyVoiceReply & 0ms playback/queue fast-path resist
   assert.equal(resolveNewWorkspacePath([], 'fresh-app'), '~/fresh-app')
 
   // Barge-in gate accepts speed/queue commands mid-playback
-  for (const cmd of ['快一点', '1.5倍速', '上一条', '重播', '慢一点']) {
+  for (const cmd of ['快一点', '1.5倍速', '上一条', '重播', '慢一点', '先不聊了', '挂断']) {
     assert.equal(evaluateBargeInUtterance(cmd, '正在播报一条长总结内容').accept, true, `barge-in should accept "${cmd}"`)
   }
 })
@@ -211,5 +214,7 @@ test('Voice Harness v1 UI contracts: center AI hero icon without text label, doc
   assert.match(walkSrc, /walk-queue-bar/)
   assert.match(walkSrc, /id="walkDraftCard"/)
   assert.match(walkSrc, /aiTabMount/)
+  assert.match(walkSrc, /stayHandsFreeLoop/)
+  assert.match(walkSrc, /handsfree_pause/)
   assert.match(ctrlSrc, /tab-ai-active/)
 })

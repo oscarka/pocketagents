@@ -504,7 +504,8 @@ test('v0.9.48 Walk Mode auto-listen after briefing: synchronous walkPhaseRef upd
   const earconPos = walkSrc.indexOf("playEarcon('listen');\n      await new Promise")
   const recStartPos = walkSrc.indexOf('await recorderRef.current!.start({', earconPos)
   assert.ok(earconPos > 0 && recStartPos > earconPos, 'listen earcon must complete before mic VAD arms')
-  assert.match(walkSrc, /noSpeechTimeoutMs:\s*isAutoFollowUp\s*\?\s*7000\s*:\s*0/)
+  assert.match(walkSrc, /noSpeechTimeoutMs:\s*effectiveNoSpeechMs/)
+  assert.match(walkSrc, /aiTabActiveRef\.current\s*\?\s*14000\s*:\s*7000/)
 
   // 4. Live native zero-WebView background briefing callback triggers auto-listen when fresh,
   //    while stale visibilitychange drain does NOT hijack mic
