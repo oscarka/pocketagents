@@ -1,8 +1,14 @@
 // Verified Voice Barge-In Gate: prevents ambient noise, coughs, brief fillers ("嗯/啊/哦"),
 // and TTS speaker echo from falsely interrupting an in-progress Walk Mode briefing.
 
-const FILLER_ONLY_RE =
-  /^(?:嗯+|啊+|哦+|喔+|噢+|呃+|额+|唉+|哎+|诶+|欸+|哈+|呵+|嘿+|喂+|唔+|啧+|咳+|呀+|嘛+|吧+|好吧|行吧|嗯哼|嗯嗯|啊啊|哦哦|哈哈|呵呵|那个|就是|什么|对对|是吗|uh+|um+|ah+|oh+|hmm+|huh+|mhm+|yeah|ok|okay)$/i
+const PURE_VOCAL_FILLER_RE =
+  /^(?:嗯+|啊+|哦+|喔+|噢+|呃+|额+|唉+|哎+|诶+|欸+|哈+|呵+|嘿+|喂+|唔+|啧+|咳+|呀+|嘛+|吧+|嗯哼|嗯嗯|啊啊|哦哦|哈哈|呵呵|那个|就是|什么|对对|是吗|uh+|um+|ah+|oh+|hmm+|huh+|mhm+)$/i
+
+const CASUAL_NON_APPROVAL_FILLER_RE =
+  /^(?:好吧|行吧|yeah|ok|okay)$/i
+
+const SEMANTIC_APPROVAL_DECISION_RE =
+  /^(?:嗯)?(?:可以[呀啊吧的啦]?|行[呀啊吧啦]?|好的|好吧|好[呀啊啦]|没问题|没啥问题|执行吧|跑吧|让它跑吧?|过吧?|准了?|ok|okay|yes|yep|sure|goahead|不行|不要|算了|先别|别跑|别执行|不让|不准|no|nope)$/i
 
 const EXPLICIT_COMMAND_RE =
   /(放行|批准|同意|允许|通过|拒绝|驳回|不同意|别执行|不要执行|取消|跳过|停止|停一下|停下来|别说了|闭嘴|暂停|下一条|下一个|重说|再说一遍|继续|确认码|选第|第[一二三四1234]|一号|二号|三号|四号|帮我|查看|汇报|进度|待审批|修改|改成|不要|\b(?:approve|allow|deny|reject|stop|skip|cancel|next|pause|repeat)\b|\d{3})/i
@@ -41,19 +47,32 @@ function computeBigramOverlap(candidateNorm, spokenNorm) {
  *
  * Returns `{ accept: boolean, reason: string, stopOnly?: boolean, cleaned: string }`.
  */
-export function evaluateBargeInUtterance(transcript = '', currentlySpokenText = '') {
+export function evaluateBargeInUtterance(transcript = '', currentlySpokenText = '', opts = {}) {
   const cleaned = String(transcript || '').trim()
   const norm = normalizeForEchoCompare(cleaned)
+  const hasPendingApproval = Boolean(opts?.hasPendingApproval)
   if (!norm) {
     return { accept: false, reason: 'empty', cleaned: '' }
   }
 
-  // 1. Reject pure backchannels / hesitation fillers ("嗯", "哦", "啊", "哈哈", "那个")
-  if (FILLER_ONLY_RE.test(norm)) {
+  // 1. Always reject pure meaningless vocal fillers ("嗯", "哦", "啊", "哈哈", "那个")
+  if (PURE_VOCAL_FILLER_RE.test(norm)) {
     return { accept: false, reason: 'filler', cleaned }
   }
 
-  // 2. Direct stop/skip commands are ALWAYS accepted immediately (short and unambiguous)
+  // 2. When a pending approval is actively awaiting the user's decision, accept natural spoken
+  //    semantic consent/refusal ("可以", "没问题", "好的", "行", "行吧", "好吧", "不要", "算了", "OK")
+  //    unless it looks like a question ("可以吗", "行吗").
+  if (hasPendingApproval && !/[吗呢？?]$/.test(cleaned) && SEMANTIC_APPROVAL_DECISION_RE.test(norm)) {
+    return { accept: true, reason: 'semantic_approval_decision', stopOnly: false, cleaned }
+  }
+
+  // Outside active approval windows, casual backchannels ("好吧", "行吧", "ok") stay rejected.
+  if (CASUAL_NON_APPROVAL_FILLER_RE.test(norm)) {
+    return { accept: false, reason: 'filler', cleaned }
+  }
+
+  // 3. Direct stop/skip commands are ALWAYS accepted immediately (short and unambiguous)
   if (STOP_ONLY_RE.test(norm)) {
     return { accept: true, reason: 'stop_command', stopOnly: true, cleaned }
   }

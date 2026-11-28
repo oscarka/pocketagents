@@ -3551,7 +3551,9 @@ function bindWalkMediaSession(handlers) {
 	};
 }
 // hub/web/src/voice/bargeInGate.js
-var FILLER_ONLY_RE = /^(?:嗯+|啊+|哦+|喔+|噢+|呃+|额+|唉+|哎+|诶+|欸+|哈+|呵+|嘿+|喂+|唔+|啧+|咳+|呀+|嘛+|吧+|好吧|行吧|嗯哼|嗯嗯|啊啊|哦哦|哈哈|呵呵|那个|就是|什么|对对|是吗|uh+|um+|ah+|oh+|hmm+|huh+|mhm+|yeah|ok|okay)$/i;
+var PURE_VOCAL_FILLER_RE = /^(?:嗯+|啊+|哦+|喔+|噢+|呃+|额+|唉+|哎+|诶+|欸+|哈+|呵+|嘿+|喂+|唔+|啧+|咳+|呀+|嘛+|吧+|嗯哼|嗯嗯|啊啊|哦哦|哈哈|呵呵|那个|就是|什么|对对|是吗|uh+|um+|ah+|oh+|hmm+|huh+|mhm+)$/i;
+var CASUAL_NON_APPROVAL_FILLER_RE = /^(?:好吧|行吧|yeah|ok|okay)$/i;
+var SEMANTIC_APPROVAL_DECISION_RE = /^(?:嗯)?(?:可以[呀啊吧的啦]?|行[呀啊吧啦]?|好的|好吧|好[呀啊啦]|没问题|没啥问题|执行吧|跑吧|让它跑吧?|过吧?|准了?|ok|okay|yes|yep|sure|goahead|不行|不要|算了|先别|别跑|别执行|不让|不准|no|nope)$/i;
 var EXPLICIT_COMMAND_RE = /(放行|批准|同意|允许|通过|拒绝|驳回|不同意|别执行|不要执行|取消|跳过|停止|停一下|停下来|别说了|闭嘴|暂停|下一条|下一个|重说|再说一遍|继续|确认码|选第|第[一二三四1234]|一号|二号|三号|四号|帮我|查看|汇报|进度|待审批|修改|改成|不要|\b(?:approve|allow|deny|reject|stop|skip|cancel|next|pause|repeat)\b|\d{3})/i;
 var STOP_ONLY_RE = /^(?:停|停下|停止|停一下|停下来|别说了|闭嘴|先停|暂停|跳过|下一条|不用说了|知道了|stop|skip|pause)$/i;
 function normalizeForEchoCompare(raw = "") {
@@ -3573,15 +3575,27 @@ function computeBigramOverlap(candidateNorm, spokenNorm) {
 *
 * Returns `{ accept: boolean, reason: string, stopOnly?: boolean, cleaned: string }`.
 */
-function evaluateBargeInUtterance(transcript = "", currentlySpokenText = "") {
+function evaluateBargeInUtterance(transcript = "", currentlySpokenText = "", opts = {}) {
 	const cleaned = String(transcript || "").trim();
 	const norm = normalizeForEchoCompare(cleaned);
+	const hasPendingApproval = Boolean(opts?.hasPendingApproval);
 	if (!norm) return {
 		accept: false,
 		reason: "empty",
 		cleaned: ""
 	};
-	if (FILLER_ONLY_RE.test(norm)) return {
+	if (PURE_VOCAL_FILLER_RE.test(norm)) return {
+		accept: false,
+		reason: "filler",
+		cleaned
+	};
+	if (hasPendingApproval && !/[吗呢？?]$/.test(cleaned) && SEMANTIC_APPROVAL_DECISION_RE.test(norm)) return {
+		accept: true,
+		reason: "semantic_approval_decision",
+		stopOnly: false,
+		cleaned
+	};
+	if (CASUAL_NON_APPROVAL_FILLER_RE.test(norm)) return {
 		accept: false,
 		reason: "filler",
 		cleaned
@@ -5438,6 +5452,7 @@ function VoiceCopilotSheets() {
 	const [lastReplyText, setLastReplyText] = d("戴上耳机，轻点下方大圆球，问我进度、审批或直接下达新任务。");
 	const [lastActionBadge, setLastActionBadge] = d("");
 	const [lastLatencyBadge, setLastLatencyBadge] = d("");
+	const [walkReceipts, setWalkReceipts] = d([]);
 	const [activePin, setActivePin] = d(null);
 	const [pinSecLeft, setPinSecLeft] = d(0);
 	const [walkTextInputOpen, setWalkTextInputOpen] = d(false);
@@ -6180,9 +6195,10 @@ function VoiceCopilotSheets() {
 			const data = await res.json().catch(() => null);
 			if (!walkOpenRef.current || walkPhaseRef.current !== "speaking" || bargeInTriggeredRef.current) return;
 			const rawText = res.ok && data?.ok && !data?.silence ? String(data.text || "").trim() : "";
-			const verdict = evaluateBargeInUtterance(rawText, activeSpeakingTextRef.current);
+			const hasPendingApproval = Boolean(focusedApprovalRef.current || summarizeHubState(window.__dshLastHubState).approvals.length > 0);
+			const verdict = evaluateBargeInUtterance(rawText, activeSpeakingTextRef.current, { hasPendingApproval });
 			if (!verdict.accept) {
-				postNativeVoiceDiag("barge_in_rejected", `reason=${verdict.reason} txt=${rawText.slice(0, 32)}`);
+				postNativeVoiceDiag("barge_in_rejected", `reason=${verdict.reason} app=${hasPendingApproval ? 1 : 0} txt=${rawText.slice(0, 32)}`);
 				playerRef.current?.setVolume(1);
 				return;
 			}
@@ -6312,26 +6328,56 @@ function VoiceCopilotSheets() {
 			setActivePin(data.pinChallenge || null);
 			if (data.nextFocusedApproval !== void 0) focusedApprovalRef.current = data.nextFocusedApproval || null;
 			else if (data.execution?.executed) focusedApprovalRef.current = null;
+			const pushReceipt = (heard, badge, ok) => {
+				const d = /* @__PURE__ */ new Date();
+				const hh = String(d.getHours()).padStart(2, "0");
+				const mm = String(d.getMinutes()).padStart(2, "0");
+				const ss = String(d.getSeconds()).padStart(2, "0");
+				setWalkReceipts((prev) => [{
+					id: `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+					time: `${hh}:${mm}:${ss}`,
+					heard: heard.slice(0, 28),
+					badge,
+					ok
+				}, ...prev].slice(0, 3));
+			};
 			if (data.fastPath === "l2_pin_matched") {
 				playEarcon("pin_ok");
-				setLastActionBadge(`🔓 确认码通过 · 已放行 ${data.action?.code || ""}`);
+				const b = `🔓 确认码通过 · 已放行 ${data.action?.code || ""}`.trim();
+				setLastActionBadge(b);
+				pushReceipt(clean, b, true);
 			} else if (data.execution?.requiresPin) {
 				playEarcon("alert");
-				setLastActionBadge(`⚠️ L2 高危拦截 · 需念出 ${data.pinChallenge?.pin || ""}`);
+				const b = `⚠️ 高危需念确认码 ${data.pinChallenge?.pin || ""}`.trim();
+				setLastActionBadge(b);
+				pushReceipt(clean, b, false);
 			} else if (data.execution?.ambiguousApprovals || data.action?.ambiguousApprovals) {
 				playEarcon("alert");
-				setLastActionBadge("🔢 多条待审批 · 请说编号");
+				const b = "🔢 多条待审批 · 请说编号";
+				setLastActionBadge(b);
+				pushReceipt(clean, b, false);
 			} else if (data.execution?.executed) {
-				playEarcon("done");
-				setLastActionBadge({
-					approve: "✅ 已放行审批",
-					reject: "🚫 已拒绝审批",
-					answer_question: "✅ 已提交选择",
+				playEarcon("pin_ok");
+				const slotStr = data.execution?.approval?.slot ? ` ${data.execution.approval.slot}号` : "";
+				const b = {
+					approve: `✅ 已放行${slotStr}`,
+					reject: `🚫 已拒绝${slotStr}`,
+					answer_question: `✅ 已提交选择${slotStr}`,
 					send_prompt: "📤 已发送追问",
 					create_task: "✨ 已新建任务",
 					stop_session: "⏹ 已发送停止指令"
-				}[data.execution.type] || `✅ ${data.execution.type}`);
-			} else if (data.action?.type === "query_status") setLastActionBadge("📊 状态播报");
+				}[data.execution.type] || `✅ ${data.execution.type}`;
+				setLastActionBadge(b);
+				pushReceipt(clean, b, true);
+			} else if (data.action?.type === "query_status" || data.action?.type === "inspect_session") {
+				const b = "📊 状态播报（未改状态）";
+				setLastActionBadge(b);
+				pushReceipt(clean, b, true);
+			} else {
+				const b = "⏸️ 未执行操作";
+				setLastActionBadge(b);
+				pushReceipt(clean, b, false);
+			}
 			const baseMetrics = [];
 			if (wavKb !== null) baseMetrics.push(`WAV ${wavKb}KB`);
 			if (sttMs !== null) baseMetrics.push(`STT ${sttMs}ms`);
@@ -6402,8 +6448,14 @@ function VoiceCopilotSheets() {
 				setWalkPhase("idle");
 				if (duckMusic) setWalkAudioSessionMode("ambient");
 				if (!isAutoFollowUp) {
+					playEarcon("alert");
 					setLastReplyText("没有检测到清晰人声（静音），轻点圆球重新说。");
+					setLastActionBadge("❓ 未听清 · 未执行");
 					setLastLatencyBadge(`WAV ${wavKb}KB · STT ${data.latencyMs ?? 0}ms · 静音`);
+				} else if (rec.hadSpeech) {
+					playEarcon("alert");
+					setLastActionBadge("❓ 刚没听清 · 未执行");
+					setLastLatencyBadge(`WAV ${wavKb}KB · STT 静音`);
 				}
 				return;
 			}
@@ -6907,7 +6959,13 @@ function VoiceCopilotSheets() {
 		type: "button",
 		class: "walk-pin-btn-cancel",
 		onClick: () => void handleClearPin(false)
-	}, "取消弹窗"))), /* @__PURE__ */ k$1("div", { class: "walk-subtitle-box" }, lastUserText && /* @__PURE__ */ k$1("div", { class: "walk-user-line" }, `你：${lastUserText}`), /* @__PURE__ */ k$1("div", { class: `walk-reply-line ${isLongReply ? "compact" : ""}` }, lastReplyText), (lastActionBadge || lastLatencyBadge) && /* @__PURE__ */ k$1("div", { class: "walk-meta-row" }, lastActionBadge && /* @__PURE__ */ k$1("span", { class: "walk-action-tag" }, lastActionBadge), lastLatencyBadge && /* @__PURE__ */ k$1("span", { class: "walk-latency-tag" }, lastLatencyBadge))), walkTextInputOpen && /* @__PURE__ */ k$1("div", {
+	}, "取消弹窗"))), /* @__PURE__ */ k$1("div", { class: "walk-subtitle-box" }, lastUserText && /* @__PURE__ */ k$1("div", { class: "walk-user-line" }, `你：${lastUserText}`), /* @__PURE__ */ k$1("div", { class: `walk-reply-line ${isLongReply ? "compact" : ""}` }, lastReplyText), (lastActionBadge || lastLatencyBadge) && /* @__PURE__ */ k$1("div", { class: "walk-meta-row" }, lastActionBadge && /* @__PURE__ */ k$1("span", { class: "walk-action-tag" }, lastActionBadge), lastLatencyBadge && /* @__PURE__ */ k$1("span", { class: "walk-latency-tag" }, lastLatencyBadge)), walkReceipts.length > 0 && /* @__PURE__ */ k$1("div", {
+		class: "walk-receipt-log",
+		"aria-label": "近期语音执行记录"
+	}, walkReceipts.map((rc) => /* @__PURE__ */ k$1("div", {
+		key: rc.id,
+		class: `walk-receipt-item ${rc.ok ? "is-ok" : "is-warn"}`
+	}, /* @__PURE__ */ k$1("span", { class: "walk-receipt-time" }, rc.time), /* @__PURE__ */ k$1("span", { class: "walk-receipt-heard" }, `「${rc.heard}」`), /* @__PURE__ */ k$1("span", { class: "walk-receipt-badge" }, rc.badge))))), walkTextInputOpen && /* @__PURE__ */ k$1("div", {
 		class: "walk-text-composer",
 		onClick: (e) => e.stopPropagation()
 	}, /* @__PURE__ */ k$1("input", {

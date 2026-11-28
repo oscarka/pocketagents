@@ -263,8 +263,9 @@ export function extractSpokenPin(text = '') {
   return ''
 }
 
-const REJECT_INTENT_RE = /(拒绝|不同意|取消|算了|别执行|不要执行|驳回|跳过|停止|\breject\b|\bdeny\b|\bcancel\b|\bno\b)/i
-const APPROVE_INTENT_RE = /(批准|放行|同意|允许|通过|确认执行|准了|可以执行|\bapprove\b|\ballow\b|\byes\b|\bconfirm\b)/i
+const REJECT_INTENT_RE = /(拒绝|不同意|不可以|不行|不要|不让|不准|取消|算了|先别|别执行|不要执行|别跑|驳回|跳过|停止|\breject\b|\bdeny\b|\bcancel\b|\bno\b|\bnope\b)/i
+const APPROVE_INTENT_RE = /(批准|放行|同意|允许|通过|确认执行|准了|可以执行|执行吧|跑吧|让它跑吧?|\bapprove\b|\ballow\b|\byes\b|\bconfirm\b)/i
+const NATURAL_APPROVE_UTTERANCE_RE = /^(?:嗯[，,\s]*)?(?:可以[呀啊吧的啦]?|行[呀啊吧啦]?|好的|好吧|没问题|没啥问题|过吧?|ok|okay|sure|go\s*ahead)[。！!~～]*$/i
 
 export function generateSafe3DigitPin() {
   for (let i = 0; i < 12; i += 1) {
@@ -443,7 +444,7 @@ export function splitIntoProgressiveTtsChunks(text = '', { firstChunkMax = 32, n
   return chunks
 }
 
-const FOCUS_APPROVAL_TTL_MS = 45_000
+const FOCUS_APPROVAL_TTL_MS = 120_000
 const SLOT_ZH_MAP = {
   一: 1, 幺: 1,
   二: 2, 两: 2,
@@ -1186,7 +1187,11 @@ function buildVoiceSystemPrompt(ctx, l2Policy = 'pin', focusedApproval = null) {
     '安全铁律与防串台规则：',
     '1. 只能引用下方实时上下文中真实存在的 hostId、agentId、slot 和 code，绝不编造。',
     '2. 每条待审批都有唯一序号 slot（1号、2号、3号…）。如果当前有多条待审批，且用户没有说出序号/会话名/单号，同时也没有刚播报过的 focusedApproval，严禁盲批！必须把 action.type 设为 "none"，简短念出 1号、2号 摘要让用户指定编号。',
-    '3. 若存在有效的 focusedApproval（刚刚 45 秒内播报给用户并自动开麦等待回答），用户直接说“放行/拒绝/选第二个”即指该 focusedApproval，输出它对应的 hostId、code、slot，并在 spokenReply 中报出编号与名称方便用户核对。',
+    '3. 自然语义理解与审批判定（非常重要，绝不要死板只认「放行」两个字）：若存在有效的 focusedApproval（刚刚播报给用户等待确认）或当前仅有 1 条待审批：',
+    '   - 只要用户用自然中文或英文表达同意/许可（如「可以」「可以呀」「好的」「好吧」「行」「行吧」「没问题」「让它跑吧」「执行吧」「过吧」「OK」「嗯可以」「允许」「准了」「就按这个来」），直接判定为批准，必须输出 action.type="approve" 及对应的 hostId、code、slot！绝不要把「好的/可以/行吧/没问题」误判为 action.type="none" 而空等反问。',
+    '   - 只要用户用自然口语表达拒绝/阻止（如「不行」「不要」「算了」「先别」「别跑了」「别执行」「不让」「拒绝」「驳回」），直接输出 action.type="reject"。',
+    '   - 只有当用户是在追问细节或明确表示观望（如「这是干嘛的」「具体改了哪」「有风险吗」「先等等」「等一下」「让我看看」）时，才输出 action.type="none"（或 "inspect_session"），并在 spokenReply 中明确说「这条审批我先没动」。',
+    '   - 绝不虚假汇报：如果 action.type 是 "none"，spokenReply 中严禁出现「已放行 / 已批准 / 已同意 / 已拒绝 / 已执行」等字样；如果 action.type 是 "approve" 或 "reject"（且非 L2 高危），spokenReply 开头请直接明确播报「已放行 X号…」或「已拒绝 X号…」，让用户一听就知道真的执行了。',
     `4. 高危审批策略当前为 ${l2Policy === 'pin' ? '「念出随机 3 位确认码放行」' : '「仅允许在手机屏幕点按确认」'}；若用户想批准风险标记为 L2 的审批，你仍然输出 action.type="approve" 与对应 code，后端安全闸门会自动生成 3 位确认码拦截，绝不要在 spokenReply 中声称“已直接放行高危操作”。`,
     '5. 如果用户问进度、汇总、某任务结论，使用 type="query_status" 或 "inspect_session"，把关键结论用自然口语念出来；若有待审批，按 1号、2号 简短念出要点和选项。',
     '6. 如果用户追问当前待审批「到底要干嘛 / 具体改了哪 / 原命令是什么 / 有没有风险」，使用 type="inspect_session" 或 "none"，严格对照 pendingApprovals 里的 fullCommand、riskLevel 和 riskReason 用大白话如实解释，绝不隐瞒或淡化删除、强制覆盖、管理员权限或远程部署。',
@@ -1338,8 +1343,9 @@ export function runNativeRuleRouter(userText = '', ctx = {}) {
     }
   }
 
-  // 4. Approve pending approval (strict anti-mixup!)
-  if (approvals.length > 0 && APPROVE_INTENT_RE.test(text)) {
+  // 4. Approve pending approval (strict anti-mixup; accepts both explicit keywords and natural spoken consent)
+  const isNaturalConsent = NATURAL_APPROVE_UTTERANCE_RE.test(text) && !/[？?吗呢]/.test(text)
+  if (approvals.length > 0 && (APPROVE_INTENT_RE.test(text) || isNaturalConsent)) {
     const resolved = resolveApprovalTarget(text, approvals, { focusedApproval, now })
     if (resolved.status === 'ambiguous') {
       return {
@@ -1959,24 +1965,41 @@ export class VoiceCopilotEngine {
         max_tokens: Number(stageCfg?.maxTokens) || 320,
       }
       const firstBody = wantDisableThinking ? { ...baseBody, thinking: { type: 'disabled' } } : baseBody
-      let resp
-      try {
-        resp = await fetchWithTimeout(this.fetch, url, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${cred.apiKey}`,
-          },
-          body: JSON.stringify(firstBody),
-        })
-      } catch (err) {
+      const isMockFetch = this.fetch !== globalThis.fetch
+      const isRetryableHttp = status => status === 429 || status === 502 || status === 503 || status === 504
+      let resp = null
+      let lastNetErr = null
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        if (attempt > 0 && !isMockFetch) {
+          await new Promise(r => setTimeout(r, 250))
+        }
+        try {
+          resp = await fetchWithTimeout(this.fetch, url, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${cred.apiKey}`,
+            },
+            body: JSON.stringify(firstBody),
+          })
+          lastNetErr = null
+          if (!resp.ok && isRetryableHttp(resp.status) && attempt === 0) {
+            continue
+          }
+          break
+        } catch (err) {
+          lastNetErr = err
+          if (attempt === 0) continue
+        }
+      }
+      if (lastNetErr || !resp) {
         return {
           ok: false,
           provider,
           model,
           credId: cred.id,
           latencyMs: this.now() - t0,
-          error: formatFetchError(err),
+          error: formatFetchError(lastNetErr),
         }
       }
       let data = await resp.json().catch(() => ({}))
@@ -2423,6 +2446,35 @@ export class VoiceCopilotEngine {
 
     let spokenReply = String(execution.overrideReply || parsed?.spokenReply || '已处理。').trim()
     let nextFocusedApproval = null
+    let shouldReopenFocusMic = false
+
+    // Guarantee unmistakable spoken confirmation whenever an approval action genuinely executed
+    if (execution.executed && execution.approval && !execution.overrideReply) {
+      const slotTag = `${execution.approval.slot || 1}号`
+      if (execution.type === 'approve' && !/(?:已|已经)(?:为你|帮你)?(?:放行|批准|同意|允许)/.test(spokenReply)) {
+        spokenReply = `已放行 ${slotTag}，${spokenReply}`
+      } else if (execution.type === 'reject' && !/(?:已|已经)(?:为你|帮你)?(?:拒绝|驳回|取消)/.test(spokenReply)) {
+        spokenReply = `已拒绝 ${slotTag}，${spokenReply}`
+      } else if (execution.type === 'answer_question' && !/(?:已|已经)(?:为你|帮你)?(?:选择|提交|选好)/.test(spokenReply)) {
+        spokenReply = `已提交 ${slotTag}选择，${spokenReply}`
+      }
+    }
+
+    // Hard anti-false-claim guard: NEVER let the LLM claim "已放行/已执行/已拒绝" when execution.executed is false!
+    if (
+      !execution.executed
+      && !execution.dryRun
+      && !execution.requiresPin
+      && !execution.blockedByPolicy
+      && !execution.overrideReply
+      && (!action?.type || action.type === 'none')
+      && ctx.pendingApprovals.length > 0
+    ) {
+      if (/(?:已|已经)(?:为你|帮你)?(?:放行|批准|同意|允许|执行|拒绝|驳回|提交)/.test(spokenReply)) {
+        spokenReply = '我刚才没完全确认你的意思，这条待审批目前还没执行。确认放行请说可以，不需要请说拒绝。'
+        shouldReopenFocusMic = true
+      }
+    }
 
     if (execution.executed && execution.approval && ['approve', 'reject', 'answer_question'].includes(execution.type)) {
       const handledCode = execution.approval.code
@@ -2441,13 +2493,23 @@ export class VoiceCopilotEngine {
       }
     } else if (execution.requiresPin && execution.approval) {
       nextFocusedApproval = this.setFocusedApproval(voiceSessionId, execution.approval)
+    } else if (activeFocus && (!action?.type || action.type === 'none' || action.type === 'inspect_session')) {
+      const stillPending = ctx.pendingApprovals.find(
+        a => a.code === activeFocus.code && (!activeFocus.hostId || a.hostId === activeFocus.hostId),
+      )
+      if (stillPending) {
+        // Keep focus fresh and reopen mic when user asked about or hesitated on the focused approval
+        nextFocusedApproval = this.setFocusedApproval(voiceSessionId, stillPending)
+        shouldReopenFocusMic = true
+      }
     }
 
     const expectReply = Boolean(
       execution.requiresPin
       || execution.ambiguousApprovals
       || action?.ambiguousApprovals
-      || nextFocusedApproval,
+      || nextFocusedApproval
+      || shouldReopenFocusMic,
     )
 
     const historyList = this.turnHistory.get(voiceSessionId) || []

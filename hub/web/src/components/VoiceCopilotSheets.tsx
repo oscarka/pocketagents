@@ -189,6 +189,7 @@ export function VoiceCopilotSheets() {
   const [lastReplyText, setLastReplyText] = useState('戴上耳机，轻点下方大圆球，问我进度、审批或直接下达新任务。');
   const [lastActionBadge, setLastActionBadge] = useState('');
   const [lastLatencyBadge, setLastLatencyBadge] = useState('');
+  const [walkReceipts, setWalkReceipts] = useState<Array<{ id: string; time: string; heard: string; badge: string; ok: boolean }>>([]);
   const [activePin, setActivePin] = useState<PinChallenge | null>(null);
   const [pinSecLeft, setPinSecLeft] = useState(0);
   const [walkTextInputOpen, setWalkTextInputOpen] = useState(false);
@@ -1107,9 +1108,13 @@ export function VoiceCopilotSheets() {
         return;
       }
       const rawText = res.ok && data?.ok && !data?.silence ? String(data.text || '').trim() : '';
-      const verdict = evaluateBargeInUtterance(rawText, activeSpeakingTextRef.current);
+      const hasPendingApproval = Boolean(
+        focusedApprovalRef.current
+        || summarizeHubState((window as any).__dshLastHubState).approvals.length > 0,
+      );
+      const verdict = evaluateBargeInUtterance(rawText, activeSpeakingTextRef.current, { hasPendingApproval });
       if (!verdict.accept) {
-        postNativeVoiceDiag('barge_in_rejected', `reason=${verdict.reason} txt=${rawText.slice(0, 32)}`);
+        postNativeVoiceDiag('barge_in_rejected', `reason=${verdict.reason} app=${hasPendingApproval ? 1 : 0} txt=${rawText.slice(0, 32)}`);
         playerRef.current?.setVolume(1.0);
         return;
       }
@@ -1277,28 +1282,54 @@ export function VoiceCopilotSheets() {
         focusedApprovalRef.current = null;
       }
 
+      const pushReceipt = (heard: string, badge: string, ok: boolean) => {
+        const d = new Date();
+        const hh = String(d.getHours()).padStart(2, '0');
+        const mm = String(d.getMinutes()).padStart(2, '0');
+        const ss = String(d.getSeconds()).padStart(2, '0');
+        setWalkReceipts(prev => [
+          { id: `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, time: `${hh}:${mm}:${ss}`, heard: heard.slice(0, 28), badge, ok },
+          ...prev,
+        ].slice(0, 3));
+      };
+
       if (data.fastPath === 'l2_pin_matched') {
         playEarcon('pin_ok');
-        setLastActionBadge(`🔓 确认码通过 · 已放行 ${data.action?.code || ''}`);
+        const b = `🔓 确认码通过 · 已放行 ${data.action?.code || ''}`.trim();
+        setLastActionBadge(b);
+        pushReceipt(clean, b, true);
       } else if (data.execution?.requiresPin) {
         playEarcon('alert');
-        setLastActionBadge(`⚠️ L2 高危拦截 · 需念出 ${data.pinChallenge?.pin || ''}`);
+        const b = `⚠️ 高危需念确认码 ${data.pinChallenge?.pin || ''}`.trim();
+        setLastActionBadge(b);
+        pushReceipt(clean, b, false);
       } else if (data.execution?.ambiguousApprovals || data.action?.ambiguousApprovals) {
         playEarcon('alert');
-        setLastActionBadge('🔢 多条待审批 · 请说编号');
+        const b = '🔢 多条待审批 · 请说编号';
+        setLastActionBadge(b);
+        pushReceipt(clean, b, false);
       } else if (data.execution?.executed) {
-        playEarcon('done');
+        playEarcon('pin_ok');
+        const slotStr = data.execution?.approval?.slot ? ` ${data.execution.approval.slot}号` : '';
         const mapLabel: Record<string, string> = {
-          approve: '✅ 已放行审批',
-          reject: '🚫 已拒绝审批',
-          answer_question: '✅ 已提交选择',
+          approve: `✅ 已放行${slotStr}`,
+          reject: `🚫 已拒绝${slotStr}`,
+          answer_question: `✅ 已提交选择${slotStr}`,
           send_prompt: '📤 已发送追问',
           create_task: '✨ 已新建任务',
           stop_session: '⏹ 已发送停止指令',
         };
-        setLastActionBadge(mapLabel[data.execution.type] || `✅ ${data.execution.type}`);
-      } else if (data.action?.type === 'query_status') {
-        setLastActionBadge('📊 状态播报');
+        const b = mapLabel[data.execution.type] || `✅ ${data.execution.type}`;
+        setLastActionBadge(b);
+        pushReceipt(clean, b, true);
+      } else if (data.action?.type === 'query_status' || data.action?.type === 'inspect_session') {
+        const b = '📊 状态播报（未改状态）';
+        setLastActionBadge(b);
+        pushReceipt(clean, b, true);
+      } else {
+        const b = '⏸️ 未执行操作';
+        setLastActionBadge(b);
+        pushReceipt(clean, b, false);
       }
 
       const baseMetrics: string[] = [];
@@ -1391,8 +1422,14 @@ export function VoiceCopilotSheets() {
         setWalkPhase('idle');
         if (duckMusic) setWalkAudioSessionMode('ambient');
         if (!isAutoFollowUp) {
+          playEarcon('alert');
           setLastReplyText('没有检测到清晰人声（静音），轻点圆球重新说。');
+          setLastActionBadge('❓ 未听清 · 未执行');
           setLastLatencyBadge(`WAV ${wavKb}KB · STT ${data.latencyMs ?? 0}ms · 静音`);
+        } else if (rec.hadSpeech) {
+          playEarcon('alert');
+          setLastActionBadge('❓ 刚没听清 · 未执行');
+          setLastLatencyBadge(`WAV ${wavKb}KB · STT 静音`);
         }
         return;
       }
@@ -1954,6 +1991,17 @@ export function VoiceCopilotSheets() {
                 <div class="walk-meta-row">
                   {lastActionBadge && <span class="walk-action-tag">{lastActionBadge}</span>}
                   {lastLatencyBadge && <span class="walk-latency-tag">{lastLatencyBadge}</span>}
+                </div>
+              )}
+              {walkReceipts.length > 0 && (
+                <div class="walk-receipt-log" aria-label="近期语音执行记录">
+                  {walkReceipts.map(rc => (
+                    <div key={rc.id} class={`walk-receipt-item ${rc.ok ? 'is-ok' : 'is-warn'}`}>
+                      <span class="walk-receipt-time">{rc.time}</span>
+                      <span class="walk-receipt-heard">{`「${rc.heard}」`}</span>
+                      <span class="walk-receipt-badge">{rc.badge}</span>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>

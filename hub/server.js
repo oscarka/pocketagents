@@ -1982,6 +1982,10 @@ export function createHubServer({
             logger?.warn?.(
               `[voice] turn failed provider=${outcome.provider || '?'} model=${outcome.model || ''} latency=${outcome.latencyMs ?? 0}ms err=${String(outcome.error || '').slice(0, 260)}`,
             )
+          } else {
+            logger?.info?.(
+              `[voice] turn ok text=${JSON.stringify(String(outcome.userText || '').slice(0, 48))} action=${outcome.action?.type || 'none'} exec=${outcome.execution?.executed ? 1 : 0} pin=${outcome.execution?.requiresPin ? 1 : 0} code=${outcome.action?.code || outcome.execution?.approval?.code || '-'} ms=${outcome.latencyMs ?? 0}`,
+            )
           }
           return { status: outcome.ok ? 200 : 502, json: outcome }
         }
