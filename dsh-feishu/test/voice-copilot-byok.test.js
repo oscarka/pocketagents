@@ -551,12 +551,12 @@ describe('v0.9.9 BYOK Voice Copilot & Encrypted Vault', () => {
     assert.equal(dryTurn.json.execution.commandPayload.type, 'new_session')
     assert.equal(hub.hosts.get('mac-studio').commands.length, 0)
 
-    // 5. Real Brain turn enqueues `new_session` into HubCore
+    // 5. Real Brain turn enqueues `new_session` into HubCore (explicit skipTaskConfirm legacy direct mode)
     const realTurn = await dispatchRequest({
       method: 'POST',
       url: '/api/voice/turn',
       headers: auth,
-      body: { text: '新建任务跑 pytest', dryRun: false },
+      body: { text: '新建任务跑 pytest', dryRun: false, skipTaskConfirm: true },
     })
     assert.equal(realTurn.json.ok, true)
     assert.equal(realTurn.json.execution.executed, true)

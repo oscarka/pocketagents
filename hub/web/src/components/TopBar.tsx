@@ -51,7 +51,13 @@ export function TopBar() {
             class={`top-walk-btn ${walkState.active ? `active phase-${walkState.phase}` : ''}`}
             aria-label="边走边听"
             title={walkState.active ? '边走边听运行中 · 点击展开' : '开启边走边听'}
-            onClick={() => (window as any).openWalkMode?.()}
+            onClick={() => {
+              if (typeof (window as any).switchTab === 'function') {
+                (window as any).switchTab('ai');
+              } else {
+                (window as any).openWalkMode?.();
+              }
+            }}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M3 18v-6a9 9 0 0 1 18 0v6" />

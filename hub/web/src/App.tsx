@@ -241,6 +241,7 @@ export function App() {
             </div>
           </div>
           <main class="main-viewport" id="mainViewport"></main>
+          <div id="aiTabMount" class="ai-tab-mount" style="display:none;"></div>
           <BottomTabs />
           <TriageDeck />
         </div>

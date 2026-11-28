@@ -43,7 +43,7 @@ var h$1 = Symbol.for("pv");
 var p$1 = {};
 var v$1 = [];
 var y$1 = /^m(i|n|o|s|text|space)$/;
-var w$1 = Array.isArray;
+var w$2 = Array.isArray;
 var d$1 = v$1.slice;
 var _$1 = Object.assign;
 function g$1(n) {
@@ -75,7 +75,7 @@ function m$1(r, i, u, f, e) {
 function M(n) {
 	return n.children;
 }
-function x(n, t) {
+function x$1(n, t) {
 	this.props = n, this.context = t, this.__g = 0;
 }
 function S(n, t) {
@@ -99,14 +99,14 @@ function L() {
 		(f$1 = i$1.length) && (u$1 || queueMicrotask)(L);
 	}
 }
-function H(n, t, r, i, u, f, e, o, l, c, a) {
+function H$1(n, t, r, i, u, f, e, o, l, c, a) {
 	var s, h, y, w, d, _, g = i.__k || v$1, k = t.length;
 	for (l = I(r, t, g, l, k), s = 0; s < k; s++) null != (y = r.__k[s]) && (h = ~y.__i && g[y.__i] || p$1, y.__i = s, _ = V(n, y, h, u, f, e, o, l, c, a), w = y.__e, (h.ref != y.ref || 8 & h.__u) && (h.ref && F(h.ref, null, y, h), y.ref && a.push(y.ref, y.__c || w, y)), d = d || w, 4 & y.__u ? (l = q(y, l, n, !h.__v), h.__e && (h.__e = null)) : "function" == typeof y.type && void 0 !== _ ? l = _ : w && (l = w.nextSibling), y.__u &= -21);
 	return r.__e = d, l;
 }
 function I(n, t, r, i, u) {
 	var f, e, o, l, c, a, s, p, v, y = r.length, d = y, _ = 0, g = 0, k = n.__k = Array(u);
-	for (f = 0; f < u; f++) null != (e = t[f]) && "boolean" != typeof e && "function" != typeof e ? ("object" != typeof e || e.constructor === String ? e = k[f] = m$1(null, e) : w$1(e) ? e = k[f] = m$1(M, { children: e }) : e.constructor === h$1 && e.__b ? e = k[f] = m$1(e.type, e.props, e.key, e.ref, e.__v) : k[f] = e, l = f + _, e.__ = n, e.__b = n.__b + 1, o = null, ~(c = e.__i = O(e, r, l, d)) && (d--, (o = r[c]) && (o.__u |= 2)), o && o.__v ? (e.__u |= 16, c == l - 1 ? _-- : c == l + 1 ? _++ : c != l && (c > l ? _-- : _++, g = 1)) : (~c || (u > y ? _-- : u < y && _++), "function" != typeof e.type && (e.__u |= 4))) : k[f] = null;
+	for (f = 0; f < u; f++) null != (e = t[f]) && "boolean" != typeof e && "function" != typeof e ? ("object" != typeof e || e.constructor === String ? e = k[f] = m$1(null, e) : w$2(e) ? e = k[f] = m$1(M, { children: e }) : e.constructor === h$1 && e.__b ? e = k[f] = m$1(e.type, e.props, e.key, e.ref, e.__v) : k[f] = e, l = f + _, e.__ = n, e.__b = n.__b + 1, o = null, ~(c = e.__i = O(e, r, l, d)) && (d--, (o = r[c]) && (o.__u |= 2)), o && o.__v ? (e.__u |= 16, c == l - 1 ? _-- : c == l + 1 ? _++ : c != l && (c > l ? _-- : _++, g = 1)) : (~c || (u > y ? _-- : u < y && _++), "function" != typeof e.type && (e.__u |= 4))) : k[f] = null;
 	if (g) {
 		for (a = [], s = [], f = 0; f < u; f++) if ((e = k[f]) && 16 & e.__u) {
 			for (_ = 0, p = a.length; _ < p;) a[v = _ + p >> 1] < e.__i ? _ = v + 1 : p = v;
@@ -128,6 +128,11 @@ function q(n, t, r, i) {
 	for (e != o && (!i && r.moveBefore && e.parentNode ? r.moveBefore(e, t) : r.insertBefore(e, t || null)), t = e; (t = t && t.nextSibling) && 8 == t.nodeType && !t.data.startsWith("$s"););
 	return t;
 }
+function A$1(n, t) {
+	return t = t || [], null != n && "boolean" != typeof n && (w$2(n) ? n.some(function(n) {
+		A$1(n, t);
+	}) : t.push(n)), t;
+}
 function O(n, t, r, i) {
 	var u, f = n.key, e = n.type, o = t[r], l = o && !(2 & o.__u);
 	if (null === o && null == f || l && f == o.key && e == o.type) return r;
@@ -137,15 +142,15 @@ function O(n, t, r, i) {
 	}
 	return -1;
 }
-function P(n, t, r) {
+function P$1(n, t, r) {
 	r ??= "", "-" == t[0] ? n.setProperty(t, r) : n[t] = r;
 }
 function T$1(n, t, r, i, u) {
 	var f, e;
 	if ("style" == t) if ("string" == typeof r) n.style.cssText = r;
 	else {
-		if ("string" == typeof i && (n.style.cssText = i = ""), i) for (t in i) r && t in r || P(n.style, t);
-		if (r) for (t in r) i && r[t] == i[t] || P(n.style, t, r[t]);
+		if ("string" == typeof i && (n.style.cssText = i = ""), i) for (t in i) r && t in r || P$1(n.style, t);
+		if (r) for (t in r) i && r[t] == i[t] || P$1(n.style, t, r[t]);
 	}
 	else if ("o" == t[0] && "n" == t[1]) (n.__e || (n.__e = {}))[t] = r, r && i || (e = a$1[t] || (a$1[t] = N(t)), (n.__a || (n.__a = {}))[t] = c$1, f = t != (t = t.replace(l$1, "$1")), (t = t.slice(2))[0] < "a" && (t = t.toLowerCase()), r ? n.addEventListener(t, e, f) : n.removeEventListener(t, e, f));
 	else {
@@ -171,11 +176,11 @@ function N(t) {
 function V(t, r, i, u, f, e, o, l, c, a) {
 	var s, p, y, d, k, b, m, $, C, j, L, I, q, A, O, P, T, N, V = r.type;
 	if (r.constructor !== h$1) return null;
-	128 & i.__u && (c = 32 & i.__u, s = i.__c.__z) && (r.__u |= c, p = e = [], 8 == s.nodeType ? l = z$1(s, e) : e.push(s), l = e[0] || l), (s = n.__b) && s(r);
+	128 & i.__u && (c = 32 & i.__u, s = i.__c.__z) && (r.__u |= c, p = e = [], 8 == s.nodeType ? l = z$2(s, e) : e.push(s), l = e[0] || l), (s = n.__b) && s(r);
 	n: if ("function" == typeof V) {
 		y = o.length;
 		try {
-			if ($ = r.props, C = (s = V.prototype) && s.render, j = (s = V.contextType) && u[s.__c], L = s ? j ? j.props.value : s.__ : u, (d = i.__c) ? (r.__c = d, 2 & d.__g && (d.__g |= 1)) : (C ? r.__c = d = new V($, L) : (r.__c = d = new x($, L), d.constructor = V, d.render = J), j && j.sub(d), d.state || (d.state = {}), d.__n = u, d.__g |= 8, d.__h = [], d.__k = []), C && (d.__s || (d.__s = d.state), V.getDerivedStateFromProps && (d.__s == d.state && (d.__s = _$1({}, d.__s)), _$1(d.__s, V.getDerivedStateFromProps($, d.__s)))), k = d.props, b = d.state, d.__v = r, i.__c) {
+			if ($ = r.props, C = (s = V.prototype) && s.render, j = (s = V.contextType) && u[s.__c], L = s ? j ? j.props.value : s.__ : u, (d = i.__c) ? (r.__c = d, 2 & d.__g && (d.__g |= 1)) : (C ? r.__c = d = new V($, L) : (r.__c = d = new x$1($, L), d.constructor = V, d.render = J$1), j && j.sub(d), d.state || (d.state = {}), d.__n = u, d.__g |= 8, d.__h = [], d.__k = []), C && (d.__s || (d.__s = d.state), V.getDerivedStateFromProps && (d.__s == d.state && (d.__s = _$1({}, d.__s)), _$1(d.__s, V.getDerivedStateFromProps($, d.__s)))), k = d.props, b = d.state, d.__v = r, i.__c) {
 				if ($ !== k && C && !V.getDerivedStateFromProps && d.componentWillReceiveProps && d.componentWillReceiveProps($, L), r.__v == i.__v && !(8 & d.__g) || !(4 & d.__g) && d.shouldComponentUpdate && !1 === d.shouldComponentUpdate($, d.__s, L)) {
 					r.__v != i.__v && (d.props = $, d.state = d.__s, d.__g &= -9), r.__e = i.__e, r.__k = i.__k, r.__k.some(function(n) {
 						n && (n.__ = r);
@@ -192,7 +197,7 @@ function V(t, r, i, u, f, e, o, l, c, a) {
 			while (8 & d.__g && ++q < 25);
 			d.state = d.__s, d.getChildContext && (u = _$1({}, u, d.getChildContext())), C && i.__c && d.getSnapshotBeforeUpdate && (m = d.getSnapshotBeforeUpdate(k, b)), A = s && s.type === M && null == s.key ? s.props.children : s, $.__P && (s = l, f = (t = $.__P).namespaceURI, c = e = null, i.props && i.props.__P != t && (i.__k.some(function(n) {
 				n && G$1(n, n);
-			}), i.__k = null), l = i.__k ? S(i, 0) : null), l = H(t, w$1(A) ? A : [A], r, i, u, f, e, o, l, c, a), $.__P && (r.__e = null, l = s), r.__u &= -161, p && p.some(g$1), d.__h.length && o.push(d), 1 & d.__g && (d.__g &= -4);
+			}), i.__k = null), l = i.__k ? S(i, 0) : null), l = H$1(t, w$2(A) ? A : [A], r, i, u, f, e, o, l, c, a), $.__P && (r.__e = null, l = s), r.__u &= -161, p && p.some(g$1), d.__h.length && o.push(d), 1 & d.__g && (d.__g &= -4);
 		} catch (t) {
 			if (o.length = y, r.__v = null, c || e) if (t.then) {
 				if (O = 0, r.__u |= 128 | c, e) {
@@ -208,7 +213,7 @@ function V(t, r, i, u, f, e, o, l, c, a) {
 					for (; l && 8 == l.nodeType && l.nextSibling;) l = l.nextSibling;
 					P = l;
 				}
-				(s = z$1(P = r.__c.__z || (r.__c.__z = P))) ? (r.__e = P, l = s) : r.__e = l, l = l && l.nextSibling;
+				(s = z$2(P = r.__c.__z || (r.__c.__z = P))) ? (r.__e = P, l = s) : r.__e = l, l = l && l.nextSibling;
 			} else e && e.some(g$1);
 			else r.__e = i.__e;
 			r.__k || (r.__k = i.__k || []), t.then || B$1(r), n.__e(t, r, i);
@@ -216,7 +221,7 @@ function V(t, r, i, u, f, e, o, l, c, a) {
 	} else l = r.__e = E$1(i.__e, r, i, u, f, e, o, c, a, t);
 	return (s = n.diffed) && s(r), l;
 }
-function z$1(n, t) {
+function z$2(n, t) {
 	if (n && 8 == n.nodeType && n.data.startsWith("$s")) for (var r = 1; n = n.nextSibling;) {
 		if (8 == n.nodeType) {
 			if (n.data.startsWith("$s")) r++;
@@ -256,7 +261,7 @@ function E$1(t, r, i, u, f, e, o, l, c, a) {
 		if (a = "template" == j && t.content || t, e = "textarea" == j && null != C.defaultValue ? null : e && d$1.call(a.childNodes), !l && e) for (x = {}, s = 0; s < t.attributes.length; s++) x[(k = t.attributes[s]).name] = k.value;
 		for (s in x) k = x[s], "dangerouslySetInnerHTML" == s ? v = k : "children" == s || s in C || "value" == s && "defaultValue" in C || "checked" == s && "defaultChecked" in C || T$1(t, s, null, k, f);
 		for (s in M = 1 & i.__u, C) k = C[s], "children" == s ? _ = k : "dangerouslySetInnerHTML" == s ? h = k : "value" == s ? b = k : "checked" == s ? m = k : l && "function" != typeof k || !(x[s] !== k || M && null != k) || T$1(t, s, k, x[s], f);
-		h ? (l || v && (h.__html == v.__html || h.__html == t.innerHTML) || (t.innerHTML = h.__html), r.__k = []) : (v && (t.textContent = ""), ("foreignObject" == j || "http://www.w3.org/1998/Math/MathML" == f && y$1.test(j)) && (f = "http://www.w3.org/1999/xhtml"), H(a, w$1(_) ? _ : [_], r, i, u, f, e, o, e ? e[0] : i.__k && S(i, 0), l, c), e && e.some(g$1)), l && "textarea" != j || (s = "value", "progress" == j && null == b ? t.removeAttribute(s) : null == b || b === t[s] && ("progress" != j || b) || T$1(t, s, b, x[s], f), s = "checked", null != m && m != t[s] && T$1(t, s, m, x[s], f));
+		h ? (l || v && (h.__html == v.__html || h.__html == t.innerHTML) || (t.innerHTML = h.__html), r.__k = []) : (v && (t.textContent = ""), ("foreignObject" == j || "http://www.w3.org/1998/Math/MathML" == f && y$1.test(j)) && (f = "http://www.w3.org/1999/xhtml"), H$1(a, w$2(_) ? _ : [_], r, i, u, f, e, o, e ? e[0] : i.__k && S(i, 0), l, c), e && e.some(g$1)), l && "textarea" != j || (s = "value", "progress" == j && null == b ? t.removeAttribute(s) : null == b || b === t[s] && ("progress" != j || b) || T$1(t, s, b, x[s], f), s = "checked", null != m && m != t[s] && T$1(t, s, m, x[s], f));
 	} else x === C || l && t.data == C || (t.data = C);
 	return t;
 }
@@ -278,14 +283,23 @@ function G$1(t, r, i) {
 		u.__P = u.__n = null;
 	}
 	if (u = t.__k) for (o = 0; o < u.length; o++) u[o] && G$1(u[o], r, "function" != typeof t.type || i && !t.props.__P);
-	!i && (u = t.__c) && (u = u.__z) && (f = z$1(u, e = [])) && (u == t.__e && e.some(g$1), g$1(f), g$1(u)), (u = t.__e) && (i || g$1(u), u.__e && (u.__e = null)), t.__e = t.__c = t.__ = null;
+	!i && (u = t.__c) && (u = u.__z) && (f = z$2(u, e = [])) && (u == t.__e && e.some(g$1), g$1(f), g$1(u)), (u = t.__e) && (i || g$1(u), u.__e && (u.__e = null)), t.__e = t.__c = t.__ = null;
 }
-function J(n, t, r) {
+function J$1(n, t, r) {
 	return this.constructor(n, r);
 }
-function K(t, r) {
+function K$1(t, r) {
 	var i, u, f, e;
 	n.__ && n.__(t, r), 9 == r.nodeType && (r = r.documentElement), u = (i = t && 32 & t.__u) ? null : r.__k, r.__k = m$1(M, { children: [t] }), f = [], e = [], V(r, r.__k, u || p$1, p$1, r.namespaceURI, u ? null : r.firstChild ? d$1.call(r.childNodes) : null, f, u ? u.__e : r.firstChild, i, e), D$1(f, r.__k, e), r.__k.props.children = null;
+}
+function U$1(n) {
+	return n.children;
+}
+function W(n, t) {
+	return m$1(U$1, {
+		__P: t,
+		children: n
+	});
 }
 n = { __e: function(n, t, r, i) {
 	for (var u, e, o; t = t.__;) if ((u = t.__c) && !(1 & u.__g)) {
@@ -297,12 +311,12 @@ n = { __e: function(n, t, r, i) {
 		}
 	}
 	throw f$1 = 0, n;
-} }, t$1 = 0, x.prototype.setState = function(n, t) {
+} }, t$1 = 0, x$1.prototype.setState = function(n, t) {
 	var r = this.__s;
 	r && r != this.state || (r = this.__s = _$1({}, this.state)), "function" == typeof n && (n = n(_$1({}, r), this.props)), n && (_$1(r, n), this.__v && (t && this.__k.push(t), j(this)));
-}, x.prototype.forceUpdate = function(n) {
+}, x$1.prototype.forceUpdate = function(n) {
 	this.__v && (this.__g |= 4, n && this.__h.push(n), j(this));
-}, x.prototype.render = M, i$1 = [], f$1 = 0, e$1 = function(n, t) {
+}, x$1.prototype.render = M, i$1 = [], f$1 = 0, e$1 = function(n, t) {
 	return n.__v.__b - t.__v.__b;
 }, o$1 = Symbol(), l$1 = /(PointerCapture)$|Capture$/i, c$1 = 0, a$1 = {};
 // node_modules/.pnpm/preact@11.1.1/node_modules/preact/hooks/dist/hooks.mjs
@@ -360,11 +374,11 @@ function A(n, u) {
 	!a.__s && E(i.__H, u) && (i.__P = !0, i.__ = n, i.u = u, r.__H.__h.push(i));
 }
 function T(n) {
-	return f = 5, w(function() {
+	return f = 5, w$1(function() {
 		return { current: n };
 	}, []);
 }
-function w(n, r) {
+function w$1(n, r) {
 	var u = y(t++, 7);
 	return E(u.__H, r) && (u.__ = n(), u.__H = r), u.__;
 }
@@ -432,14 +446,14 @@ a.__b = function(n) {
 	}), u.__H = void 0, t && a.__e(t, u.__v));
 };
 var k = "function" == typeof requestAnimationFrame;
-function z(n) {
+function z$1(n) {
 	var t, r = function() {
 		clearTimeout(u), k && cancelAnimationFrame(t), setTimeout(n);
 	}, u = setTimeout(r, 35);
 	k && (t = requestAnimationFrame(r));
 }
 function B(n) {
-	1 != n && i == a.requestAnimationFrame || ((i = a.requestAnimationFrame) || z)(g);
+	1 != n && i == a.requestAnimationFrame || ((i = a.requestAnimationFrame) || z$1)(g);
 }
 function C(n) {
 	var t = r, u = n.__c;
@@ -498,7 +512,10 @@ function TopBar() {
 		class: `top-walk-btn ${walkState.active ? `active phase-${walkState.phase}` : ""}`,
 		"aria-label": "边走边听",
 		title: walkState.active ? "边走边听运行中 · 点击展开" : "开启边走边听",
-		onClick: () => window.openWalkMode?.()
+		onClick: () => {
+			if (typeof window.switchTab === "function") window.switchTab("ai");
+			else window.openWalkMode?.();
+		}
 	}, /* @__PURE__ */ k$1("svg", {
 		width: "14",
 		height: "14",
@@ -562,7 +579,40 @@ function TopBar() {
 	})));
 }
 // hub/web/src/components/BottomTabs.tsx
+function countPendingApprovals(hubState) {
+	const hosts = Array.isArray(hubState?.hosts) ? hubState.hosts : [];
+	let total = 0;
+	for (const h of hosts) {
+		if (!h?.online) continue;
+		const apps = Array.isArray(h?.bridgeState?.approvals) ? h.bridgeState.approvals : [];
+		total += apps.length;
+	}
+	return total;
+}
 function BottomTabs() {
+	const [walkState, setWalkState] = d({
+		active: Boolean(window.__dshWalkModeOpen),
+		phase: "idle"
+	});
+	const [approvalCount, setApprovalCount] = d(() => countPendingApprovals(window.__dshLastHubState));
+	A(() => {
+		const onWalk = (ev) => {
+			const d = ev?.detail || {};
+			setWalkState({
+				active: Boolean(d.active),
+				phase: String(d.phase || "idle")
+			});
+		};
+		const onHub = (ev) => {
+			setApprovalCount(countPendingApprovals(ev?.detail || window.__dshLastHubState));
+		};
+		window.addEventListener("dsh:walk-state", onWalk);
+		window.addEventListener("dsh:hub-state", onHub);
+		return () => {
+			window.removeEventListener("dsh:walk-state", onWalk);
+			window.removeEventListener("dsh:hub-state", onHub);
+		};
+	}, []);
 	return /* @__PURE__ */ k$1("footer", { class: "bottom-tabs" }, /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: "tab-btn active",
@@ -570,10 +620,36 @@ function BottomTabs() {
 		onClick: () => window.switchTab?.("chats")
 	}, /* @__PURE__ */ k$1("span", { class: "icon" }, "💬"), /* @__PURE__ */ k$1("span", null, "对话")), /* @__PURE__ */ k$1("button", {
 		type: "button",
-		class: "tab-btn",
-		id: "tab-files",
-		onClick: () => window.switchTab?.("files")
-	}, /* @__PURE__ */ k$1("span", { class: "icon" }, "📂"), /* @__PURE__ */ k$1("span", null, "项目文件")), /* @__PURE__ */ k$1("button", {
+		class: `tab-btn tab-ai-hero ${walkState.active ? `is-live phase-${walkState.phase}` : ""}`,
+		id: "tab-ai",
+		"aria-label": "AI",
+		title: "AI 指挥中枢",
+		onClick: () => window.switchTab?.("ai")
+	}, /* @__PURE__ */ k$1("span", { class: `tab-ai-orb ${walkState.active ? `is-live phase-${walkState.phase}` : ""}` }, /* @__PURE__ */ k$1("svg", {
+		class: "tab-ai-bot-svg",
+		width: "26",
+		height: "26",
+		viewBox: "0 0 24 24",
+		fill: "none",
+		stroke: "currentColor",
+		"stroke-width": "2.1",
+		"stroke-linecap": "round",
+		"stroke-linejoin": "round",
+		"aria-hidden": "true"
+	}, /* @__PURE__ */ k$1("path", { d: "M12 8V4H8" }), /* @__PURE__ */ k$1("rect", {
+		width: "16",
+		height: "12",
+		x: "4",
+		y: "8",
+		rx: "3"
+	}), /* @__PURE__ */ k$1("path", { d: "M2 14h2" }), /* @__PURE__ */ k$1("path", { d: "M20 14h2" }), /* @__PURE__ */ k$1("path", { d: "M9 13v2" }), /* @__PURE__ */ k$1("path", { d: "M15 13v2" })), /* @__PURE__ */ k$1("svg", {
+		class: "tab-ai-sparkle-svg",
+		width: "12",
+		height: "12",
+		viewBox: "0 0 24 24",
+		fill: "currentColor",
+		"aria-hidden": "true"
+	}, /* @__PURE__ */ k$1("path", { d: "M12 2l2.1 5.9L20 10l-5.9 2.1L12 18l-2.1-5.9L4 10l5.9-2.1L12 2z" })), approvalCount > 0 ? /* @__PURE__ */ k$1("span", { class: "tab-ai-badge" }, approvalCount > 9 ? "9+" : approvalCount) : walkState.active ? /* @__PURE__ */ k$1("span", { class: "tab-ai-live-dot" }) : null)), /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: "tab-btn",
 		id: "tab-settings",
@@ -1208,6 +1284,90 @@ function Sheets() {
 		style: "flex:1;position:relative;background:#ffffff;overflow:auto;"
 	})));
 }
+// node_modules/.pnpm/preact@11.1.1/node_modules/preact/compat/dist/compat.mjs
+var w = Object.assign;
+var x = /^(-|f[lo].*[^se]$|g.{5,}[^ps]$|z|o[pr]|(W.{5})?[lL]i.*(t|mp)$|an|(bo|s).{4}Im|sca|m.{6}[ds]|ta|c.*[st]$|wido|ini|asp|fill|st)/;
+function U(n, t) {
+	var e = W(n, t);
+	return e.containerInfo = t, e;
+}
+var P = Symbol.for("react.element");
+var $ = /^(?:accent|alignment|arabic|baseline|cap|clip(?!PathU)|color|dominant|fill|flood|font|glyph(?!R)|horiz|image(?!S)|letter|lighting|marker(?!H|W|U)|overline|paint|pointer|shape|stop|strikethrough|stroke|text(?!L)|transform|underline|unicode|units|v|vector|vert|word|writing|x(?!C))[A-Z]/;
+var z = /[A-Z0-9]/g;
+var H = typeof document < "u";
+var Y = function(n) {
+	return /fil|che|rad/.test(n);
+};
+x$1.prototype.isReactComponent = !0, [
+	"componentWillMount",
+	"componentWillReceiveProps",
+	"componentWillUpdate"
+].forEach(function(n) {
+	Object.defineProperty(x$1.prototype, n, {
+		configurable: !0,
+		get: function() {
+			return this["UNSAFE_" + n];
+		},
+		set: function(t) {
+			Object.defineProperty(this, n, {
+				configurable: !0,
+				writable: !0,
+				value: t
+			});
+		}
+	});
+});
+var J = n.event;
+n.event = function(n) {
+	return J && (n = J(n)), n.persist = function() {}, n.isPropagationStopped = function() {
+		return this.cancelBubble;
+	}, n.isDefaultPrevented = function() {
+		return this.defaultPrevented;
+	}, n.nativeEvent = n;
+};
+var K = {
+	configurable: !0,
+	get: function() {
+		return this.class;
+	}
+};
+var Q = n.vnode;
+n.vnode = function(t) {
+	if ("string" == typeof t.type) (function(t) {
+		var e = t.props, r = t.type, u = {}, i = -1 == r.indexOf("-");
+		for (var o in e) {
+			var f = e[o];
+			if (!("value" == o && "defaultValue" in e && null == f || H && "children" == o && "noscript" == r || "class" == o || "className" == o)) {
+				if ("style" == o && f && f.constructor == Object) {
+					var a = void 0;
+					for (var c in f) "number" != typeof f[c] || x.test(c) || (a || (a = f = w({}, f)), f[c] += "px");
+				} else if ("defaultValue" == o && "value" in e && null == e.value) o = "value";
+				else if ("download" == o && !0 === f) f = "";
+				else if ("translate" == o && "no" === f) f = !1;
+				else if ("o" == o[0] && "n" == o[1]) {
+					var l = o.toLowerCase();
+					"ondoubleclick" == l ? o = "ondblclick" : "onchange" != l || "input" != r && "textarea" != r || Y(e.type) ? "onfocus" == l ? o = "onfocusin" : "onblur" == l && (o = "onfocusout") : l = o = "oninput", "oninput" == l && u[o = l] && (o = "oninputCapture");
+				} else i && $.test(o) ? o = o.replace(z, "-$&").toLowerCase() : null === f && (f = void 0);
+				u[o] = f;
+			}
+		}
+		"select" == r && (u.multiple && Array.isArray(u.value) && (u.value = A$1(e.children).forEach(function(n) {
+			n.props.selected = -1 != u.value.indexOf(n.props.value);
+		})), null != u.defaultValue && (u.value = A$1(e.children).forEach(function(n) {
+			n.props.selected = u.multiple ? -1 != u.defaultValue.indexOf(n.props.value) : u.defaultValue == n.props.value;
+		}))), e.class && !e.className ? (u.class = e.class, Object.defineProperty(u, "className", K)) : e.className && (u.class = u.className = e.className), t.props = u;
+	})(t);
+	else if ("function" == typeof t.type && ("ref" in t.props && "prototype" in t.type && t.type.prototype.render && (t.ref = t.props.ref, delete t.props.ref), t.type.defaultProps)) {
+		var e = w({}, t.props);
+		for (var r in t.type.defaultProps) void 0 === e[r] && (e[r] = t.type.defaultProps[r]);
+		t.props = e;
+	}
+	t.ref && !("ref" in t.props) && Object.defineProperty(t.props, "ref", {
+		value: t.ref,
+		configurable: !0,
+		writable: !0
+	}), t.$$typeof = P, Q && Q(t);
+};
 // hub/web/src/utils/i18n.js
 var EXACT_ZH_TO_EN = {
 	"🔒 DSH 远控总控台": "🔒 DSH Remote Control Hub",
@@ -3232,6 +3392,21 @@ var WalkSpeechPlayer = class {
 		} catch {}
 		setNativePlaybackVolume(v);
 	}
+	currentPlaybackRate = 1;
+	setPlaybackRate(rate) {
+		const r = Math.max(.75, Math.min(2, Math.round((Number(rate) || 1) * 20) / 20));
+		this.currentPlaybackRate = r;
+		if (this.activeSource) try {
+			this.activeSource.playbackRate.value = r;
+		} catch {}
+		if (this.activeAudio) try {
+			this.activeAudio.playbackRate = r;
+		} catch {}
+		return r;
+	}
+	getPlaybackRate() {
+		return this.currentPlaybackRate;
+	}
 	/**
 	* Call synchronously inside a user tap/click handler BEFORE any async fetch()
 	* so iOS Safari / Home-Screen PWA unlocks audio playback reliably across async TTS calls.
@@ -3319,6 +3494,9 @@ var WalkSpeechPlayer = class {
 				const gain = this.playbackCtx.createGain();
 				gain.gain.value = this.currentVolume;
 				src.buffer = decoded;
+				try {
+					src.playbackRate.value = this.currentPlaybackRate;
+				} catch {}
 				src.connect(gain);
 				gain.connect(this.playbackCtx.destination);
 				this.activeSource = src;
@@ -3342,6 +3520,9 @@ var WalkSpeechPlayer = class {
 		this.activeObjectUrl = url;
 		const audio = new Audio(url);
 		audio.playsInline = true;
+		try {
+			audio.playbackRate = this.currentPlaybackRate;
+		} catch {}
 		this.activeAudio = audio;
 		return new Promise((resolve) => {
 			const cleanup = (ok) => {
@@ -3390,6 +3571,7 @@ var WalkSpeechPlayer = class {
 	}
 	async speakChunksProgressive(chunks, { useCloudTts, fetchTts, speechRate = 1, duckMusicMode = false, keepAudioSessionAfter = false, allowNativeFallback = false, onFirstLatency, onStateChange, onCloudTtsError }) {
 		this.stop();
+		this.setPlaybackRate(speechRate);
 		const list = (chunks || []).map((c) => String(c || "").trim()).filter((c) => Boolean(c) && /[\p{L}\p{N}]/u.test(c));
 		if (list.length === 0) return;
 		const myRun = this.runId;
@@ -3554,7 +3736,7 @@ function bindWalkMediaSession(handlers) {
 var PURE_VOCAL_FILLER_RE = /^(?:嗯+|啊+|哦+|喔+|噢+|呃+|额+|唉+|哎+|诶+|欸+|哈+|呵+|嘿+|喂+|唔+|啧+|咳+|呀+|嘛+|吧+|嗯哼|嗯嗯|啊啊|哦哦|哈哈|呵呵|那个|就是|什么|对对|是吗|uh+|um+|ah+|oh+|hmm+|huh+|mhm+)$/i;
 var CASUAL_NON_APPROVAL_FILLER_RE = /^(?:好吧|行吧|yeah|ok|okay)$/i;
 var SEMANTIC_APPROVAL_DECISION_RE = /^(?:嗯)?(?:可以[呀啊吧的啦]?|行[呀啊吧啦]?|好的|好吧|好[呀啊啦]|没问题|没啥问题|执行吧|跑吧|让它跑吧?|过吧?|准了?|ok|okay|yes|yep|sure|goahead|不行|不要|算了|先别|别跑|别执行|不让|不准|no|nope)$/i;
-var EXPLICIT_COMMAND_RE = /(放行|批准|同意|允许|通过|拒绝|驳回|不同意|别执行|不要执行|取消|跳过|停止|停一下|停下来|别说了|闭嘴|暂停|下一条|下一个|重说|再说一遍|继续|确认码|选第|第[一二三四1234]|一号|二号|三号|四号|帮我|查看|汇报|进度|待审批|修改|改成|不要|\b(?:approve|allow|deny|reject|stop|skip|cancel|next|pause|repeat)\b|\d{3})/i;
+var EXPLICIT_COMMAND_RE = /(放行|批准|同意|允许|通过|拒绝|驳回|不同意|别执行|不要执行|取消|跳过|停止|停一下|停下来|别说了|闭嘴|暂停|下一条|下一个|上一条|上一个|重说|再说一遍|重播|重听|加速|快一点|快点|提速|减速|慢一点|慢点|放慢|倍速|原速|继续|新建|确认码|选第|第[一二三四1234]|一号|二号|三号|四号|帮我|查看|汇报|进度|待审批|修改|改成|不要|\b(?:approve|allow|deny|reject|stop|skip|cancel|next|prev|pause|repeat|faster|slower)\b|\d{3})/i;
 var STOP_ONLY_RE = /^(?:停|停下|停止|停一下|停下来|别说了|闭嘴|先停|暂停|跳过|下一条|不用说了|知道了|stop|skip|pause)$/i;
 function normalizeForEchoCompare(raw = "") {
 	return String(raw || "").toLowerCase().replace(/[\s`*_#>\-—~·.,，。！？!?：:;；、"'“”‘’()（）[\]【】]/g, "");
@@ -5438,6 +5620,7 @@ function summarizeHubState(state) {
 function VoiceCopilotSheets() {
 	const [walkOpen, setWalkOpenState] = d(false);
 	const [walkExpanded, setWalkExpanded] = d(false);
+	const [aiTabActive, setAiTabActive] = d(false);
 	const [chatScreenOpen, setChatScreenOpen] = d(false);
 	const [labOpen, setLabOpen] = d(false);
 	const [labInitialView, setLabInitialView] = d("walk");
@@ -5449,10 +5632,16 @@ function VoiceCopilotSheets() {
 	const [micLevel, setMicLevel] = d(0);
 	const [wakeLocked, setWakeLocked] = d(false);
 	const [lastUserText, setLastUserText] = d("");
-	const [lastReplyText, setLastReplyText] = d("戴上耳机，轻点下方大圆球，问我进度、审批或直接下达新任务。");
+	const [lastReplyText, setLastReplyText] = d("轻点下方圆麦说话：可核对新建任务、审批放行、查进度或操控任意电脑会话。");
 	const [lastActionBadge, setLastActionBadge] = d("");
 	const [lastLatencyBadge, setLastLatencyBadge] = d("");
 	const [walkReceipts, setWalkReceipts] = d([]);
+	const [activeDraft, setActiveDraft] = d(null);
+	const [draftSubmitting, setDraftSubmitting] = d(false);
+	const [queueItems, setQueueItems] = d([]);
+	const [queueCursor, setQueueCursor] = d(-1);
+	const [queuePaused, setQueuePaused] = d(false);
+	const [queueExpanded, setQueueExpanded] = d(false);
 	const [activePin, setActivePin] = d(null);
 	const [pinSecLeft, setPinSecLeft] = d(0);
 	const [walkTextInputOpen, setWalkTextInputOpen] = d(false);
@@ -5530,6 +5719,10 @@ function VoiceCopilotSheets() {
 	const focusedApprovalRef = T(null);
 	const focusedSessionRef = T(null);
 	const briefingQueueRef = T([]);
+	const queueItemsRef = T([]);
+	const queueCursorRef = T(-1);
+	const queuePausedRef = T(false);
+	const activeQueueItemIdRef = T("");
 	const drainingBriefingRef = T(false);
 	const walkOpenRef = T(false);
 	const walkPhaseRef = T(walkPhase);
@@ -5578,6 +5771,8 @@ function VoiceCopilotSheets() {
 				configRef.current = next;
 				setConfig(next);
 				if (data.activePin) setActivePin(data.activePin);
+				if (data.activeDraft !== void 0) setActiveDraft(data.activeDraft || null);
+				playerRef.current?.setPlaybackRate(next.prefs.speechRate || 1);
 				window.__dshVoiceConfig = next;
 				window.dispatchEvent(new CustomEvent("dsh:voice-config", { detail: next }));
 			}
@@ -5586,14 +5781,32 @@ function VoiceCopilotSheets() {
 		}
 	};
 	A(() => {
+		const onTabChange = (ev) => {
+			if (String(ev?.detail?.tab || "") === "ai") {
+				setAiTabActive(true);
+				setWalkOpen(true);
+				setWalkExpanded(true);
+				refreshConfig(true);
+			} else {
+				setAiTabActive(false);
+				setWalkExpanded(false);
+			}
+		};
+		window.addEventListener("dsh:tab-change", onTabChange);
+		return () => window.removeEventListener("dsh:tab-change", onTabChange);
+	}, []);
+	A(() => {
 		window.openWalkMode = (opts) => {
 			setWalkOpen(true);
-			setWalkExpanded(!opts?.minimized);
+			if (opts?.minimized) setWalkExpanded(false);
+			else if (typeof window.switchTab === "function") window.switchTab("ai");
+			else setWalkExpanded(true);
 			refreshConfig(true);
 		};
 		window.minimizeWalkMode = () => {
 			setWalkPrefsOpen(false);
 			setWalkExpanded(false);
+			if (aiTabActive && typeof window.switchTab === "function") window.switchTab("chats");
 		};
 		window.closeWalkMode = () => {
 			setWalkPrefsOpen(false);
@@ -6037,13 +6250,198 @@ function VoiceCopilotSheets() {
 		config.activeProfile?.id,
 		config.activeProfile?.tts?.provider
 	]);
+	const syncQueueState = (nextList, nextCursor = queueCursorRef.current) => {
+		const trimmed = nextList.slice(-20);
+		queueItemsRef.current = trimmed;
+		const clampedCursor = trimmed.length === 0 ? -1 : Math.max(0, Math.min(trimmed.length - 1, nextCursor));
+		queueCursorRef.current = clampedCursor;
+		setQueueItems(trimmed);
+		setQueueCursor(clampedCursor);
+	};
+	const updateQueueItemStatus = (itemId, patch) => {
+		if (!itemId) return;
+		const next = queueItemsRef.current.map((it) => it.id === itemId ? {
+			...it,
+			...patch
+		} : it);
+		syncQueueState(next);
+	};
+	const replayQueueItemAt = async (idx, { prefixResume = false } = {}) => {
+		const list = queueItemsRef.current;
+		if (idx < 0 || idx >= list.length) {
+			toast("📋 队列里没有更多条目了");
+			return;
+		}
+		const item = list[idx];
+		syncQueueState(list.map((it, i) => i === idx ? {
+			...it,
+			status: "playing"
+		} : it), idx);
+		activeQueueItemIdRef.current = item.id;
+		let text = String(item.spokenText || "").trim();
+		let chunks = Array.isArray(item.spokenChunks) && item.spokenChunks.length > 0 ? item.spokenChunks : [];
+		if (!text) {
+			try {
+				const data = await (await apiCall("/api/voice/briefing", {
+					method: "POST",
+					body: JSON.stringify({
+						kind: item.kind,
+						hostId: item.hostId,
+						code: item.code || "",
+						agentId: item.agentId || "",
+						profileId: configRef.current.activeProfile.id,
+						voiceSessionId: voiceSessionIdRef.current,
+						detailLevel: configRef.current.prefs.briefingDetail || "detailed"
+					})
+				})).json().catch(() => null);
+				text = String(data?.spokenReply || `${item.hostName}：${item.title}`).trim();
+				chunks = Array.isArray(data?.spokenChunks) && data.spokenChunks.length > 0 ? data.spokenChunks : [text];
+				if (data?.focusedApproval) focusedApprovalRef.current = data.focusedApproval;
+			} catch {
+				text = `${item.hostName}：${item.title}`;
+				chunks = [text];
+			}
+			updateQueueItemStatus(item.id, {
+				spokenText: text,
+				spokenChunks: chunks
+			});
+		}
+		const spoken = prefixResume && item.status === "partial" ? `刚才没说完，补充一下：${text}` : text;
+		const playChunks = prefixResume && item.status === "partial" ? [spoken] : chunks;
+		setLastReplyText(spoken);
+		setLastActionBadge(item.kind === "approval" ? `🔔 第 ${idx + 1}/${list.length} 条 · 待审批 ${item.code || ""}` : `✅ 第 ${idx + 1}/${list.length} 条 · 任务完成`);
+		await speakWalkReply(playChunks, void 0, { allowNativeFallback: item.kind === "approval" });
+		if (bargeInTriggeredRef.current) updateQueueItemStatus(item.id, { status: "partial" });
+		else updateQueueItemStatus(item.id, { status: "done" });
+	};
+	const applyPlaybackControl = async (ctrl) => {
+		if (!ctrl || !ctrl.kind) return;
+		if (ctrl.kind === "set_speed" && typeof ctrl.speechRate === "number") {
+			const rate = playerRef.current?.setPlaybackRate(ctrl.speechRate) ?? ctrl.speechRate;
+			setConfig((prev) => {
+				const next = {
+					...prev,
+					prefs: {
+						...prev.prefs,
+						speechRate: rate
+					}
+				};
+				configRef.current = next;
+				return next;
+			});
+			toast(`⏩ 播报语速已调至 ${rate}x`);
+			return;
+		}
+		if (ctrl.kind === "queue_pause") {
+			queuePausedRef.current = true;
+			setQueuePaused(true);
+			playerRef.current?.stop();
+			if (activeQueueItemIdRef.current) updateQueueItemStatus(activeQueueItemIdRef.current, { status: "partial" });
+			setWalkPhase("idle");
+			toast("⏸️ 已暂停播报队列");
+			return;
+		}
+		if (ctrl.kind === "queue_resume") {
+			queuePausedRef.current = false;
+			setQueuePaused(false);
+			const nextIdx = queueItemsRef.current.findIndex((it) => it.status === "partial" || it.status === "pending");
+			if (nextIdx >= 0) replayQueueItemAt(nextIdx, { prefixResume: true });
+			else if (briefingQueueRef.current.length > 0) drainBriefingQueue();
+			else toast("📋 当前没有待播报条目");
+			return;
+		}
+		if (ctrl.kind === "queue_next") {
+			playerRef.current?.stop();
+			if (activeQueueItemIdRef.current) updateQueueItemStatus(activeQueueItemIdRef.current, { status: "skipped" });
+			queuePausedRef.current = false;
+			setQueuePaused(false);
+			const list = queueItemsRef.current;
+			const cur = queueCursorRef.current;
+			const nextIdx = list.findIndex((it, i) => i > cur && it.status !== "done" && it.status !== "skipped");
+			if (nextIdx >= 0) replayQueueItemAt(nextIdx);
+			else if (cur + 1 < list.length) replayQueueItemAt(cur + 1);
+			else if (briefingQueueRef.current.length > 0) drainBriefingQueue();
+			else {
+				setWalkPhase("idle");
+				toast("📋 已经是最后一条了");
+			}
+			return;
+		}
+		if (ctrl.kind === "queue_prev") {
+			playerRef.current?.stop();
+			queuePausedRef.current = false;
+			setQueuePaused(false);
+			const prevIdx = Math.max(0, queueCursorRef.current - 1);
+			if (queueItemsRef.current.length > 0) replayQueueItemAt(prevIdx);
+			else toast("📋 暂无上一条记录");
+			return;
+		}
+		if (ctrl.kind === "queue_repeat") {
+			playerRef.current?.stop();
+			queuePausedRef.current = false;
+			setQueuePaused(false);
+			const cur = queueCursorRef.current >= 0 ? queueCursorRef.current : queueItemsRef.current.length - 1;
+			if (cur >= 0 && queueItemsRef.current[cur]) replayQueueItemAt(cur);
+			else if (lastReplyText) speakWalkReply([lastReplyText]);
+		}
+	};
+	const handleDraftCardAction = async (action) => {
+		if (draftSubmitting) return;
+		setDraftSubmitting(true);
+		try {
+			const res = await apiCall("/api/voice/draft/action", {
+				method: "POST",
+				body: JSON.stringify({
+					voiceSessionId: voiceSessionIdRef.current,
+					action,
+					dryRun: false
+				})
+			});
+			const data = await res.json().catch(() => ({
+				ok: false,
+				error: `HTTP ${res.status}`
+			}));
+			if (!res.ok || !data?.ok) {
+				toast(`⚠️ ${data?.error || "操作失败"}`);
+				return;
+			}
+			setActiveDraft(data.draftCard || null);
+			const reply = String(data.spokenReply || (action === "confirm" ? "已创建任务。" : "已取消新建任务。"));
+			setLastReplyText(reply);
+			const badge = action === "confirm" ? "✨ 已确认创建任务" : "🚫 已取消新建草稿";
+			setLastActionBadge(badge);
+			playEarcon(action === "confirm" ? "pin_ok" : "done");
+			const d = /* @__PURE__ */ new Date();
+			const timeStr = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}:${String(d.getSeconds()).padStart(2, "0")}`;
+			setWalkReceipts((prev) => [{
+				id: `${Date.now()}_card`,
+				time: timeStr,
+				heard: action === "confirm" ? "点击确认创建" : "点击取消草稿",
+				badge,
+				ok: action === "confirm"
+			}, ...prev].slice(0, 3));
+			const chunks = Array.isArray(data.spokenChunks) && data.spokenChunks.length > 0 ? data.spokenChunks : [reply];
+			speakWalkReply(chunks);
+		} finally {
+			setDraftSubmitting(false);
+		}
+	};
 	const drainBriefingQueue = async () => {
-		if (drainingBriefingRef.current || !walkOpenRef.current) return;
+		if (drainingBriefingRef.current || !walkOpenRef.current || queuePausedRef.current) return;
 		if (walkPhaseRef.current !== "idle") return;
 		const nextItem = briefingQueueRef.current.shift();
 		if (!nextItem) return;
 		drainingBriefingRef.current = true;
 		let startedAutoListen = false;
+		const qId = nextItem.queueItemId || "";
+		if (qId) {
+			activeQueueItemIdRef.current = qId;
+			const idx = queueItemsRef.current.findIndex((it) => it.id === qId);
+			syncQueueState(queueItemsRef.current.map((it) => it.id === qId ? {
+				...it,
+				status: "playing"
+			} : it), idx >= 0 ? idx : queueCursorRef.current);
+		}
 		try {
 			const cfg = configRef.current;
 			const duckMusic = cfg.prefs.duckMusicMode !== false;
@@ -6076,6 +6474,10 @@ function VoiceCopilotSheets() {
 			const fallbackText = nextItem.kind === "approval" ? `注意，${nextItem.hostName} 收到新的审批请求：${nextItem.title || nextItem.code}。请说放行或拒绝。` : `${nextItem.hostName} 上的任务「${nextItem.title || ""}」已完成。`;
 			const spokenText = String(data?.spokenReply || fallbackText).trim();
 			const chunks = Array.isArray(data?.spokenChunks) && data.spokenChunks.length > 0 ? data.spokenChunks : [spokenText];
+			if (qId) updateQueueItemStatus(qId, {
+				spokenText,
+				spokenChunks: chunks
+			});
 			if (data?.focusedApproval) focusedApprovalRef.current = data.focusedApproval;
 			if (data?.focusedSession?.hostId && data?.focusedSession?.agentId) focusedSessionRef.current = {
 				hostId: String(data.focusedSession.hostId),
@@ -6100,9 +6502,11 @@ function VoiceCopilotSheets() {
 				allowNativeFallback: nextItem.kind === "approval"
 			});
 			if (bargeInTriggeredRef.current) {
+				if (qId) updateQueueItemStatus(qId, { status: "partial" });
 				startedAutoListen = true;
 				return;
 			}
+			if (qId) updateQueueItemStatus(qId, { status: "done" });
 			const canListenAfterSpeak = wantsAutoListen ? micReadyForAutoListen || await canNativeAutoListenNow() : false;
 			if (canListenAfterSpeak && walkOpenRef.current && walkPhaseRef.current === "idle") {
 				startedAutoListen = true;
@@ -6128,19 +6532,38 @@ function VoiceCopilotSheets() {
 			const mode = configRef.current?.prefs?.proactiveBriefing || "approvals";
 			if (mode === "manual") return;
 			let enqueued = false;
+			const addedQueueItems = [];
 			for (const a of snap.approvals) {
 				const k = `${a.hostId}:${a.code}`;
 				if (seenApprovalsRef.current.has(k)) continue;
 				seenApprovalsRef.current.add(k);
-				briefingQueueRef.current.push({
+				const qItemId = `qi_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+				addedQueueItems.push({
+					id: qItemId,
+					kind: "approval",
+					priority: 0,
+					key: k,
+					hostId: a.hostId,
+					hostName: a.hostName,
+					code: a.code,
+					agentId: a.agentId,
+					title: a.title || a.code,
+					status: "pending",
+					createdAt: Date.now()
+				});
+				const insertIdx = briefingQueueRef.current.findIndex((q) => q.kind !== "approval");
+				const entry = {
 					kind: "approval",
 					key: k,
 					hostId: a.hostId,
 					hostName: a.hostName,
 					code: a.code,
 					agentId: a.agentId,
-					title: a.title
-				});
+					title: a.title,
+					queueItemId: qItemId
+				};
+				if (insertIdx >= 0) briefingQueueRef.current.splice(insertIdx, 0, entry);
+				else briefingQueueRef.current.push(entry);
 				enqueued = true;
 			}
 			if (mode === "all") {
@@ -6149,17 +6572,32 @@ function VoiceCopilotSheets() {
 					if (seenCompletedRef.current.has(c.key)) continue;
 					seenCompletedRef.current.add(c.key);
 					if (nowTs - (recentPushAgentsRef.current.get(`${c.hostId}:${c.agentId}`) || 0) < 18e3) continue;
+					const qItemId = `qi_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+					addedQueueItems.push({
+						id: qItemId,
+						kind: "completed",
+						priority: 1,
+						key: c.key,
+						hostId: c.hostId,
+						hostName: c.hostName,
+						agentId: c.agentId,
+						title: c.title || "任务完成",
+						status: "pending",
+						createdAt: Date.now()
+					});
 					briefingQueueRef.current.push({
 						kind: "completed",
 						key: c.key,
 						hostId: c.hostId,
 						hostName: c.hostName,
 						agentId: c.agentId,
-						title: c.title
+						title: c.title,
+						queueItemId: qItemId
 					});
 					enqueued = true;
 				}
 			}
+			if (addedQueueItems.length > 0) syncQueueState([...queueItemsRef.current, ...addedQueueItems]);
 			if (briefingQueueRef.current.length > 12) briefingQueueRef.current.splice(0, briefingQueueRef.current.length - 12);
 			if (enqueued && walkPhaseRef.current === "idle") drainBriefingQueue();
 		};
@@ -6326,6 +6764,13 @@ function VoiceCopilotSheets() {
 			const chunks = Array.isArray(data.spokenChunks) && data.spokenChunks.length ? data.spokenChunks : [reply];
 			setLastReplyText(reply);
 			setActivePin(data.pinChallenge || null);
+			if (data.draftCard !== void 0) setActiveDraft(data.draftCard || null);
+			if (data.focusedSession?.hostId && data.focusedSession?.agentId) focusedSessionRef.current = {
+				hostId: String(data.focusedSession.hostId),
+				agentId: String(data.focusedSession.agentId),
+				title: String(data.focusedSession.title || ""),
+				announcedAt: Date.now()
+			};
 			if (data.nextFocusedApproval !== void 0) focusedApprovalRef.current = data.nextFocusedApproval || null;
 			else if (data.execution?.executed) focusedApprovalRef.current = null;
 			const pushReceipt = (heard, badge, ok) => {
@@ -6341,9 +6786,24 @@ function VoiceCopilotSheets() {
 					ok
 				}, ...prev].slice(0, 3));
 			};
+			if (data.playbackControl && data.playbackControl.kind) {
+				const pc = data.playbackControl;
+				const pcBadge = pc.kind === "set_speed" ? `⏩ 语速 ${pc.speechRate}x` : pc.kind === "queue_next" ? "⏭️ 下一条" : pc.kind === "queue_prev" ? "⏮️ 上一条" : pc.kind === "queue_repeat" ? "🔁 重播" : pc.kind === "queue_pause" ? "⏸️ 已暂停播报" : "▶️ 继续播报";
+				setLastActionBadge(pcBadge);
+				pushReceipt(clean, pcBadge, true);
+				playEarcon("done");
+				await applyPlaybackControl(pc);
+				if (pc.kind === "set_speed" || pc.kind === "queue_pause") await speakWalkReply(chunks);
+				return;
+			}
 			if (data.fastPath === "l2_pin_matched") {
 				playEarcon("pin_ok");
 				const b = `🔓 确认码通过 · 已放行 ${data.action?.code || ""}`.trim();
+				setLastActionBadge(b);
+				pushReceipt(clean, b, true);
+			} else if (data.action?.type === "stage_new_task" || data.draftCard) {
+				playEarcon("listen");
+				const b = data.draftCard?.status === "awaiting_confirm" ? "📝 等待确认新建任务" : "📝 核对新建任务信息";
 				setLastActionBadge(b);
 				pushReceipt(clean, b, true);
 			} else if (data.execution?.requiresPin) {
@@ -6365,7 +6825,12 @@ function VoiceCopilotSheets() {
 					answer_question: `✅ 已提交选择${slotStr}`,
 					send_prompt: "📤 已发送追问",
 					create_task: "✨ 已新建任务",
-					stop_session: "⏹ 已发送停止指令"
+					stop_session: "⏹ 已发送停止指令",
+					focus_session: "🎯 已切换锁定会话",
+					pin_session: "📌 已更新置顶",
+					rename_session: "✏️ 已重命名会话",
+					switch_model: "🧠 已切换模型",
+					delete_session: "🗑️ 已删除会话"
 				}[data.execution.type] || `✅ ${data.execution.type}`;
 				setLastActionBadge(b);
 				pushReceipt(clean, b, true);
@@ -6843,18 +7308,43 @@ function VoiceCopilotSheets() {
 	else if (walkPhase === "speaking") statusMetaParts.push("正在播报 · 点字幕静音");
 	const statusSubline = statusMetaParts.join(" · ");
 	const isLongReply = (lastReplyText || "").length > 96;
-	return /* @__PURE__ */ k$1(M, null, walkOpen && walkExpanded && /* @__PURE__ */ k$1("div", {
+	const currentSpeed = Math.round((Number(config.prefs.speechRate) || 1) * 100) / 100;
+	const cyclePlaybackSpeed = () => {
+		const steps = [
+			1,
+			1.25,
+			1.5,
+			1.75,
+			2,
+			.75
+		];
+		const nextRate = steps[(steps.findIndex((s) => Math.abs(s - currentSpeed) < .06) + 1) % steps.length];
+		applyPlaybackControl({
+			kind: "set_speed",
+			speechRate: nextRate
+		});
+		updatePrefPatch({ speechRate: nextRate });
+	};
+	const aiMountNode = aiTabActive && typeof document !== "undefined" ? document.getElementById("aiTabMount") : null;
+	const walkCanvasEl = walkOpen && walkExpanded ? /* @__PURE__ */ k$1("div", {
 		id: "walkModeOverlay",
-		class: `walk-mode-overlay walk-phase-${walkPhase}`,
-		role: "dialog",
-		"aria-label": "随行耳机模式",
+		class: `walk-mode-overlay ${aiTabActive ? "is-tab-docked" : ""} walk-phase-${walkPhase}`,
+		role: aiTabActive ? "region" : "dialog",
+		"aria-label": "AI 语音中枢",
 		onClick: () => {
 			if (walkPrefsOpen) setWalkPrefsOpen(false);
+			if (queueExpanded) setQueueExpanded(false);
 		}
 	}, /* @__PURE__ */ k$1("div", {
 		class: "walk-top-bar",
 		onClick: (e) => e.stopPropagation()
-	}, /* @__PURE__ */ k$1("button", {
+	}, aiTabActive ? /* @__PURE__ */ k$1("button", {
+		type: "button",
+		class: "walk-speed-pill",
+		id: "walkSpeedPillBtn",
+		title: "点击切换播报语速（也可直接说「加速/慢一点」）",
+		onClick: cyclePlaybackSpeed
+	}, `${currentSpeed}x`) : /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: "walk-circle-nav-btn",
 		id: "walkMinimizeBtn",
@@ -6906,12 +7396,13 @@ function VoiceCopilotSheets() {
 		type: "button",
 		class: "walk-circle-nav-btn danger",
 		id: "walkExitBtn",
-		"aria-label": "结束边走边听",
-		title: "结束边走边听",
+		"aria-label": "暂停并结束后台监听",
+		title: "结束后台监听",
 		onClick: () => {
 			setWalkPrefsOpen(false);
 			setWalkExpanded(false);
 			setWalkOpen(false);
+			if (aiTabActive && typeof window.switchTab === "function") window.switchTab("chats");
 		}
 	}, /* @__PURE__ */ k$1("svg", {
 		width: "16",
@@ -6927,8 +7418,38 @@ function VoiceCopilotSheets() {
 		y1: "2",
 		x2: "12",
 		y2: "12"
-	}))))), /* @__PURE__ */ k$1("div", {
-		class: "walk-stage",
+	}))))), queueItems.length > 0 && /* @__PURE__ */ k$1("div", {
+		class: "walk-queue-wrap",
+		onClick: (e) => e.stopPropagation()
+	}, /* @__PURE__ */ k$1("div", { class: "walk-queue-bar" }, /* @__PURE__ */ k$1("button", {
+		type: "button",
+		class: "walk-queue-summary",
+		onClick: () => setQueueExpanded((v) => !v)
+	}, /* @__PURE__ */ k$1("span", null, `📋 队列 ${Math.max(1, queueCursor + 1)} / ${queueItems.length}`), queuePaused && /* @__PURE__ */ k$1("span", { class: "walk-queue-paused-tag" }, "已暂停")), /* @__PURE__ */ k$1("div", { class: "walk-queue-btns" }, /* @__PURE__ */ k$1("button", {
+		type: "button",
+		class: "walk-queue-btn",
+		title: "上一条",
+		onClick: () => void applyPlaybackControl({ kind: "queue_prev" })
+	}, "◀"), /* @__PURE__ */ k$1("button", {
+		type: "button",
+		class: "walk-queue-btn",
+		title: queuePaused ? "继续播报" : "暂停播报",
+		onClick: () => void applyPlaybackControl({ kind: queuePaused ? "queue_resume" : "queue_pause" })
+	}, queuePaused ? "▶" : "⏸"), /* @__PURE__ */ k$1("button", {
+		type: "button",
+		class: "walk-queue-btn",
+		title: "下一条",
+		onClick: () => void applyPlaybackControl({ kind: "queue_next" })
+	}, "⏭"))), queueExpanded && /* @__PURE__ */ k$1("div", { class: "walk-queue-list" }, queueItems.map((it, idx) => /* @__PURE__ */ k$1("button", {
+		type: "button",
+		key: it.id,
+		class: `walk-queue-item ${idx === queueCursor ? "is-current" : ""} status-${it.status}`,
+		onClick: () => {
+			setQueueExpanded(false);
+			replayQueueItemAt(idx, { prefixResume: it.status === "partial" });
+		}
+	}, /* @__PURE__ */ k$1("span", { class: "walk-queue-idx" }, `${idx + 1}.`), /* @__PURE__ */ k$1("span", { class: "walk-queue-kind" }, it.kind === "approval" ? "🔔" : "✅"), /* @__PURE__ */ k$1("span", { class: "walk-queue-title" }, `${it.hostName} · ${it.title}`), /* @__PURE__ */ k$1("span", { class: "walk-queue-st" }, it.status === "playing" ? "播报中" : it.status === "partial" ? "待补播" : it.status === "done" ? "已播" : it.status === "skipped" ? "已跳过" : "排队中"))))), /* @__PURE__ */ k$1("div", {
+		class: `walk-stage ${activeDraft || activePin ? "has-active-card" : ""}`,
 		onClick: () => {
 			if (walkPrefsOpen) {
 				setWalkPrefsOpen(false);
@@ -6940,7 +7461,7 @@ function VoiceCopilotSheets() {
 				toast("🔇 已跳过当前播报");
 			}
 		}
-	}, /* @__PURE__ */ k$1("button", {
+	}, !activeDraft && /* @__PURE__ */ k$1("button", {
 		type: "button",
 		class: `walk-status-strip ${hubSummary.approvals.length > 0 ? "has-approvals" : ""}`,
 		onClick: (e) => {
@@ -6948,7 +7469,21 @@ function VoiceCopilotSheets() {
 			setWalkPrefsOpen(false);
 			runBriefingTurn();
 		}
-	}, /* @__PURE__ */ k$1("span", { class: hubSummary.approvals.length > 0 ? "walk-strip-amber" : "" }, `${hubSummary.approvals.length} 项待审批`), /* @__PURE__ */ k$1("span", { class: "walk-strip-sep" }, "·"), /* @__PURE__ */ k$1("span", null, `${hubSummary.runningCount} 个任务运行中`)), activePin && /* @__PURE__ */ k$1("div", {
+	}, /* @__PURE__ */ k$1("span", { class: hubSummary.approvals.length > 0 ? "walk-strip-amber" : "" }, `${hubSummary.approvals.length} 项待审批`), /* @__PURE__ */ k$1("span", { class: "walk-strip-sep" }, "·"), /* @__PURE__ */ k$1("span", null, `${hubSummary.runningCount} 个任务运行中`)), activeDraft && /* @__PURE__ */ k$1("div", {
+		class: `walk-draft-card ${activeDraft.status === "awaiting_confirm" ? "is-ready" : ""}`,
+		id: "walkDraftCard",
+		onClick: (e) => e.stopPropagation()
+	}, /* @__PURE__ */ k$1("div", { class: "walk-draft-head" }, /* @__PURE__ */ k$1("span", null, activeDraft.status === "awaiting_confirm" ? "📝 新建任务核对单 · 等待确认" : "📝 正在核对新建任务信息"), /* @__PURE__ */ k$1("span", { class: "walk-draft-badge" }, activeDraft.createDir ? "✨ 新建工作区" : activeDraft.workspaceMode === "existing" ? "📂 已有项目" : "待选目录")), /* @__PURE__ */ k$1("div", { class: "walk-draft-rows" }, /* @__PURE__ */ k$1("div", { class: "walk-draft-row" }, /* @__PURE__ */ k$1("span", { class: "walk-draft-k" }, "电脑"), /* @__PURE__ */ k$1("span", { class: `walk-draft-v ${activeDraft.hostId ? "ok" : "pending"}` }, activeDraft.hostName || "🟡 待你指定（如 Air / mini）")), /* @__PURE__ */ k$1("div", { class: "walk-draft-row" }, /* @__PURE__ */ k$1("span", { class: "walk-draft-k" }, "工作区"), /* @__PURE__ */ k$1("span", { class: `walk-draft-v ${activeDraft.cwd ? "ok" : "pending"}` }, activeDraft.workspaceLabel || "🟡 已有项目 或 说「新建工作区叫…」")), /* @__PURE__ */ k$1("div", { class: "walk-draft-row" }, /* @__PURE__ */ k$1("span", { class: "walk-draft-k" }, "工具"), /* @__PURE__ */ k$1("span", { class: "walk-draft-v ok" }, activeDraft.harnessLabel || "Antigravity")), /* @__PURE__ */ k$1("div", { class: "walk-draft-row" }, /* @__PURE__ */ k$1("span", { class: "walk-draft-k" }, "任务"), /* @__PURE__ */ k$1("span", { class: `walk-draft-v ${activeDraft.prompt ? "ok" : "pending"}` }, activeDraft.prompt || "🟡 待你说明要做什么"))), /* @__PURE__ */ k$1("div", { class: "walk-draft-actions" }, activeDraft.status === "awaiting_confirm" && /* @__PURE__ */ k$1("button", {
+		type: "button",
+		class: "walk-draft-btn-ok",
+		disabled: draftSubmitting,
+		onClick: () => void handleDraftCardAction("confirm")
+	}, draftSubmitting ? "创建中…" : "✅ 确认创建"), /* @__PURE__ */ k$1("button", {
+		type: "button",
+		class: "walk-draft-btn-cancel",
+		disabled: draftSubmitting,
+		onClick: () => void handleDraftCardAction("cancel")
+	}, "取消"))), activePin && /* @__PURE__ */ k$1("div", {
 		class: "walk-pin-card",
 		onClick: (e) => e.stopPropagation()
 	}, /* @__PURE__ */ k$1("div", { class: "walk-pin-head" }, /* @__PURE__ */ k$1("span", null, "高危操作语音确认码"), /* @__PURE__ */ k$1("span", { class: "walk-pin-timer" }, `${pinSecLeft}s 后过期`)), /* @__PURE__ */ k$1("div", { class: "walk-pin-digits" }, activePin.pin.split("").join(" ")), /* @__PURE__ */ k$1("div", { class: "walk-pin-desc" }, `${activePin.summary || activePin.code} · 请念出上方 3 位数字放行，或说「拒绝」`), /* @__PURE__ */ k$1("div", { class: "walk-pin-actions" }, /* @__PURE__ */ k$1("button", {
@@ -6959,13 +7494,16 @@ function VoiceCopilotSheets() {
 		type: "button",
 		class: "walk-pin-btn-cancel",
 		onClick: () => void handleClearPin(false)
-	}, "取消弹窗"))), /* @__PURE__ */ k$1("div", { class: "walk-subtitle-box" }, lastUserText && /* @__PURE__ */ k$1("div", { class: "walk-user-line" }, `你：${lastUserText}`), /* @__PURE__ */ k$1("div", { class: `walk-reply-line ${isLongReply ? "compact" : ""}` }, lastReplyText), (lastActionBadge || lastLatencyBadge) && /* @__PURE__ */ k$1("div", { class: "walk-meta-row" }, lastActionBadge && /* @__PURE__ */ k$1("span", { class: "walk-action-tag" }, lastActionBadge), lastLatencyBadge && /* @__PURE__ */ k$1("span", { class: "walk-latency-tag" }, lastLatencyBadge)), walkReceipts.length > 0 && /* @__PURE__ */ k$1("div", {
+	}, "取消弹窗"))), /* @__PURE__ */ k$1("div", { class: "walk-subtitle-box" }, lastUserText && /* @__PURE__ */ k$1("div", { class: "walk-user-line" }, `你：${lastUserText}`), /* @__PURE__ */ k$1("div", { class: `walk-reply-line ${isLongReply || activeDraft ? "compact" : ""}` }, lastReplyText), (lastActionBadge || lastLatencyBadge) && /* @__PURE__ */ k$1("div", { class: "walk-meta-row" }, lastActionBadge && /* @__PURE__ */ k$1("span", { class: "walk-action-tag" }, lastActionBadge), lastLatencyBadge && /* @__PURE__ */ k$1("span", { class: "walk-latency-tag" }, lastLatencyBadge)), walkReceipts.length > 0 && !activeDraft && /* @__PURE__ */ k$1("div", {
 		class: "walk-receipt-log",
 		"aria-label": "近期语音执行记录"
 	}, walkReceipts.map((rc) => /* @__PURE__ */ k$1("div", {
 		key: rc.id,
 		class: `walk-receipt-item ${rc.ok ? "is-ok" : "is-warn"}`
-	}, /* @__PURE__ */ k$1("span", { class: "walk-receipt-time" }, rc.time), /* @__PURE__ */ k$1("span", { class: "walk-receipt-heard" }, `「${rc.heard}」`), /* @__PURE__ */ k$1("span", { class: "walk-receipt-badge" }, rc.badge))))), walkTextInputOpen && /* @__PURE__ */ k$1("div", {
+	}, /* @__PURE__ */ k$1("span", { class: "walk-receipt-time" }, rc.time), /* @__PURE__ */ k$1("span", { class: "walk-receipt-heard" }, `「${rc.heard}」`), /* @__PURE__ */ k$1("span", { class: "walk-receipt-badge" }, rc.badge)))))), /* @__PURE__ */ k$1("div", {
+		class: "walk-orb-dock",
+		onClick: (e) => e.stopPropagation()
+	}, walkTextInputOpen && /* @__PURE__ */ k$1("div", {
 		class: "walk-text-composer",
 		onClick: (e) => e.stopPropagation()
 	}, /* @__PURE__ */ k$1("input", {
@@ -6990,10 +7528,7 @@ function VoiceCopilotSheets() {
 			setWalkTextDraft("");
 			handleWalkUserText(t);
 		}
-	}, "发送"))), /* @__PURE__ */ k$1("div", {
-		class: "walk-orb-dock",
-		onClick: (e) => e.stopPropagation()
-	}, /* @__PURE__ */ k$1("div", { class: "walk-controls-row" }, /* @__PURE__ */ k$1("div", { class: "walk-side-btn-wrap" }, /* @__PURE__ */ k$1("button", {
+	}, "发送")), /* @__PURE__ */ k$1("div", { class: "walk-controls-row" }, /* @__PURE__ */ k$1("div", { class: "walk-side-btn-wrap" }, /* @__PURE__ */ k$1("button", {
 		type: "button",
 		id: "walkKeyboardBtn",
 		class: `walk-side-btn ${walkTextInputOpen ? "active" : ""}`,
@@ -7226,7 +7761,8 @@ function VoiceCopilotSheets() {
 		stroke: "currentColor",
 		"stroke-width": "2.2",
 		"stroke-linecap": "round"
-	}, /* @__PURE__ */ k$1("path", { d: "M18 15l-6-6-6 6" })))))), walkOpen && !walkExpanded && /* @__PURE__ */ k$1("div", {
+	}, /* @__PURE__ */ k$1("path", { d: "M18 15l-6-6-6 6" })))))) : null;
+	return /* @__PURE__ */ k$1(M, null, walkCanvasEl && (aiMountNode ? U(walkCanvasEl, aiMountNode) : walkCanvasEl), walkOpen && !walkExpanded && !aiTabActive && /* @__PURE__ */ k$1("div", {
 		id: "walkMiniBar",
 		class: `walk-mini-bar phase-${walkPhase} ${chatScreenOpen ? "in-chat" : ""}`,
 		role: "region",
@@ -7235,8 +7771,11 @@ function VoiceCopilotSheets() {
 		type: "button",
 		class: "walk-mini-main",
 		id: "walkMiniExpandBtn",
-		onClick: () => setWalkExpanded(true),
-		title: "点击展开全屏语音台"
+		onClick: () => {
+			if (typeof window.switchTab === "function") window.switchTab("ai");
+			else setWalkExpanded(true);
+		},
+		title: "点击切回 AI 语音中枢"
 	}, /* @__PURE__ */ k$1("span", {
 		class: `walk-mini-orb phase-${walkPhase}`,
 		"aria-hidden": "true"
@@ -7542,6 +8081,10 @@ function App() {
 	}, /* @__PURE__ */ k$1("span", { id: "pullRefreshLabel" }, "↓ 下拉刷新状态"))), /* @__PURE__ */ k$1("main", {
 		class: "main-viewport",
 		id: "mainViewport"
+	}), /* @__PURE__ */ k$1("div", {
+		id: "aiTabMount",
+		class: "ai-tab-mount",
+		style: "display:none;"
 	}), /* @__PURE__ */ k$1(BottomTabs, null), /* @__PURE__ */ k$1(TriageDeck, null)), /* @__PURE__ */ k$1(ChatStage, null), /* @__PURE__ */ k$1(Sheets, null), /* @__PURE__ */ k$1(VoiceCopilotSheets, null), /* @__PURE__ */ k$1("button", {
 		type: "button",
 		id: "scrollBottomBtn",
@@ -17623,13 +18166,19 @@ function initHubController() {
 			}
 		}
 		const searchBox = document.getElementById("searchAndFilterBox");
+		const mainVp = document.getElementById("mainViewport");
+		const aiMount = document.getElementById("aiTabMount");
 		document.body.classList.toggle("tab-settings-active", currentTab === "settings");
+		document.body.classList.toggle("tab-ai-active", currentTab === "ai");
+		if (mainVp) mainVp.style.display = currentTab === "ai" ? "none" : "";
+		if (aiMount) aiMount.style.display = currentTab === "ai" ? "flex" : "none";
 		const normalizedSessions = getNormalizedSessions();
 		if (currentTab === "chats") {
 			searchBox.style.display = hosts.length === 0 ? "none" : "block";
 			renderProjectStrip(normalizedSessions);
 			renderSessionList(normalizedSessions);
-		} else if (currentTab === "files") {
+		} else if (currentTab === "ai") searchBox.style.display = "none";
+		else if (currentTab === "files") {
 			searchBox.style.display = "none";
 			renderFilesTab(document.getElementById("mainViewport"));
 		} else {
@@ -23327,11 +23876,16 @@ function initHubController() {
 	}
 	async function jumpToSessionFiles(hostId, agentId, cwd) {
 		closeSheet("taskActionSheet");
-		closeMobileChat();
 		currentHostId = hostId;
 		fileProjectCwd = cwd;
-		switchTab("files");
-		await requestDirList(hostId, agentId, cwd, "");
+		if (agentId) {
+			openSession(hostId, agentId);
+			setTimeout(() => {
+				openInChatFileDrawer();
+			}, 60);
+			return;
+		}
+		showToast("📂 请先打开任意会话，点右上角「文件速览」浏览项目文件");
 	}
 	async function deleteTargetSession() {
 		if (!confirmSheetDelete) {
@@ -24117,6 +24671,11 @@ function initHubController() {
 		renderAll();
 	}
 	function switchTab(tab) {
+		if (tab === "files") {
+			if (activeSessionId) openInChatFileDrawer();
+			else showToast("📂 打开任意会话即可查看项目文件");
+			return;
+		}
 		if (tab === "settings" && currentTab === "settings" && settingsPanel.getActiveSubpage() !== "home") {
 			closeSettingsSubpage();
 			return;
@@ -24124,17 +24683,11 @@ function initHubController() {
 		if (currentTab === "settings" && tab !== "settings" && settingsPanel.getActiveSubpage() !== "home") closeSettingsSubpage();
 		currentTab = tab;
 		document.body.classList.toggle("tab-settings-active", currentTab === "settings");
+		document.body.classList.toggle("tab-ai-active", currentTab === "ai");
 		document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
-		document.getElementById("tab-" + tab).classList.add("active");
-		if (tab === "files") {
-			const hosts = hubState.hosts || [];
-			const host = currentHostId === "ALL_HOSTS" ? hosts[0] : hosts.find((h) => h.hostId === currentHostId);
-			if (host && !host.lastFsListing) {
-				const projs = getHostProjects(host);
-				const firstTask = (host.bridgeState?.tasks || [])[0];
-				if (projs[0]) requestDirList(host.hostId, firstTask?.id || "", projs[0].cwd, "");
-			}
-		}
+		const tabBtn = document.getElementById("tab-" + tab);
+		if (tabBtn) tabBtn.classList.add("active");
+		window.dispatchEvent(new CustomEvent("dsh:tab-change", { detail: { tab: currentTab } }));
 		renderAll();
 	}
 	function closeSheet(id) {
@@ -27005,6 +27558,6 @@ function initHubController() {
 // hub/web/src/main.tsx
 var root = document.getElementById("app");
 if (root) {
-	K(/* @__PURE__ */ k$1(App, null), root);
+	K$1(/* @__PURE__ */ k$1(App, null), root);
 	initHubController();
 }

@@ -1568,12 +1568,19 @@ export function initHubController() {
     }
 
     const searchBox = document.getElementById('searchAndFilterBox');
+    const mainVp = document.getElementById('mainViewport');
+    const aiMount = document.getElementById('aiTabMount');
     document.body.classList.toggle('tab-settings-active', currentTab === 'settings');
+    document.body.classList.toggle('tab-ai-active', currentTab === 'ai');
+    if (mainVp) mainVp.style.display = currentTab === 'ai' ? 'none' : '';
+    if (aiMount) aiMount.style.display = currentTab === 'ai' ? 'flex' : 'none';
     const normalizedSessions = getNormalizedSessions();
     if (currentTab === 'chats') {
       searchBox.style.display = hosts.length === 0 ? 'none' : 'block';
       renderProjectStrip(normalizedSessions);
       renderSessionList(normalizedSessions);
+    } else if (currentTab === 'ai') {
+      searchBox.style.display = 'none';
     } else if (currentTab === 'files') {
       searchBox.style.display = 'none';
       renderFilesTab(document.getElementById('mainViewport'));
@@ -8673,11 +8680,16 @@ export function initHubController() {
 
   async function jumpToSessionFiles(hostId, agentId, cwd) {
     closeSheet('taskActionSheet');
-    closeMobileChat();
     currentHostId = hostId;
     fileProjectCwd = cwd;
-    switchTab('files');
-    await requestDirList(hostId, agentId, cwd, '');
+    if (agentId) {
+      openSession(hostId, agentId);
+      setTimeout(() => {
+        void openInChatFileDrawer();
+      }, 60);
+      return;
+    }
+    showToast('📂 请先打开任意会话，点右上角「文件速览」浏览项目文件');
   }
 
   async function deleteTargetSession() {
@@ -9576,6 +9588,14 @@ export function initHubController() {
   }
 
   function switchTab(tab) {
+    if (tab === 'files') {
+      if (activeSessionId) {
+        void openInChatFileDrawer();
+      } else {
+        showToast('📂 打开任意会话即可查看项目文件');
+      }
+      return;
+    }
     if (tab === 'settings' && currentTab === 'settings' && settingsPanel.getActiveSubpage() !== 'home') {
       closeSettingsSubpage();
       return;
@@ -9585,19 +9605,11 @@ export function initHubController() {
     }
     currentTab = tab;
     document.body.classList.toggle('tab-settings-active', currentTab === 'settings');
+    document.body.classList.toggle('tab-ai-active', currentTab === 'ai');
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-    document.getElementById('tab-' + tab).classList.add('active');
-    if (tab === 'files') {
-      const hosts = hubState.hosts || [];
-      const host = currentHostId === 'ALL_HOSTS' ? hosts[0] : hosts.find(h => h.hostId === currentHostId);
-      if (host && !host.lastFsListing) {
-        const projs = getHostProjects(host);
-        const firstTask = (host.bridgeState?.tasks || [])[0];
-        if (projs[0]) {
-          requestDirList(host.hostId, firstTask?.id || '', projs[0].cwd, '');
-        }
-      }
-    }
+    const tabBtn = document.getElementById('tab-' + tab);
+    if (tabBtn) tabBtn.classList.add('active');
+    window.dispatchEvent(new CustomEvent('dsh:tab-change', { detail: { tab: currentTab } }));
     renderAll();
   }
 

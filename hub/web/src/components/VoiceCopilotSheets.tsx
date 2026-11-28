@@ -1,4 +1,5 @@
 import { h, Fragment } from 'preact';
+import { createPortal } from 'preact/compat';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { applyLangToDom, getLangPref } from '../utils/i18n.js';
 import {
@@ -37,6 +38,38 @@ interface PinChallenge {
   summary: string;
   reason: string;
   expiresAt: number;
+}
+
+interface DraftCard {
+  id: string;
+  status: 'collecting' | 'awaiting_confirm';
+  hostId: string;
+  hostName: string;
+  workspaceMode: '' | 'existing' | 'new';
+  cwd: string;
+  workspaceLabel: string;
+  newWorkspaceName: string;
+  createDir: boolean;
+  harness: string;
+  harnessLabel: string;
+  prompt: string;
+  missingFields: string[];
+}
+
+interface BroadcastQueueItem {
+  id: string;
+  kind: 'approval' | 'completed';
+  priority: number; // 0 = approval (P0), 1 = completed (P1)
+  key: string;
+  hostId: string;
+  hostName: string;
+  code?: string;
+  agentId?: string;
+  title: string;
+  spokenText?: string;
+  spokenChunks?: string[];
+  status: 'pending' | 'playing' | 'partial' | 'done' | 'skipped';
+  createdAt: number;
 }
 
 const DEFAULT_CONFIG: VoiceConfigState = {
@@ -173,6 +206,7 @@ function summarizeHubState(state: any) {
 export function VoiceCopilotSheets() {
   const [walkOpen, setWalkOpenState] = useState(false); // Mode active (engine + background audio + briefings)
   const [walkExpanded, setWalkExpanded] = useState(false); // Full-screen canvas vs minimized Apple Music-style Mini Bar
+  const [aiTabActive, setAiTabActive] = useState(false); // Docked inside bottom center AI Tab
   const [chatScreenOpen, setChatScreenOpen] = useState(false);
   const [labOpen, setLabOpen] = useState(false);
   const [labInitialView, setLabInitialView] = useState<'models' | 'walk' | 'chat' | 'add' | 'bench'>('walk');
@@ -186,10 +220,16 @@ export function VoiceCopilotSheets() {
   const [micLevel, setMicLevel] = useState(0);
   const [wakeLocked, setWakeLocked] = useState(false);
   const [lastUserText, setLastUserText] = useState('');
-  const [lastReplyText, setLastReplyText] = useState('戴上耳机，轻点下方大圆球，问我进度、审批或直接下达新任务。');
+  const [lastReplyText, setLastReplyText] = useState('轻点下方圆麦说话：可核对新建任务、审批放行、查进度或操控任意电脑会话。');
   const [lastActionBadge, setLastActionBadge] = useState('');
   const [lastLatencyBadge, setLastLatencyBadge] = useState('');
   const [walkReceipts, setWalkReceipts] = useState<Array<{ id: string; time: string; heard: string; badge: string; ok: boolean }>>([]);
+  const [activeDraft, setActiveDraft] = useState<DraftCard | null>(null);
+  const [draftSubmitting, setDraftSubmitting] = useState(false);
+  const [queueItems, setQueueItems] = useState<BroadcastQueueItem[]>([]);
+  const [queueCursor, setQueueCursor] = useState(-1);
+  const [queuePaused, setQueuePaused] = useState(false);
+  const [queueExpanded, setQueueExpanded] = useState(false);
   const [activePin, setActivePin] = useState<PinChallenge | null>(null);
   const [pinSecLeft, setPinSecLeft] = useState(0);
   const [walkTextInputOpen, setWalkTextInputOpen] = useState(false);
@@ -277,7 +317,11 @@ export function VoiceCopilotSheets() {
   const recentPushAgentsRef = useRef<Map<string, number>>(new Map());
   const focusedApprovalRef = useRef<{ hostId: string; code: string; slot?: number; announcedAt?: number } | null>(null);
   const focusedSessionRef = useRef<{ hostId: string; agentId: string; title?: string; announcedAt: number } | null>(null);
-  const briefingQueueRef = useRef<Array<{ kind: 'approval' | 'completed'; key: string; hostId: string; hostName: string; code?: string; agentId?: string; title?: string }>>([]);
+  const briefingQueueRef = useRef<Array<{ kind: 'approval' | 'completed'; key: string; hostId: string; hostName: string; code?: string; agentId?: string; title?: string; queueItemId?: string }>>([]);
+  const queueItemsRef = useRef<BroadcastQueueItem[]>([]);
+  const queueCursorRef = useRef(-1);
+  const queuePausedRef = useRef(false);
+  const activeQueueItemIdRef = useRef('');
   const drainingBriefingRef = useRef(false);
   const walkOpenRef = useRef(false);
   const walkPhaseRef = useRef(walkPhase);
@@ -323,6 +367,8 @@ export function VoiceCopilotSheets() {
         configRef.current = next;
         setConfig(next);
         if (data.activePin) setActivePin(data.activePin);
+        if (data.activeDraft !== undefined) setActiveDraft(data.activeDraft || null);
+        playerRef.current?.setPlaybackRate(next.prefs.speechRate || 1.0);
         (window as any).__dshVoiceConfig = next;
         window.dispatchEvent(new CustomEvent('dsh:voice-config', { detail: next }));
       }
@@ -333,16 +379,43 @@ export function VoiceCopilotSheets() {
     }
   };
 
+  // Sync with bottom center AI tab (`switchTab('ai')`)
+  useEffect(() => {
+    const onTabChange = (ev: any) => {
+      const nextTab = String(ev?.detail?.tab || '');
+      if (nextTab === 'ai') {
+        setAiTabActive(true);
+        setWalkOpen(true);
+        setWalkExpanded(true);
+        void refreshConfig(true);
+      } else {
+        setAiTabActive(false);
+        setWalkExpanded(false);
+      }
+    };
+    window.addEventListener('dsh:tab-change', onTabChange);
+    return () => window.removeEventListener('dsh:tab-change', onTabChange);
+  }, []);
+
   // Expose global openers & chat BYOK helpers on window
   useEffect(() => {
     (window as any).openWalkMode = (opts?: { minimized?: boolean }) => {
       setWalkOpen(true);
-      setWalkExpanded(!opts?.minimized);
+      if (opts?.minimized) {
+        setWalkExpanded(false);
+      } else if (typeof (window as any).switchTab === 'function') {
+        (window as any).switchTab('ai');
+      } else {
+        setWalkExpanded(true);
+      }
       void refreshConfig(true);
     };
     (window as any).minimizeWalkMode = () => {
       setWalkPrefsOpen(false);
       setWalkExpanded(false);
+      if (aiTabActive && typeof (window as any).switchTab === 'function') {
+        (window as any).switchTab('chats');
+      }
     };
     (window as any).closeWalkMode = () => {
       setWalkPrefsOpen(false);
@@ -871,13 +944,213 @@ export function VoiceCopilotSheets() {
     config.activeProfile?.tts?.provider,
   ]);
 
+  const syncQueueState = (nextList: BroadcastQueueItem[], nextCursor = queueCursorRef.current) => {
+    const trimmed = nextList.slice(-20);
+    queueItemsRef.current = trimmed;
+    const clampedCursor = trimmed.length === 0 ? -1 : Math.max(0, Math.min(trimmed.length - 1, nextCursor));
+    queueCursorRef.current = clampedCursor;
+    setQueueItems(trimmed);
+    setQueueCursor(clampedCursor);
+  };
+
+  const updateQueueItemStatus = (itemId: string, patch: Partial<BroadcastQueueItem>) => {
+    if (!itemId) return;
+    const next = queueItemsRef.current.map(it => (it.id === itemId ? { ...it, ...patch } : it));
+    syncQueueState(next);
+  };
+
+  const replayQueueItemAt = async (idx: number, { prefixResume = false } = {}) => {
+    const list = queueItemsRef.current;
+    if (idx < 0 || idx >= list.length) {
+      toast('📋 队列里没有更多条目了');
+      return;
+    }
+    const item = list[idx];
+    syncQueueState(
+      list.map((it, i) => (i === idx ? { ...it, status: 'playing' } : it)),
+      idx,
+    );
+    activeQueueItemIdRef.current = item.id;
+    let text = String(item.spokenText || '').trim();
+    let chunks = Array.isArray(item.spokenChunks) && item.spokenChunks.length > 0 ? item.spokenChunks : [];
+    if (!text) {
+      try {
+        const res = await apiCall('/api/voice/briefing', {
+          method: 'POST',
+          body: JSON.stringify({
+            kind: item.kind,
+            hostId: item.hostId,
+            code: item.code || '',
+            agentId: item.agentId || '',
+            profileId: configRef.current.activeProfile.id,
+            voiceSessionId: voiceSessionIdRef.current,
+            detailLevel: configRef.current.prefs.briefingDetail || 'detailed',
+          }),
+        });
+        const data = await res.json().catch(() => null);
+        text = String(data?.spokenReply || `${item.hostName}：${item.title}`).trim();
+        chunks = Array.isArray(data?.spokenChunks) && data.spokenChunks.length > 0 ? data.spokenChunks : [text];
+        if (data?.focusedApproval) focusedApprovalRef.current = data.focusedApproval;
+      } catch {
+        text = `${item.hostName}：${item.title}`;
+        chunks = [text];
+      }
+      updateQueueItemStatus(item.id, { spokenText: text, spokenChunks: chunks });
+    }
+    const spoken = prefixResume && item.status === 'partial'
+      ? `刚才没说完，补充一下：${text}`
+      : text;
+    const playChunks = prefixResume && item.status === 'partial' ? [spoken] : chunks;
+    setLastReplyText(spoken);
+    setLastActionBadge(
+      item.kind === 'approval'
+        ? `🔔 第 ${idx + 1}/${list.length} 条 · 待审批 ${item.code || ''}`
+        : `✅ 第 ${idx + 1}/${list.length} 条 · 任务完成`,
+    );
+    await speakWalkReply(playChunks, undefined, { allowNativeFallback: item.kind === 'approval' });
+    if (bargeInTriggeredRef.current) {
+      updateQueueItemStatus(item.id, { status: 'partial' });
+    } else {
+      updateQueueItemStatus(item.id, { status: 'done' });
+    }
+  };
+
+  const applyPlaybackControl = async (ctrl: { kind: string; speechRate?: number; spokenReply?: string }) => {
+    if (!ctrl || !ctrl.kind) return;
+    if (ctrl.kind === 'set_speed' && typeof ctrl.speechRate === 'number') {
+      const rate = playerRef.current?.setPlaybackRate(ctrl.speechRate) ?? ctrl.speechRate;
+      setConfig(prev => {
+        const next = { ...prev, prefs: { ...prev.prefs, speechRate: rate } };
+        configRef.current = next;
+        return next;
+      });
+      toast(`⏩ 播报语速已调至 ${rate}x`);
+      return;
+    }
+    if (ctrl.kind === 'queue_pause') {
+      queuePausedRef.current = true;
+      setQueuePaused(true);
+      playerRef.current?.stop();
+      if (activeQueueItemIdRef.current) {
+        updateQueueItemStatus(activeQueueItemIdRef.current, { status: 'partial' });
+      }
+      setWalkPhase('idle');
+      toast('⏸️ 已暂停播报队列');
+      return;
+    }
+    if (ctrl.kind === 'queue_resume') {
+      queuePausedRef.current = false;
+      setQueuePaused(false);
+      const list = queueItemsRef.current;
+      const nextIdx = list.findIndex(it => it.status === 'partial' || it.status === 'pending');
+      if (nextIdx >= 0) {
+        void replayQueueItemAt(nextIdx, { prefixResume: true });
+      } else if (briefingQueueRef.current.length > 0) {
+        void drainBriefingQueue();
+      } else {
+        toast('📋 当前没有待播报条目');
+      }
+      return;
+    }
+    if (ctrl.kind === 'queue_next') {
+      playerRef.current?.stop();
+      if (activeQueueItemIdRef.current) {
+        updateQueueItemStatus(activeQueueItemIdRef.current, { status: 'skipped' });
+      }
+      queuePausedRef.current = false;
+      setQueuePaused(false);
+      const list = queueItemsRef.current;
+      const cur = queueCursorRef.current;
+      const nextIdx = list.findIndex((it, i) => i > cur && it.status !== 'done' && it.status !== 'skipped');
+      if (nextIdx >= 0) {
+        void replayQueueItemAt(nextIdx);
+      } else if (cur + 1 < list.length) {
+        void replayQueueItemAt(cur + 1);
+      } else if (briefingQueueRef.current.length > 0) {
+        void drainBriefingQueue();
+      } else {
+        setWalkPhase('idle');
+        toast('📋 已经是最后一条了');
+      }
+      return;
+    }
+    if (ctrl.kind === 'queue_prev') {
+      playerRef.current?.stop();
+      queuePausedRef.current = false;
+      setQueuePaused(false);
+      const prevIdx = Math.max(0, queueCursorRef.current - 1);
+      if (queueItemsRef.current.length > 0) {
+        void replayQueueItemAt(prevIdx);
+      } else {
+        toast('📋 暂无上一条记录');
+      }
+      return;
+    }
+    if (ctrl.kind === 'queue_repeat') {
+      playerRef.current?.stop();
+      queuePausedRef.current = false;
+      setQueuePaused(false);
+      const cur = queueCursorRef.current >= 0 ? queueCursorRef.current : queueItemsRef.current.length - 1;
+      if (cur >= 0 && queueItemsRef.current[cur]) {
+        void replayQueueItemAt(cur);
+      } else if (lastReplyText) {
+        void speakWalkReply([lastReplyText]);
+      }
+    }
+  };
+
+  const handleDraftCardAction = async (action: 'confirm' | 'cancel') => {
+    if (draftSubmitting) return;
+    setDraftSubmitting(true);
+    try {
+      const res = await apiCall('/api/voice/draft/action', {
+        method: 'POST',
+        body: JSON.stringify({
+          voiceSessionId: voiceSessionIdRef.current,
+          action,
+          dryRun: false,
+        }),
+      });
+      const data = await res.json().catch(() => ({ ok: false, error: `HTTP ${res.status}` }));
+      if (!res.ok || !data?.ok) {
+        toast(`⚠️ ${data?.error || '操作失败'}`);
+        return;
+      }
+      setActiveDraft(data.draftCard || null);
+      const reply = String(data.spokenReply || (action === 'confirm' ? '已创建任务。' : '已取消新建任务。'));
+      setLastReplyText(reply);
+      const badge = action === 'confirm' ? '✨ 已确认创建任务' : '🚫 已取消新建草稿';
+      setLastActionBadge(badge);
+      playEarcon(action === 'confirm' ? 'pin_ok' : 'done');
+      const d = new Date();
+      const timeStr = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`;
+      setWalkReceipts(prev => [
+        { id: `${Date.now()}_card`, time: timeStr, heard: action === 'confirm' ? '点击确认创建' : '点击取消草稿', badge, ok: action === 'confirm' },
+        ...prev,
+      ].slice(0, 3));
+      const chunks = Array.isArray(data.spokenChunks) && data.spokenChunks.length > 0 ? data.spokenChunks : [reply];
+      void speakWalkReply(chunks);
+    } finally {
+      setDraftSubmitting(false);
+    }
+  };
+
   const drainBriefingQueue = async () => {
-    if (drainingBriefingRef.current || !walkOpenRef.current) return;
+    if (drainingBriefingRef.current || !walkOpenRef.current || queuePausedRef.current) return;
     if (walkPhaseRef.current !== 'idle') return;
     const nextItem = briefingQueueRef.current.shift();
     if (!nextItem) return;
     drainingBriefingRef.current = true;
     let startedAutoListen = false;
+    const qId = nextItem.queueItemId || '';
+    if (qId) {
+      activeQueueItemIdRef.current = qId;
+      const idx = queueItemsRef.current.findIndex(it => it.id === qId);
+      syncQueueState(
+        queueItemsRef.current.map(it => (it.id === qId ? { ...it, status: 'playing' } : it)),
+        idx >= 0 ? idx : queueCursorRef.current,
+      );
+    }
     try {
       const cfg = configRef.current;
       const duckMusic = cfg.prefs.duckMusicMode !== false;
@@ -929,6 +1202,9 @@ export function VoiceCopilotSheets() {
         : `${nextItem.hostName} 上的任务「${nextItem.title || ''}」已完成。`;
       const spokenText = String(data?.spokenReply || fallbackText).trim();
       const chunks = Array.isArray(data?.spokenChunks) && data.spokenChunks.length > 0 ? data.spokenChunks : [spokenText];
+      if (qId) {
+        updateQueueItemStatus(qId, { spokenText, spokenChunks: chunks });
+      }
       if (data?.focusedApproval) {
         focusedApprovalRef.current = data.focusedApproval;
       }
@@ -976,9 +1252,11 @@ export function VoiceCopilotSheets() {
       });
 
       if (bargeInTriggeredRef.current) {
+        if (qId) updateQueueItemStatus(qId, { status: 'partial' });
         startedAutoListen = true;
         return;
       }
+      if (qId) updateQueueItemStatus(qId, { status: 'done' });
 
       const canListenAfterSpeak = wantsAutoListen
         ? (micReadyForAutoListen || await canNativeAutoListenNow())
@@ -1021,19 +1299,39 @@ export function VoiceCopilotSheets() {
       if (mode === 'manual') return;
 
       let enqueued = false;
+      const addedQueueItems: BroadcastQueueItem[] = [];
       for (const a of snap.approvals) {
         const k = `${a.hostId}:${a.code}`;
         if (seenApprovalsRef.current.has(k)) continue;
         seenApprovalsRef.current.add(k);
-        briefingQueueRef.current.push({
+        const qItemId = `qi_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+        addedQueueItems.push({
+          id: qItemId,
           kind: 'approval',
+          priority: 0,
+          key: k,
+          hostId: a.hostId,
+          hostName: a.hostName,
+          code: a.code,
+          agentId: a.agentId,
+          title: a.title || a.code,
+          status: 'pending',
+          createdAt: Date.now(),
+        });
+        // P0 approvals go ahead of pending completed items while keeping FIFO among approvals
+        const insertIdx = briefingQueueRef.current.findIndex(q => q.kind !== 'approval');
+        const entry = {
+          kind: 'approval' as const,
           key: k,
           hostId: a.hostId,
           hostName: a.hostName,
           code: a.code,
           agentId: a.agentId,
           title: a.title,
-        });
+          queueItemId: qItemId,
+        };
+        if (insertIdx >= 0) briefingQueueRef.current.splice(insertIdx, 0, entry);
+        else briefingQueueRef.current.push(entry);
         enqueued = true;
       }
 
@@ -1045,6 +1343,19 @@ export function VoiceCopilotSheets() {
           // Avoid duplicate briefing if APNs fast-path just enqueued this exact task seconds ago
           const pushedAt = recentPushAgentsRef.current.get(`${c.hostId}:${c.agentId}`) || 0;
           if (nowTs - pushedAt < 18_000) continue;
+          const qItemId = `qi_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+          addedQueueItems.push({
+            id: qItemId,
+            kind: 'completed',
+            priority: 1,
+            key: c.key,
+            hostId: c.hostId,
+            hostName: c.hostName,
+            agentId: c.agentId,
+            title: c.title || '任务完成',
+            status: 'pending',
+            createdAt: Date.now(),
+          });
           briefingQueueRef.current.push({
             kind: 'completed',
             key: c.key,
@@ -1052,9 +1363,14 @@ export function VoiceCopilotSheets() {
             hostName: c.hostName,
             agentId: c.agentId,
             title: c.title,
+            queueItemId: qItemId,
           });
           enqueued = true;
         }
+      }
+
+      if (addedQueueItems.length > 0) {
+        syncQueueState([...queueItemsRef.current, ...addedQueueItems]);
       }
 
       if (briefingQueueRef.current.length > 12) {
@@ -1276,6 +1592,17 @@ export function VoiceCopilotSheets() {
       const chunks = Array.isArray(data.spokenChunks) && data.spokenChunks.length ? data.spokenChunks : [reply];
       setLastReplyText(reply);
       setActivePin(data.pinChallenge || null);
+      if (data.draftCard !== undefined) {
+        setActiveDraft(data.draftCard || null);
+      }
+      if (data.focusedSession?.hostId && data.focusedSession?.agentId) {
+        focusedSessionRef.current = {
+          hostId: String(data.focusedSession.hostId),
+          agentId: String(data.focusedSession.agentId),
+          title: String(data.focusedSession.title || ''),
+          announcedAt: Date.now(),
+        };
+      }
       if (data.nextFocusedApproval !== undefined) {
         focusedApprovalRef.current = data.nextFocusedApproval || null;
       } else if (data.execution?.executed) {
@@ -1293,9 +1620,41 @@ export function VoiceCopilotSheets() {
         ].slice(0, 3));
       };
 
+      // Handle 0ms playback & queue control fast-path directly
+      if (data.playbackControl && data.playbackControl.kind) {
+        const pc = data.playbackControl;
+        const pcBadge =
+          pc.kind === 'set_speed'
+            ? `⏩ 语速 ${pc.speechRate}x`
+            : pc.kind === 'queue_next'
+              ? '⏭️ 下一条'
+              : pc.kind === 'queue_prev'
+                ? '⏮️ 上一条'
+                : pc.kind === 'queue_repeat'
+                  ? '🔁 重播'
+                  : pc.kind === 'queue_pause'
+                    ? '⏸️ 已暂停播报'
+                    : '▶️ 继续播报';
+        setLastActionBadge(pcBadge);
+        pushReceipt(clean, pcBadge, true);
+        playEarcon('done');
+        await applyPlaybackControl(pc);
+        if (pc.kind === 'set_speed' || pc.kind === 'queue_pause') {
+          await speakWalkReply(chunks);
+        }
+        return;
+      }
+
       if (data.fastPath === 'l2_pin_matched') {
         playEarcon('pin_ok');
         const b = `🔓 确认码通过 · 已放行 ${data.action?.code || ''}`.trim();
+        setLastActionBadge(b);
+        pushReceipt(clean, b, true);
+      } else if (data.action?.type === 'stage_new_task' || data.draftCard) {
+        playEarcon('listen');
+        const b = data.draftCard?.status === 'awaiting_confirm'
+          ? '📝 等待确认新建任务'
+          : '📝 核对新建任务信息';
         setLastActionBadge(b);
         pushReceipt(clean, b, true);
       } else if (data.execution?.requiresPin) {
@@ -1318,6 +1677,11 @@ export function VoiceCopilotSheets() {
           send_prompt: '📤 已发送追问',
           create_task: '✨ 已新建任务',
           stop_session: '⏹ 已发送停止指令',
+          focus_session: '🎯 已切换锁定会话',
+          pin_session: '📌 已更新置顶',
+          rename_session: '✏️ 已重命名会话',
+          switch_model: '🧠 已切换模型',
+          delete_session: '🗑️ 已删除会话',
         };
         const b = mapLabel[data.execution.type] || `✅ ${data.execution.type}`;
         setLastActionBadge(b);
@@ -1848,38 +2212,60 @@ export function VoiceCopilotSheets() {
   }
   const statusSubline = statusMetaParts.join(' · ');
   const isLongReply = (lastReplyText || '').length > 96;
+  const currentSpeed = Math.round((Number(config.prefs.speechRate) || 1.0) * 100) / 100;
+  const cyclePlaybackSpeed = () => {
+    const steps = [1.0, 1.25, 1.5, 1.75, 2.0, 0.75];
+    const idx = steps.findIndex(s => Math.abs(s - currentSpeed) < 0.06);
+    const nextRate = steps[(idx + 1) % steps.length];
+    void applyPlaybackControl({ kind: 'set_speed', speechRate: nextRate });
+    void updatePrefPatch({ speechRate: nextRate });
+  };
+  const aiMountNode =
+    aiTabActive && typeof document !== 'undefined'
+      ? document.getElementById('aiTabMount')
+      : null;
 
-  return (
-    <Fragment>
-      {/* 1. 全屏极简留白随行语音台（展开态；点左上角收起成悬浮迷你条，点右上角关闭才真正退出模式） */}
-      {walkOpen && walkExpanded && (
+  const walkCanvasEl = walkOpen && walkExpanded ? (
         <div
           id="walkModeOverlay"
-          class={`walk-mode-overlay walk-phase-${walkPhase}`}
-          role="dialog"
-          aria-label="随行耳机模式"
+          class={`walk-mode-overlay ${aiTabActive ? 'is-tab-docked' : ''} walk-phase-${walkPhase}`}
+          role={aiTabActive ? 'region' : 'dialog'}
+          aria-label="AI 语音中枢"
           onClick={() => {
             if (walkPrefsOpen) setWalkPrefsOpen(false);
+            if (queueExpanded) setQueueExpanded(false);
           }}
         >
-          {/* 顶部极简导航：左收起 · 中配置标题与状态 · 右配置+结束 */}
+          {/* 顶部极简导航：左语速胶囊（或收起）· 中方案与状态 · 右配置+停止 */}
           <div class="walk-top-bar" onClick={e => e.stopPropagation()}>
-            <button
-              type="button"
-              class="walk-circle-nav-btn"
-              id="walkMinimizeBtn"
-              aria-label="收起"
-              title="收起至悬浮条（后台继续播报）"
-              onClick={() => {
-                setWalkPrefsOpen(false);
-                setWalkExpanded(false);
-                toast('🎧 已收起至悬浮条，后台播报继续运行');
-              }}
-            >
-              <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M6 9l6 6 6-6" />
-              </svg>
-            </button>
+            {aiTabActive ? (
+              <button
+                type="button"
+                class="walk-speed-pill"
+                id="walkSpeedPillBtn"
+                title="点击切换播报语速（也可直接说「加速/慢一点」）"
+                onClick={cyclePlaybackSpeed}
+              >
+                {`${currentSpeed}x`}
+              </button>
+            ) : (
+              <button
+                type="button"
+                class="walk-circle-nav-btn"
+                id="walkMinimizeBtn"
+                aria-label="收起"
+                title="收起至悬浮条（后台继续播报）"
+                onClick={() => {
+                  setWalkPrefsOpen(false);
+                  setWalkExpanded(false);
+                  toast('🎧 已收起至悬浮条，后台播报继续运行');
+                }}
+              >
+                <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M6 9l6 6 6-6" />
+                </svg>
+              </button>
+            )}
 
             <button
               type="button"
@@ -1916,12 +2302,15 @@ export function VoiceCopilotSheets() {
                 type="button"
                 class="walk-circle-nav-btn danger"
                 id="walkExitBtn"
-                aria-label="结束边走边听"
-                title="结束边走边听"
+                aria-label="暂停并结束后台监听"
+                title="结束后台监听"
                 onClick={() => {
                   setWalkPrefsOpen(false);
                   setWalkExpanded(false);
                   setWalkOpen(false);
+                  if (aiTabActive && typeof (window as any).switchTab === 'function') {
+                    (window as any).switchTab('chats');
+                  }
                 }}
               >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
@@ -1932,9 +2321,81 @@ export function VoiceCopilotSheets() {
             </div>
           </div>
 
+          {/* 有序播报队列控制条（支持顺序播报、上一条/下一条/暂停/半截补播） */}
+          {queueItems.length > 0 && (
+            <div class="walk-queue-wrap" onClick={e => e.stopPropagation()}>
+              <div class="walk-queue-bar">
+                <button
+                  type="button"
+                  class="walk-queue-summary"
+                  onClick={() => setQueueExpanded(v => !v)}
+                >
+                  <span>{`📋 队列 ${Math.max(1, queueCursor + 1)} / ${queueItems.length}`}</span>
+                  {queuePaused && <span class="walk-queue-paused-tag">已暂停</span>}
+                </button>
+                <div class="walk-queue-btns">
+                  <button
+                    type="button"
+                    class="walk-queue-btn"
+                    title="上一条"
+                    onClick={() => void applyPlaybackControl({ kind: 'queue_prev' })}
+                  >
+                    ◀
+                  </button>
+                  <button
+                    type="button"
+                    class="walk-queue-btn"
+                    title={queuePaused ? '继续播报' : '暂停播报'}
+                    onClick={() => void applyPlaybackControl({ kind: queuePaused ? 'queue_resume' : 'queue_pause' })}
+                  >
+                    {queuePaused ? '▶' : '⏸'}
+                  </button>
+                  <button
+                    type="button"
+                    class="walk-queue-btn"
+                    title="下一条"
+                    onClick={() => void applyPlaybackControl({ kind: 'queue_next' })}
+                  >
+                    ⏭
+                  </button>
+                </div>
+              </div>
+              {queueExpanded && (
+                <div class="walk-queue-list">
+                  {queueItems.map((it, idx) => (
+                    <button
+                      type="button"
+                      key={it.id}
+                      class={`walk-queue-item ${idx === queueCursor ? 'is-current' : ''} status-${it.status}`}
+                      onClick={() => {
+                        setQueueExpanded(false);
+                        void replayQueueItemAt(idx, { prefixResume: it.status === 'partial' });
+                      }}
+                    >
+                      <span class="walk-queue-idx">{`${idx + 1}.`}</span>
+                      <span class="walk-queue-kind">{it.kind === 'approval' ? '🔔' : '✅'}</span>
+                      <span class="walk-queue-title">{`${it.hostName} · ${it.title}`}</span>
+                      <span class="walk-queue-st">
+                        {it.status === 'playing'
+                          ? '播报中'
+                          : it.status === 'partial'
+                            ? '待补播'
+                            : it.status === 'done'
+                              ? '已播'
+                              : it.status === 'skipped'
+                                ? '已跳过'
+                                : '排队中'}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* 中央大留白无框字幕区（播报时轻点静音） */}
           <div
-            class="walk-stage"
+            class={`walk-stage ${(activeDraft || activePin) ? 'has-active-card' : ''}`}
             onClick={() => {
               if (walkPrefsOpen) {
                 setWalkPrefsOpen(false);
@@ -1947,21 +2408,79 @@ export function VoiceCopilotSheets() {
               }
             }}
           >
-            <button
-              type="button"
-              class={`walk-status-strip ${hubSummary.approvals.length > 0 ? 'has-approvals' : ''}`}
-              onClick={e => {
-                e.stopPropagation();
-                setWalkPrefsOpen(false);
-                void runBriefingTurn();
-              }}
-            >
-              <span class={hubSummary.approvals.length > 0 ? 'walk-strip-amber' : ''}>
-                {`${hubSummary.approvals.length} 项待审批`}
-              </span>
-              <span class="walk-strip-sep">·</span>
-              <span>{`${hubSummary.runningCount} 个任务运行中`}</span>
-            </button>
+            {!activeDraft && (
+              <button
+                type="button"
+                class={`walk-status-strip ${hubSummary.approvals.length > 0 ? 'has-approvals' : ''}`}
+                onClick={e => {
+                  e.stopPropagation();
+                  setWalkPrefsOpen(false);
+                  void runBriefingTurn();
+                }}
+              >
+                <span class={hubSummary.approvals.length > 0 ? 'walk-strip-amber' : ''}>
+                  {`${hubSummary.approvals.length} 项待审批`}
+                </span>
+                <span class="walk-strip-sep">·</span>
+                <span>{`${hubSummary.runningCount} 个任务运行中`}</span>
+              </button>
+            )}
+
+            {/* 多轮校验新建任务核对卡（支持已有项目 & 新建工作区，可语音确认也可一键点按） */}
+            {activeDraft && (
+              <div class={`walk-draft-card ${activeDraft.status === 'awaiting_confirm' ? 'is-ready' : ''}`} id="walkDraftCard" onClick={e => e.stopPropagation()}>
+                <div class="walk-draft-head">
+                  <span>{activeDraft.status === 'awaiting_confirm' ? '📝 新建任务核对单 · 等待确认' : '📝 正在核对新建任务信息'}</span>
+                  <span class="walk-draft-badge">
+                    {activeDraft.createDir ? '✨ 新建工作区' : activeDraft.workspaceMode === 'existing' ? '📂 已有项目' : '待选目录'}
+                  </span>
+                </div>
+                <div class="walk-draft-rows">
+                  <div class="walk-draft-row">
+                    <span class="walk-draft-k">电脑</span>
+                    <span class={`walk-draft-v ${activeDraft.hostId ? 'ok' : 'pending'}`}>
+                      {activeDraft.hostName || '🟡 待你指定（如 Air / mini）'}
+                    </span>
+                  </div>
+                  <div class="walk-draft-row">
+                    <span class="walk-draft-k">工作区</span>
+                    <span class={`walk-draft-v ${activeDraft.cwd ? 'ok' : 'pending'}`}>
+                      {activeDraft.workspaceLabel || '🟡 已有项目 或 说「新建工作区叫…」'}
+                    </span>
+                  </div>
+                  <div class="walk-draft-row">
+                    <span class="walk-draft-k">工具</span>
+                    <span class="walk-draft-v ok">{activeDraft.harnessLabel || 'Antigravity'}</span>
+                  </div>
+                  <div class="walk-draft-row">
+                    <span class="walk-draft-k">任务</span>
+                    <span class={`walk-draft-v ${activeDraft.prompt ? 'ok' : 'pending'}`}>
+                      {activeDraft.prompt || '🟡 待你说明要做什么'}
+                    </span>
+                  </div>
+                </div>
+                <div class="walk-draft-actions">
+                  {activeDraft.status === 'awaiting_confirm' && (
+                    <button
+                      type="button"
+                      class="walk-draft-btn-ok"
+                      disabled={draftSubmitting}
+                      onClick={() => void handleDraftCardAction('confirm')}
+                    >
+                      {draftSubmitting ? '创建中…' : '✅ 确认创建'}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    class="walk-draft-btn-cancel"
+                    disabled={draftSubmitting}
+                    onClick={() => void handleDraftCardAction('cancel')}
+                  >
+                    取消
+                  </button>
+                </div>
+              </div>
+            )}
 
             {activePin && (
               <div class="walk-pin-card" onClick={e => e.stopPropagation()}>
@@ -1986,14 +2505,14 @@ export function VoiceCopilotSheets() {
 
             <div class="walk-subtitle-box">
               {lastUserText && <div class="walk-user-line">{`你：${lastUserText}`}</div>}
-              <div class={`walk-reply-line ${isLongReply ? 'compact' : ''}`}>{lastReplyText}</div>
+              <div class={`walk-reply-line ${(isLongReply || activeDraft) ? 'compact' : ''}`}>{lastReplyText}</div>
               {(lastActionBadge || lastLatencyBadge) && (
                 <div class="walk-meta-row">
                   {lastActionBadge && <span class="walk-action-tag">{lastActionBadge}</span>}
                   {lastLatencyBadge && <span class="walk-latency-tag">{lastLatencyBadge}</span>}
                 </div>
               )}
-              {walkReceipts.length > 0 && (
+              {walkReceipts.length > 0 && !activeDraft && (
                 <div class="walk-receipt-log" aria-label="近期语音执行记录">
                   {walkReceipts.map(rc => (
                     <div key={rc.id} class={`walk-receipt-item ${rc.ok ? 'is-ok' : 'is-warn'}`}>
@@ -2005,7 +2524,10 @@ export function VoiceCopilotSheets() {
                 </div>
               )}
             </div>
+          </div>
 
+          {/* 底部对称三键控制台 + 可展开偏好胶囊 */}
+          <div class="walk-orb-dock" onClick={e => e.stopPropagation()}>
             {walkTextInputOpen && (
               <div class="walk-text-composer" onClick={e => e.stopPropagation()}>
                 <input
@@ -2036,10 +2558,6 @@ export function VoiceCopilotSheets() {
                 </button>
               </div>
             )}
-          </div>
-
-          {/* 底部对称三键控制台 + 可展开偏好胶囊 */}
-          <div class="walk-orb-dock" onClick={e => e.stopPropagation()}>
             <div class="walk-controls-row">
               <div class="walk-side-btn-wrap">
                 <button
@@ -2268,10 +2786,15 @@ export function VoiceCopilotSheets() {
             </div>
           </div>
         </div>
-      )}
+  ) : null;
 
-      {/* 1b. 收起态：Apple Music 式迷你悬浮语音条（边看对话/文件边听播报，点空白展开，右侧一键插话或关闭） */}
-      {walkOpen && !walkExpanded && (
+  return (
+    <Fragment>
+      {/* 1. AI 语音中枢：在中间 AI Tab 时直接嵌入 #aiTabMount，否则全屏弹出 */}
+      {walkCanvasEl && (aiMountNode ? createPortal(walkCanvasEl, aiMountNode) : walkCanvasEl)}
+
+      {/* 1b. 收起态：Apple Music 式迷你悬浮语音条（边看对话/设置边听播报，点空白回到中间 AI Tab，右侧一键插话或关闭） */}
+      {walkOpen && !walkExpanded && !aiTabActive && (
         <div
           id="walkMiniBar"
           class={`walk-mini-bar phase-${walkPhase} ${chatScreenOpen ? 'in-chat' : ''}`}
@@ -2282,8 +2805,14 @@ export function VoiceCopilotSheets() {
             type="button"
             class="walk-mini-main"
             id="walkMiniExpandBtn"
-            onClick={() => setWalkExpanded(true)}
-            title="点击展开全屏语音台"
+            onClick={() => {
+              if (typeof (window as any).switchTab === 'function') {
+                (window as any).switchTab('ai');
+              } else {
+                setWalkExpanded(true);
+              }
+            }}
+            title="点击切回 AI 语音中枢"
           >
             <span class={`walk-mini-orb phase-${walkPhase}`} aria-hidden="true">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">

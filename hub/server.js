@@ -1913,6 +1913,7 @@ export function createHubServer({
               ok: true,
               ...voiceVault.toPublicState(),
               activePin: voiceCopilot.getActivePinChallenge(voiceSessionId),
+              activeDraft: voiceCopilot.getActiveDraft(voiceSessionId),
             },
           }
         }
@@ -2049,6 +2050,11 @@ export function createHubServer({
         if (method === 'POST' && pathname === '/api/voice/pin/clear') {
           voiceCopilot.pinStore.clear(body?.sessionId || 'default')
           return { status: 200, json: { ok: true } }
+        }
+
+        if (method === 'POST' && pathname === '/api/voice/draft/action') {
+          const outcome = voiceCopilot.resolveDraftAction(body || {})
+          return { status: outcome.ok ? 200 : 400, json: outcome }
         }
       }
 

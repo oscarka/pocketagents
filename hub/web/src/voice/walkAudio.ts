@@ -916,6 +916,24 @@ export class WalkSpeechPlayer {
     setNativePlaybackVolume(v);
   }
 
+  private currentPlaybackRate = 1.0;
+
+  setPlaybackRate(rate: number): number {
+    const r = Math.max(0.75, Math.min(2.0, Math.round((Number(rate) || 1.0) * 20) / 20));
+    this.currentPlaybackRate = r;
+    if (this.activeSource) {
+      try { this.activeSource.playbackRate.value = r; } catch {}
+    }
+    if (this.activeAudio) {
+      try { this.activeAudio.playbackRate = r; } catch {}
+    }
+    return r;
+  }
+
+  getPlaybackRate(): number {
+    return this.currentPlaybackRate;
+  }
+
   /**
    * Call synchronously inside a user tap/click handler BEFORE any async fetch()
    * so iOS Safari / Home-Screen PWA unlocks audio playback reliably across async TTS calls.
@@ -1034,6 +1052,7 @@ export class WalkSpeechPlayer {
           const gain = this.playbackCtx!.createGain();
           gain.gain.value = this.currentVolume;
           src.buffer = decoded;
+          try { src.playbackRate.value = this.currentPlaybackRate; } catch {}
           src.connect(gain);
           gain.connect(this.playbackCtx!.destination);
           this.activeSource = src;
@@ -1061,6 +1080,7 @@ export class WalkSpeechPlayer {
     this.activeObjectUrl = url;
     const audio = new Audio(url);
     (audio as any).playsInline = true;
+    try { audio.playbackRate = this.currentPlaybackRate; } catch {}
     this.activeAudio = audio;
 
     return new Promise<boolean>(resolve => {
@@ -1143,6 +1163,7 @@ export class WalkSpeechPlayer {
     },
   ): Promise<void> {
     this.stop();
+    this.setPlaybackRate(speechRate);
     const list = (chunks || [])
       .map(c => String(c || '').trim())
       .filter(c => Boolean(c) && /[\p{L}\p{N}]/u.test(c));

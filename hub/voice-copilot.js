@@ -1,6 +1,11 @@
 import { randomInt, randomUUID } from 'node:crypto'
 import { basename } from 'node:path'
 import { assertSafeVoiceTargetUrl, isBlockedVoiceBaseUrl } from './voice-vault.js'
+import {
+  VoiceNewTaskDraftManager,
+  detectNewTaskIntent,
+  parsePlaybackControlFastPath,
+} from './voice-harness.js'
 
 const DEFAULT_HTTP_TIMEOUT_MS = 25_000
 const PIN_DEFAULT_TTL_MS = 30_000
@@ -1172,7 +1177,7 @@ function buildVoiceSystemPrompt(ctx, l2Policy = 'pin', focusedApproval = null) {
     '{',
     '  "spokenReply": "给耳朵听的自然口语中文回复（简短直接，通常1-3句，严禁读出长文件路径、hash、JSON、代码块或反引号）",',
     '  "action": {',
-    '    "type": "none | query_status | inspect_session | approve | reject | answer_question | send_prompt | create_task | stop_session",',
+    '    "type": "none | query_status | inspect_session | focus_session | approve | reject | answer_question | send_prompt | create_task | stop_session | pin_session | rename_session | switch_model | delete_session",',
     '    "hostId": "目标电脑 hostId（可空，默认当前活跃电脑）",',
     '    "agentId": "目标会话 agentId（涉及具体会话时必填）",',
     '    "code": "审批单号 code（涉及 approve/reject/answer_question 时必填，必须来自上下文真实列表）",',
@@ -1180,8 +1185,12 @@ function buildVoiceSystemPrompt(ctx, l2Policy = 'pin', focusedApproval = null) {
     '    "optionIndex": 1,',
     '    "answers": [],',
     '    "prompt": "要追问或新建任务的清晰提示词",',
-    '    "cwd": "可选工作目录路径",',
-    '    "harness": "可选引擎名（dsh / antigravity-ide / claude / codex）"',
+    '    "cwd": "可选工作目录路径（若用户要求新建工作区可填预期路径并设 createDir=true）",',
+    '    "createDir": false,',
+    '    "title": "重命名会话时的新标题",',
+    '    "pinned": true,',
+    '    "model": "切换模型时的目标模型名",',
+    '    "harness": "可选引擎名（antigravity-ide / codex / claude / dsh / workbuddy）"',
     '  }',
     '}',
     '安全铁律与防串台规则：',
@@ -1435,9 +1444,46 @@ export class VoiceCopilotEngine {
     this.fetch = fetchImpl
     this.now = now
     this.pinStore = new VoicePinChallengeStore({ now })
+    this.draftManager = new VoiceNewTaskDraftManager({ now })
     this.turnHistory = new Map() // voiceSessionId -> recent messages
     this.focusedApprovals = new Map() // voiceSessionId -> { hostId, code, slot, announcedAt }
     this.approvalExplanationCache = new Map() // key -> { summary, explainedByBrain, at }
+  }
+
+  getActiveDraft(voiceSessionId = 'default') {
+    const d = this.draftManager.getActive(voiceSessionId)
+    return d ? this.draftManager.toPublicCard(d) : null
+  }
+
+  resolveDraftAction({ voiceSessionId = 'default', action = 'confirm', dryRun = false } = {}) {
+    const res = this.draftManager.resolveCardAction(voiceSessionId, action)
+    if (!res.ok) return res
+    if (res.cancelled) {
+      return {
+        ok: true,
+        cancelled: true,
+        spokenReply: res.spokenReply,
+        spokenChunks: splitIntoProgressiveTtsChunks(res.spokenReply),
+        draftCard: null,
+        execution: { executed: false, dryRun, type: 'cancel_draft' },
+      }
+    }
+    const outcome = dryRun ? null : this.hub.queueCommand(res.hostId, res.payload)
+    return {
+      ok: true,
+      spokenReply: res.spokenReply,
+      spokenChunks: splitIntoProgressiveTtsChunks(res.spokenReply),
+      draftCard: null,
+      action: { type: 'create_task', hostId: res.hostId, ...res.payload },
+      execution: {
+        executed: !dryRun && Boolean(outcome?.ok),
+        dryRun,
+        type: 'create_task',
+        hostId: res.hostId,
+        commandPayload: res.payload,
+        outcome,
+      },
+    }
   }
 
   setFocusedApproval(voiceSessionId = 'default', approval = null) {
@@ -2199,6 +2245,7 @@ export class VoiceCopilotEngine {
         type: 'new_session',
         prompt,
         ...(action?.cwd ? { cwd: String(action.cwd) } : {}),
+        ...(action?.createDir ? { createDir: true } : {}),
         ...(action?.harness ? { harness: String(action.harness) } : {}),
       }
       if (dryRun) {
@@ -2206,6 +2253,95 @@ export class VoiceCopilotEngine {
       }
       const outcome = this.hub.queueCommand(hostId, cmdPayload)
       return { executed: Boolean(outcome?.ok), dryRun: false, type, hostId, commandPayload: cmdPayload, outcome }
+    }
+
+    if (type === 'focus_session') {
+      const task =
+        ctx.tasks.find(t => action?.agentId && t.agentId === action.agentId)
+        || ctx.tasks.find(t => ctx.activeSessionId && t.agentId === ctx.activeSessionId)
+        || ctx.tasks[0]
+      if (!task) {
+        return { executed: false, dryRun, type, overrideReply: '没有找到对应的会话。' }
+      }
+      return {
+        executed: true,
+        dryRun,
+        type,
+        hostId: task.hostId,
+        focusedSession: { hostId: task.hostId, agentId: task.agentId, title: task.title, status: task.status },
+      }
+    }
+
+    if (type === 'pin_session') {
+      const task =
+        ctx.tasks.find(t => action?.agentId && t.agentId === action.agentId)
+        || ctx.tasks.find(t => ctx.activeSessionId && t.agentId === ctx.activeSessionId)
+        || ctx.tasks[0]
+      if (!task) return { executed: false, dryRun, type, overrideReply: '没有找到要置顶的会话。' }
+      const pinned = action?.pinned !== false
+      const cmdPayload = { type: 'pin_session', agentId: task.agentId, pinned }
+      if (dryRun) return { executed: false, dryRun: true, type, hostId: task.hostId, commandPayload: cmdPayload }
+      const outcome = this.hub.queueCommand(task.hostId, cmdPayload)
+      return { executed: Boolean(outcome?.ok), dryRun: false, type, hostId: task.hostId, commandPayload: cmdPayload, outcome }
+    }
+
+    if (type === 'rename_session') {
+      const title = String(action?.title || '').trim().slice(0, 60)
+      const task =
+        ctx.tasks.find(t => action?.agentId && t.agentId === action.agentId)
+        || ctx.tasks.find(t => ctx.activeSessionId && t.agentId === ctx.activeSessionId)
+        || ctx.tasks[0]
+      if (!task || !title) return { executed: false, dryRun, type, overrideReply: '缺少目标会话或新标题，未能重命名。' }
+      const cmdPayload = { type: 'rename_session', agentId: task.agentId, title }
+      if (dryRun) return { executed: false, dryRun: true, type, hostId: task.hostId, commandPayload: cmdPayload }
+      const outcome = this.hub.queueCommand(task.hostId, cmdPayload)
+      return { executed: Boolean(outcome?.ok), dryRun: false, type, hostId: task.hostId, commandPayload: cmdPayload, outcome }
+    }
+
+    if (type === 'switch_model') {
+      const targetModel = String(action?.model || '').trim()
+      const task =
+        ctx.tasks.find(t => action?.agentId && t.agentId === action.agentId)
+        || ctx.tasks.find(t => ctx.activeSessionId && t.agentId === ctx.activeSessionId)
+        || ctx.tasks[0]
+      if (!task || !targetModel) return { executed: false, dryRun, type, overrideReply: '请说明要切换的目标模型和会话。' }
+      const cmdPayload = { type: 'prompt', agentId: task.agentId, text: '', model: targetModel, switchModelOnly: true }
+      if (dryRun) return { executed: false, dryRun: true, type, hostId: task.hostId, commandPayload: cmdPayload }
+      const outcome = this.hub.queueCommand(task.hostId, cmdPayload)
+      return { executed: Boolean(outcome?.ok), dryRun: false, type, hostId: task.hostId, commandPayload: cmdPayload, outcome }
+    }
+
+    if (type === 'delete_session') {
+      const task =
+        ctx.tasks.find(t => action?.agentId && t.agentId === action.agentId)
+        || ctx.tasks.find(t => ctx.activeSessionId && t.agentId === ctx.activeSessionId)
+      if (!task) return { executed: false, dryRun, type, overrideReply: '没有找到要删除的会话。' }
+      if (l2Policy === 'screen_only') {
+        return {
+          executed: false,
+          blockedByPolicy: 'screen_only',
+          riskLevel: 'L2',
+          type,
+          dryRun,
+          overrideReply: '删除会话属于高危操作，当前策略仅允许在手机屏幕上手动删除。',
+        }
+      }
+      const challenge = this.pinStore.issue(voiceSessionId, {
+        hostId: task.hostId,
+        code: `DEL:${task.agentId}`,
+        agentId: task.agentId,
+        summary: `删除会话「${task.title}」`,
+        reason: '删除会话操作不可逆',
+      })
+      return {
+        executed: false,
+        requiresPin: true,
+        riskLevel: 'L2',
+        type,
+        dryRun,
+        pinChallenge: challenge,
+        overrideReply: `高危操作预警：准备删除会话「${task.title}」。请念出确认码 ${formatPinForSpeech(challenge.pin)} 确认删除，或说取消。`,
+      }
     }
 
     if (type === 'stop_session') {
@@ -2235,6 +2371,7 @@ export class VoiceCopilotEngine {
     profileId = '',
     stageOverride = null,
     dryRun = false,
+    skipTaskConfirm = false,
   } = {}) {
     const t0 = this.now()
     const userText = String(text || '').trim()
@@ -2242,6 +2379,30 @@ export class VoiceCopilotEngine {
     const activeFocus = this.getFreshFocusedApproval(voiceSessionId, focusedApproval)
     const prefs = this.vault.state.prefs
     const profile = this._resolveEffectiveProfile(profileId, stageOverride ? { brain: stageOverride } : null)
+
+    // 0. 0ms Deterministic Playback & Queue Control Fast-Path (speed up/down, next/prev/repeat/pause)
+    const playbackCtrl = parsePlaybackControlFastPath(userText, prefs.speechRate || 1.0)
+    if (playbackCtrl) {
+      if (playbackCtrl.kind === 'set_speed' && !dryRun) {
+        await this.vault.updatePrefs({ speechRate: playbackCtrl.speechRate }).catch(() => {})
+      }
+      return {
+        ok: true,
+        fastPath: 'playback_control',
+        provider: 'voice_harness',
+        model: 'deterministic-0ms',
+        latencyMs: this.now() - t0,
+        userText,
+        spokenReply: playbackCtrl.spokenReply,
+        spokenChunks: splitIntoProgressiveTtsChunks(playbackCtrl.spokenReply),
+        action: { type: 'playback_control', ...playbackCtrl },
+        playbackControl: playbackCtrl,
+        execution: { executed: !dryRun, dryRun, type: 'playback_control', playbackControl: playbackCtrl },
+        expectReply: false,
+        draftCard: this.getActiveDraft(voiceSessionId),
+        pinChallenge: this.pinStore.getActive(voiceSessionId),
+      }
+    }
 
     // 1. 1ms Deterministic Hub-Side L2 PIN Fast-Path (Zero LLM hallucination, zero latency!)
     const pinVerdict = this.pinStore.verify(voiceSessionId, userText)
@@ -2260,6 +2421,27 @@ export class VoiceCopilotEngine {
           spokenChunks: splitIntoProgressiveTtsChunks(spokenReply),
           action: { type: 'none' },
           execution: { executed: false, dryRun, blockedByPolicy: 'screen_only', riskLevel: 'L2' },
+          pinChallenge: null,
+        }
+      }
+      const isDeletePin = String(ch.code || '').startsWith('DEL:')
+      if (isDeletePin) {
+        const cmdPayload = { type: 'delete_session', agentId: ch.agentId }
+        const outcome = dryRun ? null : this.hub.queueCommand(ch.hostId, cmdPayload)
+        const spokenReply = dryRun
+          ? `确认码 ${formatPinForSpeech(ch.pin)} 验证通过（试跑模式，未真实删除）。`
+          : `确认码核验通过，已${ch.summary || '删除会话'}。`
+        return {
+          ok: true,
+          fastPath: 'l2_pin_matched',
+          provider: 'hub_pin_guard',
+          model: 'deterministic-1ms',
+          latencyMs: this.now() - t0,
+          userText,
+          spokenReply,
+          spokenChunks: splitIntoProgressiveTtsChunks(spokenReply),
+          action: { type: 'delete_session', hostId: ch.hostId, agentId: ch.agentId, pinVerified: true },
+          execution: { executed: !dryRun && Boolean(outcome?.ok), dryRun, type: 'delete_session', hostId: ch.hostId, commandPayload: cmdPayload, outcome },
           pinChallenge: null,
         }
       }
@@ -2401,6 +2583,77 @@ export class VoiceCopilotEngine {
       }
     }
 
+    // 1.5. Voice Harness Multi-Turn New-Task Draft Machine (validates host + existing/new workspace + prompt before creating!)
+    let draftPreface = ''
+    if (!skipTaskConfirm && !dryRun) {
+      const activeDraft = this.draftManager.getActive(voiceSessionId)
+      if (activeDraft) {
+        const dRes = this.draftManager.handleTurn(voiceSessionId, userText, ctx)
+        if (dRes.handled) {
+          if (dRes.commit) {
+            const outcome = this.hub.queueCommand(dRes.hostId, dRes.payload)
+            return {
+              ok: true,
+              fastPath: 'draft_commit',
+              provider: 'voice_harness',
+              model: 'deterministic-0ms',
+              latencyMs: this.now() - t0,
+              userText,
+              spokenReply: dRes.spokenReply,
+              spokenChunks: splitIntoProgressiveTtsChunks(dRes.spokenReply),
+              action: { type: 'create_task', hostId: dRes.hostId, ...dRes.payload },
+              execution: {
+                executed: Boolean(outcome?.ok),
+                dryRun: false,
+                type: 'create_task',
+                hostId: dRes.hostId,
+                commandPayload: dRes.payload,
+                outcome,
+              },
+              expectReply: false,
+              draftCard: null,
+              pinChallenge: null,
+            }
+          }
+          return {
+            ok: true,
+            fastPath: dRes.tag || 'draft_turn',
+            provider: 'voice_harness',
+            model: 'deterministic-0ms',
+            latencyMs: this.now() - t0,
+            userText,
+            spokenReply: dRes.spokenReply,
+            spokenChunks: splitIntoProgressiveTtsChunks(dRes.spokenReply),
+            action: { type: 'stage_new_task' },
+            execution: { executed: false, dryRun: false, type: 'stage_new_task' },
+            expectReply: Boolean(dRes.expectReply),
+            draftCard: dRes.draftCard || null,
+            pinChallenge: null,
+          }
+        }
+        if (dRes.preface) {
+          draftPreface = dRes.preface
+        }
+      } else if (detectNewTaskIntent(userText)) {
+        const started = this.draftManager.startDraft(voiceSessionId, { userText, ctx })
+        return {
+          ok: true,
+          fastPath: 'draft_start',
+          provider: 'voice_harness',
+          model: 'deterministic-0ms',
+          latencyMs: this.now() - t0,
+          userText,
+          spokenReply: started.spokenReply,
+          spokenChunks: splitIntoProgressiveTtsChunks(started.spokenReply),
+          action: { type: 'stage_new_task' },
+          execution: { executed: false, dryRun: false, type: 'stage_new_task' },
+          expectReply: true,
+          draftCard: started.draftCard,
+          pinChallenge: null,
+        }
+      }
+    }
+
     // 2. Native rule-router or BYOK LLM Brain
     let parsed = null
     let provider = profile.brain?.provider || 'native'
@@ -2437,6 +2690,28 @@ export class VoiceCopilotEngine {
     }
 
     const action = parsed?.action && typeof parsed.action === 'object' ? parsed.action : { type: 'none' }
+
+    // Harness Guardrail: NEVER let the LLM blind-create a task without host + workspace (existing or new) confirmation!
+    if (!skipTaskConfirm && !dryRun && action.type === 'create_task') {
+      const staged = this.draftManager.startDraft(voiceSessionId, { userText, seedAction: action, ctx })
+      const replyWithPreface = draftPreface ? `${draftPreface} ${staged.spokenReply}` : staged.spokenReply
+      return {
+        ok: true,
+        fastPath: 'draft_staged_from_brain',
+        provider,
+        model,
+        latencyMs: brainLatencyMs,
+        userText,
+        spokenReply: replyWithPreface,
+        spokenChunks: splitIntoProgressiveTtsChunks(replyWithPreface),
+        action: { type: 'stage_new_task' },
+        execution: { executed: false, dryRun: false, type: 'stage_new_task' },
+        expectReply: true,
+        draftCard: staged.draftCard,
+        pinChallenge: this.pinStore.getActive(voiceSessionId),
+      }
+    }
+
     const execution = this._executeValidatedAction(action, ctx, {
       voiceSessionId,
       dryRun,
@@ -2445,6 +2720,9 @@ export class VoiceCopilotEngine {
     })
 
     let spokenReply = String(execution.overrideReply || parsed?.spokenReply || '已处理。').trim()
+    if (draftPreface) {
+      spokenReply = `${draftPreface} ${spokenReply}`
+    }
     let nextFocusedApproval = null
     let shouldReopenFocusMic = false
 
@@ -2533,6 +2811,8 @@ export class VoiceCopilotEngine {
       execution,
       expectReply,
       nextFocusedApproval,
+      focusedSession: execution.focusedSession || null,
+      draftCard: this.getActiveDraft(voiceSessionId),
       pinChallenge: execution.pinChallenge || this.pinStore.getActive(voiceSessionId),
       contextSummary: {
         pendingApprovals: ctx.pendingApprovals.length,
