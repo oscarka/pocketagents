@@ -42,6 +42,9 @@ let dictationFinalizeFn: any = null;
 let dictationFinalizeResolve: any = null;
 let dictationFinalizeTimer: any = null;
 let dictationSettleTimer: any = null;
+let activeByokHoldSession: any = null;
+let byokHoldMode = false;
+let byokHoldProviderLabel = '云端';
 
 const CJK_CHAR_RE = /[\u4e00-\u9fa5]/;
 const PUNCT_OR_SPACE_RE = /[，。！？、；：,.!?;:\s…~～—\-()（）[\]【】"'“”‘’]/;
@@ -521,6 +524,13 @@ function updateWechatOverlayUI(): void {
         if (liveText) {
           trEl.textContent = liveText;
           trEl.classList.remove('is-placeholder');
+        } else if (byokHoldMode) {
+          trEl.textContent = holdStopping
+            ? `👂 ${byokHoldProviderLabel}正在精准转写…`
+            : holdZone === 'cancel'
+              ? '松开手指，取消录音'
+              : `🎙️ ${byokHoldProviderLabel}云端听写中…`;
+          trEl.classList.add('is-placeholder');
         } else {
           trEl.textContent = '正在听你说话…';
           trEl.classList.add('is-placeholder');
@@ -530,13 +540,15 @@ function updateWechatOverlayUI(): void {
       const statusEl = document.getElementById('wechatOverlayStatus');
       if (statusEl) {
         if (holdStopping) {
-          statusEl.textContent = holdZone === 'edit' ? '正在转文字…' : '正在发送…';
+          statusEl.textContent = byokHoldMode
+            ? (holdZone === 'edit' ? `${byokHoldProviderLabel}识别后填入输入框…` : `${byokHoldProviderLabel}识别完成后发送…`)
+            : (holdZone === 'edit' ? '正在转文字…' : '正在发送…');
         } else if (holdZone === 'cancel') {
           statusEl.textContent = '松开手指，取消发送';
         } else if (holdZone === 'edit') {
           statusEl.textContent = '松开手指，填入输入框修改';
         } else {
-          statusEl.textContent = '松开 立即发送';
+          statusEl.textContent = byokHoldMode ? `松开 ${byokHoldProviderLabel}识别发送` : '松开 立即发送';
         }
       }
     }
@@ -742,6 +754,12 @@ export function stopVoiceInput(): void {
   dictationFinalizeFn = null;
   const pendingResolve = dictationFinalizeResolve;
   dictationFinalizeResolve = null;
+  const byokSess = activeByokHoldSession;
+  activeByokHoldSession = null;
+  byokHoldMode = false;
+  if (byokSess) {
+    try { byokSess.cancel(); } catch { }
+  }
   detachHoldWindowListeners();
   if (voicePauseTimer) {
     clearTimeout(voicePauseTimer);
@@ -894,8 +912,10 @@ export function startHoldVoice(startX: any, startY: any, deps?: VoiceControllerD
     return false;
   }
 
+  const byokStt = win && win.__dshVoiceByokStt;
+  const useByokHold = Boolean(byokStt && typeof byokStt.canUse === 'function' && byokStt.canUse());
   const SpeechRecognitionCtor = win && (win.SpeechRecognition || win.webkitSpeechRecognition);
-  if (!SpeechRecognitionCtor || webSpeechServiceBlocked) {
+  if (!useByokHold && (!SpeechRecognitionCtor || webSpeechServiceBlocked)) {
     const fallbackMsg = webSpeechServiceBlocked
       ? '🎙️ 桌面图标模式受苹果限制无法按住说话：请用 Safari 打开，或点键盘右下角「🎤」说话'
       : '🎙️ 当前浏览器不支持直接语音识别，已切回键盘，请用键盘「🎤」说话';
@@ -907,7 +927,7 @@ export function startHoldVoice(startX: any, startY: any, deps?: VoiceControllerD
   if (holdStopping && !holdFinalized) {
     finalizeHoldSession();
   }
-  if (voiceSessionActive || activeVoiceRecognition || holdActive) {
+  if (voiceSessionActive || activeVoiceRecognition || holdActive || activeByokHoldSession) {
     stopVoiceInput();
   }
 
@@ -936,6 +956,29 @@ export function startHoldVoice(startX: any, startY: any, deps?: VoiceControllerD
     }
   } catch { }
 
+  if (useByokHold) {
+    byokHoldMode = true;
+    byokHoldProviderLabel =
+      (typeof byokStt.getProviderLabel === 'function' ? byokStt.getProviderLabel() : '') || '云端';
+    const session = byokStt.createSession();
+    activeByokHoldSession = session;
+    attachHoldWindowListeners();
+    updateWechatOverlayUI();
+    voiceWatchdogTimer = setTimeout(() => {
+      if (holdActive) {
+        endHoldVoice(deps);
+      }
+    }, 60000);
+    void session.start().catch((err: any) => {
+      if (activeByokHoldSession !== session) return;
+      holdHadFatalError = true;
+      stopVoiceInput();
+      showToast(err?.message || '🎙️ 无法打开麦克风，请检查系统权限');
+    });
+    return true;
+  }
+
+  byokHoldMode = false;
   attachHoldWindowListeners();
   updateWechatOverlayUI();
 
@@ -1189,6 +1232,79 @@ export function endHoldVoice(deps?: VoiceControllerDeps): void {
     stopVoiceInput();
     if (input) input.value = baseDraft;
     showToast('👆 请按住按钮说话，松开立即发送');
+    return;
+  }
+
+  if (byokHoldMode && activeByokHoldSession) {
+    const session = activeByokHoldSession;
+    activeByokHoldSession = null;
+    const finalZone = holdZone;
+    const baseDraft = holdBaseDraft;
+    const depsSnap = activeHoldDeps;
+    const providerLbl = byokHoldProviderLabel || '云端';
+    if (voiceWatchdogTimer) {
+      clearTimeout(voiceWatchdogTimer);
+      voiceWatchdogTimer = null;
+    }
+    holdActive = false;
+    holdStopping = true;
+    voiceSessionActive = false;
+    updateWechatOverlayUI();
+
+    void session
+      .stopAndTranscribe({ tailGraceMs: 150 })
+      .then((res: any) => {
+        if (holdFinalized) return;
+        holdStopping = false;
+        byokHoldMode = false;
+        holdFinalized = true;
+        activeHoldDeps = null;
+        updateWechatOverlayUI();
+        if (res?.cancelled) return;
+
+        const onComposerInput =
+          depsSnap?.onComposerInput || (win && win.onComposerInput ? win.onComposerInput : () => { });
+        const sendPrompt =
+          depsSnap?.sendPrompt ||
+          (win && win.sendPromptToActiveSession ? win.sendPromptToActiveSession : () => { });
+        const input: any =
+          typeof document !== 'undefined' && document
+            ? document.getElementById('globalPromptInput')
+            : null;
+
+        if (!res?.ok) {
+          if (input) input.value = baseDraft;
+          showToast(`⚠️ ${providerLbl}识别失败：${res?.error || '请检查网络与密钥'}`);
+          return;
+        }
+        const spoken = String(res.text || '').trim();
+        if (!spoken || res.silence) {
+          if (input) input.value = baseDraft;
+          showToast('🎙️ 未听到清晰人声，请按住重试');
+          return;
+        }
+        const mergedText = joinDraftAndSpeech(baseDraft, spoken);
+        if (finalZone === 'edit') {
+          if (input) input.value = mergedText;
+          returnToVoiceAfterSend = true;
+          setWechatVoiceMode(false, false, true);
+          onComposerInput();
+          showToast('✍️ 已转为文字，修改后点「发送」即可');
+          return;
+        }
+        if (input) input.value = mergedText;
+        onComposerInput();
+        sendPrompt();
+      })
+      .catch((err: any) => {
+        if (holdFinalized) return;
+        holdStopping = false;
+        byokHoldMode = false;
+        holdFinalized = true;
+        activeHoldDeps = null;
+        updateWechatOverlayUI();
+        showToast(`⚠️ ${providerLbl}语音识别异常：${err?.message || '网络失败'}`);
+      });
     return;
   }
 

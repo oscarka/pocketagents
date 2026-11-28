@@ -669,10 +669,18 @@ export function buildDynamicVoiceContext(hub, { activeHostId = '', activeSession
     '选第二个',
     '新建任务',
     '停止任务',
+    '继续执行',
+    '帮我修改',
     'PocketAgents',
     'Antigravity',
+    'DeepSeek',
+    'Harness',
+    'DSH',
     'Claude',
     'Codex',
+    'Mac mini',
+    'MacBook',
+    '豆包',
     'pytest',
     'npm test',
     'git status',
@@ -1234,10 +1242,6 @@ export class VoiceCopilotEngine {
     if (provider === 'volcengine_asr') {
       const rawUrl = cred.baseUrl || 'https://openspeech.bytedance.com/api/v3/auc/bigmodel/recognize/flash'
       const resourceId = String(stageCfg?.model || cred.resourceId || 'volc.bigasr.auc_turbo').trim() || 'volc.bigasr.auc_turbo'
-      const headers = {
-        ...buildVolcHeaders(cred, resourceId, 'volcengine_asr'),
-        'X-Api-Sequence': '-1',
-      }
       const audioFormat = /mp4|m4a/i.test(mimeType)
         ? 'mp4'
         : /mp3|mpeg/i.test(mimeType)
@@ -1250,6 +1254,15 @@ export class VoiceCopilotEngine {
         || resourceId === 'volc.bigasr.auc'
         || /\/auc\/bigmodel\/submit\/?$/i.test(rawUrl)
 
+      // Volcengine BigModel v3 AUC requires `corpus.context = JSON.stringify({ hotwords: [{ word: "..." }] })`
+      const formattedHotwords = [...new Set(
+        (Array.isArray(hotwords) ? hotwords : [])
+          .map(w => String(w || '').trim())
+          .filter(w => w.length >= 2 && w.length <= 24),
+      )]
+        .slice(0, 30)
+        .map(word => ({ word }))
+
       const reqBody = {
         user: { uid: 'pocketagents-walk' },
         audio: isAsyncStandardAuc ? { data: cleanB64, format: audioFormat } : { data: cleanB64 },
@@ -1257,11 +1270,15 @@ export class VoiceCopilotEngine {
           model_name: 'bigmodel',
           enable_itn: true,
           enable_punc: true,
-          ...(hotwords.length > 0
-            ? { corpus: { context: JSON.stringify({ hotwords: hotwords.slice(0, 30) }) } }
+          enable_ddc: true,
+          ...(formattedHotwords.length > 0
+            ? { corpus: { context: JSON.stringify({ hotwords: formattedHotwords }) } }
             : {}),
         },
       }
+      const serializedBody = JSON.stringify(reqBody)
+      const isMockFetch = this.fetch !== globalThis.fetch
+      const isRetryableHttp = status => status === 429 || status === 502 || status === 503 || status === 504
 
       if (isAsyncStandardAuc) {
         const submitUrl = /\/recognize\/flash\/?$/i.test(rawUrl)
@@ -1271,40 +1288,89 @@ export class VoiceCopilotEngine {
             : 'https://openspeech.bytedance.com/api/v3/auc/bigmodel/submit'
         const queryUrl = submitUrl.replace(/\/submit\/?$/i, '/query')
 
-        const subResp = await fetchWithTimeout(this.fetch, submitUrl, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify(reqBody),
-        })
-        const subCode = String(subResp.headers?.get?.('x-api-status-code') || '').trim()
-        const subMsg = String(subResp.headers?.get?.('x-api-message') || '').trim()
-        const subData = await subResp.json().catch(() => ({}))
-        if (!subResp.ok || (subCode && subCode !== '20000000')) {
-          const hdrCode = subData?.header?.code ? ` (${subData.header.code})` : ''
-          const hdrMsg = subData?.header?.message ? `${subData.header.message}${hdrCode}` : ''
-          return {
-            ok: false,
-            provider,
-            model: resourceId,
-            credId: cred.id,
-            latencyMs: this.now() - t0,
-            error: subMsg || hdrMsg || subData?.message || subData?.error || `Volcengine ASR submit HTTP ${subResp.status} (${subCode || 'err'})`,
+        let lastSubmitErr = null
+        let activeHeaders = null
+        for (let subTry = 0; subTry < 2; subTry += 1) {
+          if (subTry > 0 && !isMockFetch) {
+            await new Promise(r => setTimeout(r, 350))
           }
+          const headers = {
+            ...buildVolcHeaders(cred, resourceId, 'volcengine_asr'),
+            'X-Api-Sequence': '-1',
+          }
+          let subResp
+          try {
+            subResp = await fetchWithTimeout(this.fetch, submitUrl, {
+              method: 'POST',
+              headers,
+              body: serializedBody,
+            })
+          } catch (err) {
+            lastSubmitErr = err?.name === 'AbortError' ? 'Volcengine ASR submit timeout' : (err?.message || 'Volcengine ASR submit network error')
+            if (subTry === 0) continue
+            return {
+              ok: false,
+              provider,
+              model: resourceId,
+              credId: cred.id,
+              latencyMs: this.now() - t0,
+              error: lastSubmitErr,
+            }
+          }
+          const subCode = String(subResp.headers?.get?.('x-api-status-code') || '').trim()
+          const subMsg = String(subResp.headers?.get?.('x-api-message') || '').trim()
+          const subData = await subResp.json().catch(() => ({}))
+          if (!subResp.ok || (subCode && subCode !== '20000000')) {
+            const hdrCode = subData?.header?.code ? ` (${subData.header.code})` : ''
+            const hdrMsg = subData?.header?.message ? `${subData.header.message}${hdrCode}` : ''
+            lastSubmitErr = subMsg || hdrMsg || subData?.message || subData?.error || `Volcengine ASR submit HTTP ${subResp.status} (${subCode || 'err'})`
+            if (subTry === 0 && isRetryableHttp(subResp.status)) {
+              continue
+            }
+            return {
+              ok: false,
+              provider,
+              model: resourceId,
+              credId: cred.id,
+              latencyMs: this.now() - t0,
+              error: lastSubmitErr,
+            }
+          }
+          activeHeaders = headers
+          break
         }
 
         // Poll /query using the exact same X-Api-Request-Id (short utterances typically finish in 300-900ms)
-        const queryHeaders = { ...headers }
+        const queryHeaders = { ...activeHeaders }
         delete queryHeaders['X-Api-Sequence']
-        const isMockFetch = this.fetch !== globalThis.fetch
         const maxPolls = 40
+        let transientQueryErrors = 0
         for (let attempt = 0; attempt < maxPolls; attempt++) {
           const waitMs = isMockFetch ? 0 : (attempt < 3 ? 250 : 400)
           if (waitMs > 0) await new Promise(r => setTimeout(r, waitMs))
-          const qResp = await fetchWithTimeout(this.fetch, queryUrl, {
-            method: 'POST',
-            headers: queryHeaders,
-            body: '{}',
-          })
+          let qResp
+          try {
+            qResp = await fetchWithTimeout(this.fetch, queryUrl, {
+              method: 'POST',
+              headers: queryHeaders,
+              body: '{}',
+            })
+          } catch (err) {
+            transientQueryErrors += 1
+            if (transientQueryErrors <= 2) continue
+            return {
+              ok: false,
+              provider,
+              model: resourceId,
+              credId: cred.id,
+              latencyMs: this.now() - t0,
+              error: err?.message || 'Volcengine ASR query network error',
+            }
+          }
+          if (isRetryableHttp(qResp.status) && transientQueryErrors < 2) {
+            transientQueryErrors += 1
+            continue
+          }
           const qCode = String(qResp.headers?.get?.('x-api-status-code') || '').trim()
           const qMsg = String(qResp.headers?.get?.('x-api-message') || '').trim()
           if (qCode === '20000001' || qCode === '20000002') {
@@ -1340,32 +1406,57 @@ export class VoiceCopilotEngine {
         }
       }
 
-      const resp = await fetchWithTimeout(this.fetch, rawUrl, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(reqBody),
-      })
-      const statusCode = String(resp.headers?.get?.('x-api-status-code') || '').trim()
-      const statusMsg = String(resp.headers?.get?.('x-api-message') || '').trim()
-      const latencyMs = this.now() - t0
-      if (statusCode === '20000003') {
-        return { ok: true, text: '', silence: true, provider, model: resourceId, credId: cred.id, latencyMs }
-      }
-      const data = await resp.json().catch(() => ({}))
-      if (!resp.ok || (statusCode && statusCode !== '20000000')) {
-        const hdrCode = data?.header?.code ? ` (${data.header.code})` : ''
-        const hdrMsg = data?.header?.message ? `${data.header.message}${hdrCode}` : ''
-        return {
-          ok: false,
-          provider,
-          model: resourceId,
-          credId: cred.id,
-          latencyMs,
-          error: statusMsg || hdrMsg || data?.message || data?.error || `Volcengine ASR HTTP ${resp.status} (${statusCode || 'err'})`,
+      for (let flashTry = 0; flashTry < 2; flashTry += 1) {
+        if (flashTry > 0 && !isMockFetch) {
+          await new Promise(r => setTimeout(r, 350))
         }
+        const headers = {
+          ...buildVolcHeaders(cred, resourceId, 'volcengine_asr'),
+          'X-Api-Sequence': '-1',
+        }
+        let resp
+        try {
+          resp = await fetchWithTimeout(this.fetch, rawUrl, {
+            method: 'POST',
+            headers,
+            body: serializedBody,
+          })
+        } catch (err) {
+          if (flashTry === 0) continue
+          return {
+            ok: false,
+            provider,
+            model: resourceId,
+            credId: cred.id,
+            latencyMs: this.now() - t0,
+            error: err?.name === 'AbortError' ? 'Volcengine ASR timeout' : (err?.message || 'Volcengine ASR network error'),
+          }
+        }
+        const statusCode = String(resp.headers?.get?.('x-api-status-code') || '').trim()
+        const statusMsg = String(resp.headers?.get?.('x-api-message') || '').trim()
+        const latencyMs = this.now() - t0
+        if (statusCode === '20000003') {
+          return { ok: true, text: '', silence: true, provider, model: resourceId, credId: cred.id, latencyMs }
+        }
+        const data = await resp.json().catch(() => ({}))
+        if (!resp.ok || (statusCode && statusCode !== '20000000')) {
+          if (flashTry === 0 && isRetryableHttp(resp.status)) {
+            continue
+          }
+          const hdrCode = data?.header?.code ? ` (${data.header.code})` : ''
+          const hdrMsg = data?.header?.message ? `${data.header.message}${hdrCode}` : ''
+          return {
+            ok: false,
+            provider,
+            model: resourceId,
+            credId: cred.id,
+            latencyMs,
+            error: statusMsg || hdrMsg || data?.message || data?.error || `Volcengine ASR HTTP ${resp.status} (${statusCode || 'err'})`,
+          }
+        }
+        const text = String(data?.result?.text || data?.text || '').trim()
+        return { ok: true, text, silence: !text, provider, model: resourceId, credId: cred.id, latencyMs }
       }
-      const text = String(data?.result?.text || data?.text || '').trim()
-      return { ok: true, text, silence: !text, provider, model: resourceId, credId: cred.id, latencyMs }
     }
 
     if (provider === 'gemini') {

@@ -473,7 +473,9 @@ test('v0.9.45 native zero-WebView background briefing, /api/voice/diag ring buff
   const nativeAudioPath = resolve(rootDir, 'ios-local-shell/PocketAgentsShell/NativeAudioBridge.swift')
   if (existsSync(nativeAudioPath)) {
     const swiftSrc = readFileSync(nativeAudioPath, 'utf8')
-    assert.match(swiftSrc, /shellVersion = "1\.1\.5"/)
+    assert.match(swiftSrc, /shellVersion = "1\.1\.6"/)
+    assert.match(swiftSrc, /AVAudioConverter/)
+    assert.match(swiftSrc, /startBargeInMonitor/)
     assert.match(swiftSrc, /\/api\/voice\/briefing/)
     assert.match(swiftSrc, /\/api\/voice\/tts/)
     assert.match(swiftSrc, /\/api\/voice\/diag/)

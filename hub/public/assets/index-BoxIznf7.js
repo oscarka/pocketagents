@@ -2647,6 +2647,15 @@ function notifyNativeBackgroundWakeDone() {
 		if (bridge?.notifyBackgroundWakeDone) bridge.notifyBackgroundWakeDone().catch(() => {});
 	} catch {}
 }
+function setNativePlaybackVolume(volume) {
+	try {
+		const bridge = getNativeAudioBridge();
+		if (bridge?.setPlaybackVolume) {
+			const clamped = Math.max(.05, Math.min(1, Number(volume) || 1));
+			bridge.setPlaybackVolume(clamped).catch(() => {});
+		}
+	} catch {}
+}
 function postNativeVoiceDiag(event, detail = "", latencyMs = 0) {
 	try {
 		const bridge = getNativeAudioBridge();
@@ -3020,14 +3029,209 @@ var WalkWavRecorder = class {
 		};
 	}
 };
+var WalkBargeInMonitor = class {
+	active = false;
+	nativeMode = false;
+	nativeUnsubs = [];
+	stream = null;
+	audioCtx = null;
+	sourceNode = null;
+	procNode = null;
+	silentGain = null;
+	clearNativeListeners() {
+		for (const fn of this.nativeUnsubs) try {
+			fn();
+		} catch {}
+		this.nativeUnsubs = [];
+	}
+	isActive() {
+		return this.active;
+	}
+	async start(opts) {
+		if (this.active) return true;
+		const minSpeechMs = Math.max(250, Number(opts.minSpeechMs) || 420);
+		const vadSilenceMs = Math.max(450, Number(opts.vadSilenceMs) || 700);
+		const maxDurationMs = Math.max(3e3, Number(opts.maxDurationMs) || 1e4);
+		const rmsThreshold = Number(opts.rmsThreshold) || .028;
+		const nativeBridge = getNativeAudioBridge();
+		if (isNativeIosShell()) {
+			if (!nativeBridge?.startBargeInMonitor || !nativeBridge.on) return false;
+			this.active = true;
+			this.nativeMode = true;
+			this.clearNativeListeners();
+			this.nativeUnsubs.push(nativeBridge.on("bargeInCandidate", (detail) => {
+				if (!this.active) return;
+				if (detail && typeof detail === "object" && detail.wavBase64) opts.onCandidate(detail);
+			}));
+			try {
+				if (!await nativeBridge.startBargeInMonitor({
+					minSpeechMs,
+					vadSilenceMs,
+					maxDurationMs,
+					rmsThreshold
+				})) {
+					this.active = false;
+					this.nativeMode = false;
+					this.clearNativeListeners();
+					return false;
+				}
+				return true;
+			} catch {
+				this.active = false;
+				this.nativeMode = false;
+				this.clearNativeListeners();
+				return false;
+			}
+		}
+		if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) return false;
+		try {
+			const stream = await navigator.mediaDevices.getUserMedia({ audio: {
+				channelCount: 1,
+				echoCancellation: true,
+				noiseSuppression: true,
+				autoGainControl: true
+			} });
+			const Ctor = window.AudioContext || window.webkitAudioContext;
+			if (!Ctor) {
+				stream.getTracks().forEach((t) => t.stop());
+				return false;
+			}
+			const ctx = new Ctor();
+			if (ctx.state === "suspended") await ctx.resume().catch(() => {});
+			const sampleRate = ctx.sampleRate || 48e3;
+			const preRollMaxSamples = Math.round(sampleRate * .35);
+			let preRoll = [];
+			let preRollSamples = 0;
+			let capturing = false;
+			let speechStreakMs = 0;
+			let captureStartedAt = 0;
+			let lastVoiceAt = 0;
+			let capturedChunks = [];
+			const flushCaptured = () => {
+				if (!capturing || !capturedChunks.length) return;
+				const durationMs = Math.max(0, Date.now() - captureStartedAt);
+				const chunks = capturedChunks;
+				capturing = false;
+				speechStreakMs = 0;
+				capturedChunks = [];
+				preRoll = [];
+				preRollSamples = 0;
+				let total = 0;
+				for (const c of chunks) total += c.length;
+				const merged = new Float32Array(total);
+				let offset = 0;
+				for (const c of chunks) {
+					merged.set(c, offset);
+					offset += c.length;
+				}
+				const wavBytes = encodeInt16ToWavBytes(downsampleFloat32To16kInt16(merged, sampleRate, 16e3), 16e3);
+				opts.onCandidate({
+					wavBase64: uint8ToBase64(wavBytes),
+					byteLength: wavBytes.length,
+					durationMs,
+					sampleRate: 16e3,
+					hadSpeech: true
+				});
+			};
+			const source = ctx.createMediaStreamSource(stream);
+			const proc = ctx.createScriptProcessor(2048, 1, 1);
+			const silentGain = ctx.createGain();
+			silentGain.gain.value = 0;
+			proc.onaudioprocess = (ev) => {
+				if (!this.active) return;
+				const input = ev.inputBuffer.getChannelData(0);
+				const copy = new Float32Array(input.length);
+				copy.set(input);
+				const frameMs = copy.length / sampleRate * 1e3;
+				let sumSq = 0;
+				for (let i = 0; i < copy.length; i += 1) sumSq += copy[i] * copy[i];
+				const rms = Math.sqrt(sumSq / Math.max(1, copy.length));
+				const now = Date.now();
+				if (!capturing) {
+					preRoll.push(copy);
+					preRollSamples += copy.length;
+					while (preRollSamples > preRollMaxSamples && preRoll.length > 1) {
+						const removed = preRoll.shift();
+						preRollSamples -= removed.length;
+					}
+					if (rms >= rmsThreshold) {
+						speechStreakMs += frameMs;
+						if (speechStreakMs >= minSpeechMs) {
+							capturing = true;
+							captureStartedAt = now;
+							lastVoiceAt = now;
+							capturedChunks = preRoll.slice();
+							preRoll = [];
+							preRollSamples = 0;
+						}
+					} else speechStreakMs = Math.max(0, speechStreakMs - frameMs * 1.5);
+				} else {
+					capturedChunks.push(copy);
+					if (rms >= rmsThreshold * .65) lastVoiceAt = now;
+					if (now - lastVoiceAt >= vadSilenceMs || now - captureStartedAt >= maxDurationMs) flushCaptured();
+				}
+			};
+			source.connect(proc);
+			proc.connect(silentGain);
+			silentGain.connect(ctx.destination);
+			this.stream = stream;
+			this.audioCtx = ctx;
+			this.sourceNode = source;
+			this.procNode = proc;
+			this.silentGain = silentGain;
+			this.active = true;
+			this.nativeMode = false;
+			return true;
+		} catch {
+			return false;
+		}
+	}
+	stop() {
+		if (!this.active) return;
+		this.active = false;
+		if (this.nativeMode) {
+			this.nativeMode = false;
+			this.clearNativeListeners();
+			getNativeAudioBridge()?.stopBargeInMonitor?.().catch(() => {});
+			return;
+		}
+		try {
+			this.procNode?.disconnect();
+			this.sourceNode?.disconnect();
+			this.silentGain?.disconnect();
+		} catch {}
+		try {
+			this.stream?.getTracks().forEach((t) => t.stop());
+		} catch {}
+		try {
+			this.audioCtx?.close();
+		} catch {}
+		this.procNode = null;
+		this.sourceNode = null;
+		this.silentGain = null;
+		this.stream = null;
+		this.audioCtx = null;
+	}
+};
 var WalkSpeechPlayer = class {
 	runId = 0;
 	activeAudio = null;
 	activeSource = null;
+	activeGain = null;
 	playbackCtx = null;
 	activeObjectUrl = "";
 	abortCtrl = null;
 	playing = false;
+	currentVolume = 1;
+	setVolume(volume) {
+		const v = Math.max(.05, Math.min(1, Number(volume) || 1));
+		this.currentVolume = v;
+		try {
+			if (this.activeAudio) this.activeAudio.volume = v;
+			if (this.activeGain) this.activeGain.gain.value = v;
+		} catch {}
+		setNativePlaybackVolume(v);
+	}
 	/**
 	* Call synchronously inside a user tap/click handler BEFORE any async fetch()
 	* so iOS Safari / Home-Screen PWA unlocks audio playback reliably across async TTS calls.
@@ -3112,11 +3316,18 @@ var WalkSpeechPlayer = class {
 			if (this.runId !== myRun) return false;
 			return await new Promise((resolve) => {
 				const src = this.playbackCtx.createBufferSource();
+				const gain = this.playbackCtx.createGain();
+				gain.gain.value = this.currentVolume;
 				src.buffer = decoded;
-				src.connect(this.playbackCtx.destination);
+				src.connect(gain);
+				gain.connect(this.playbackCtx.destination);
 				this.activeSource = src;
+				this.activeGain = gain;
 				src.onended = () => {
-					if (this.activeSource === src) this.activeSource = null;
+					if (this.activeSource === src) {
+						this.activeSource = null;
+						this.activeGain = null;
+					}
 					resolve(this.runId === myRun);
 				};
 				src.start(0);
@@ -3337,6 +3548,80 @@ function bindWalkMediaSession(handlers) {
 			ms.setActionHandler("nexttrack", null);
 			ms.setActionHandler("previoustrack", null);
 		} catch {}
+	};
+}
+// hub/web/src/voice/bargeInGate.js
+var FILLER_ONLY_RE = /^(?:嗯+|啊+|哦+|喔+|噢+|呃+|额+|唉+|哎+|诶+|欸+|哈+|呵+|嘿+|喂+|唔+|啧+|咳+|呀+|嘛+|吧+|好吧|行吧|嗯哼|嗯嗯|啊啊|哦哦|哈哈|呵呵|那个|就是|什么|对对|是吗|uh+|um+|ah+|oh+|hmm+|huh+|mhm+|yeah|ok|okay)$/i;
+var EXPLICIT_COMMAND_RE = /(放行|批准|同意|允许|通过|拒绝|驳回|不同意|别执行|不要执行|取消|跳过|停止|停一下|停下来|别说了|闭嘴|暂停|下一条|下一个|重说|再说一遍|继续|确认码|选第|第[一二三四1234]|一号|二号|三号|四号|帮我|查看|汇报|进度|待审批|修改|改成|不要|\b(?:approve|allow|deny|reject|stop|skip|cancel|next|pause|repeat)\b|\d{3})/i;
+var STOP_ONLY_RE = /^(?:停|停下|停止|停一下|停下来|别说了|闭嘴|先停|暂停|跳过|下一条|不用说了|知道了|stop|skip|pause)$/i;
+function normalizeForEchoCompare(raw = "") {
+	return String(raw || "").toLowerCase().replace(/[\s`*_#>\-—~·.,，。！？!?：:;；、"'“”‘’()（）[\]【】]/g, "");
+}
+function computeBigramOverlap(candidateNorm, spokenNorm) {
+	if (!candidateNorm || !spokenNorm) return 0;
+	if (candidateNorm.length < 2) return spokenNorm.includes(candidateNorm) ? 1 : 0;
+	const spokenBigrams = /* @__PURE__ */ new Set();
+	for (let i = 0; i < spokenNorm.length - 1; i += 1) spokenBigrams.add(spokenNorm.slice(i, i + 2));
+	let hits = 0;
+	const total = candidateNorm.length - 1;
+	for (let i = 0; i < total; i += 1) if (spokenBigrams.has(candidateNorm.slice(i, i + 2))) hits += 1;
+	return total > 0 ? hits / total : 0;
+}
+/**
+* Evaluate whether an STT transcript captured DURING Walk Mode TTS playback
+* represents a genuine, intentional user interruption rather than noise, backchannel, or TTS echo.
+*
+* Returns `{ accept: boolean, reason: string, stopOnly?: boolean, cleaned: string }`.
+*/
+function evaluateBargeInUtterance(transcript = "", currentlySpokenText = "") {
+	const cleaned = String(transcript || "").trim();
+	const norm = normalizeForEchoCompare(cleaned);
+	if (!norm) return {
+		accept: false,
+		reason: "empty",
+		cleaned: ""
+	};
+	if (FILLER_ONLY_RE.test(norm)) return {
+		accept: false,
+		reason: "filler",
+		cleaned
+	};
+	if (STOP_ONLY_RE.test(norm)) return {
+		accept: true,
+		reason: "stop_command",
+		stopOnly: true,
+		cleaned
+	};
+	const isExplicitCommand = EXPLICIT_COMMAND_RE.test(cleaned);
+	const spokenNorm = normalizeForEchoCompare(currentlySpokenText);
+	if (spokenNorm && norm.length >= 4 && !(isExplicitCommand && norm.length <= 5)) {
+		if (spokenNorm.includes(norm)) return {
+			accept: false,
+			reason: "tts_echo_substring",
+			cleaned
+		};
+		if (computeBigramOverlap(norm, spokenNorm) >= .62) return {
+			accept: false,
+			reason: "tts_echo_overlap",
+			cleaned
+		};
+	}
+	if (isExplicitCommand) return {
+		accept: true,
+		reason: "explicit_command",
+		stopOnly: false,
+		cleaned
+	};
+	if (norm.length >= 4) return {
+		accept: true,
+		reason: "substantive_speech",
+		stopOnly: false,
+		cleaned
+	};
+	return {
+		accept: false,
+		reason: "too_short_non_command",
+		cleaned
 	};
 }
 // hub/web/src/voice/provider-routing.js
@@ -5216,9 +5501,13 @@ function VoiceCopilotSheets() {
 		walkPhase
 	]);
 	const recorderRef = T(null);
+	const bargeInMonitorRef = T(null);
 	const playerRef = T(null);
 	const wakeRef = T(null);
 	const nativeRecRef = T(null);
+	const activeSpeakingTextRef = T("");
+	const bargeInTriggeredRef = T(false);
+	const bargeInVerifyingRef = T(false);
 	const voiceSessionIdRef = T(`walk_${Math.random().toString(36).slice(2, 10)}`);
 	const seenApprovalsRef = T(/* @__PURE__ */ new Set());
 	const seenCompletedRef = T(/* @__PURE__ */ new Set());
@@ -5249,6 +5538,7 @@ function VoiceCopilotSheets() {
 		configRef.current = config;
 	}, [config]);
 	if (!recorderRef.current) recorderRef.current = new WalkWavRecorder();
+	if (!bargeInMonitorRef.current) bargeInMonitorRef.current = new WalkBargeInMonitor();
 	if (!playerRef.current) playerRef.current = new WalkSpeechPlayer();
 	if (!wakeRef.current) wakeRef.current = new WalkWakeLockManager();
 	const refreshConfig = async (silent = false) => {
@@ -5491,11 +5781,120 @@ function VoiceCopilotSheets() {
 		window.__dshVoiceByokStopSpeak = () => {
 			playerRef.current?.stop();
 		};
+		const resolveChatSttStageOverride = () => {
+			const cfg = configRef.current;
+			return resolveFeatureStageConfig(String(cfg?.prefs?.chatSttTarget || (cfg?.prefs?.useByokForChatStt ? "follow_walk" : "native")), "stt", cfg?.activeProfile, cfg?.credentials || []);
+		};
+		const postCloudSttWithRetry = async (wavBase64, stageOverride) => {
+			const cfg = configRef.current;
+			let lastRes = {
+				ok: false,
+				error: "网络异常"
+			};
+			for (let attempt = 0; attempt < 2; attempt += 1) {
+				if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 350));
+				try {
+					const r = await apiCall("/api/voice/stt", {
+						method: "POST",
+						body: JSON.stringify({
+							audioBase64: wavBase64,
+							mimeType: "audio/wav",
+							profileId: cfg.activeProfile.id,
+							...stageOverride ? { stageOverride } : {}
+						})
+					});
+					const data = await r.json().catch(() => ({
+						ok: false,
+						error: `HTTP ${r.status}`
+					}));
+					if (r.ok && data?.ok) return data;
+					lastRes = data || {
+						ok: false,
+						error: `HTTP ${r.status}`
+					};
+					if (r.status >= 500 || r.status === 429) continue;
+					return lastRes;
+				} catch (err) {
+					lastRes = {
+						ok: false,
+						error: err?.message || "网络异常"
+					};
+				}
+			}
+			return lastRes;
+		};
+		window.__dshVoiceByokStt = {
+			canUse: () => Boolean(resolveChatSttStageOverride()),
+			getProviderLabel: () => {
+				const st = resolveChatSttStageOverride();
+				if (!st) return "";
+				if (st.provider === "volcengine_asr") return "豆包";
+				if (st.provider === "gemini") return "Gemini";
+				return "云端";
+			},
+			createSession: ({ onLevel } = {}) => {
+				const stageOverride = resolveChatSttStageOverride();
+				const rec = new WalkWavRecorder();
+				let cancelled = false;
+				let started = false;
+				let stopped = false;
+				return {
+					start: async () => {
+						if (!stageOverride) throw new Error("未配置云端语音听写");
+						if (cancelled || stopped) return;
+						setWalkAudioSessionMode("play-and-record");
+						started = true;
+						await rec.start({
+							autoVad: false,
+							maxDurationMs: 6e4,
+							onLevel
+						});
+					},
+					cancel: () => {
+						cancelled = true;
+						stopped = true;
+						try {
+							rec.stop();
+						} catch {}
+						if (configRef.current?.prefs?.duckMusicMode !== false) setWalkAudioSessionMode("ambient");
+					},
+					stopAndTranscribe: async ({ tailGraceMs = 150 } = {}) => {
+						if (cancelled || stopped || !started) return {
+							ok: true,
+							text: "",
+							silence: true,
+							cancelled: true
+						};
+						stopped = true;
+						if (tailGraceMs > 0) await new Promise((resolve) => setTimeout(resolve, tailGraceMs));
+						if (cancelled) {
+							try {
+								rec.stop();
+							} catch {}
+							return {
+								ok: true,
+								text: "",
+								silence: true,
+								cancelled: true
+							};
+						}
+						const wav = await rec.stopAsync().catch(() => null);
+						if (configRef.current?.prefs?.duckMusicMode !== false) setWalkAudioSessionMode("ambient");
+						if (!wav || wav.byteLength < 1200) return {
+							ok: true,
+							text: "",
+							silence: true,
+							tooShort: true
+						};
+						return postCloudSttWithRetry(wav.wavBase64, stageOverride);
+					}
+				};
+			}
+		};
 		let chatDictRecorder = null;
 		let chatDictBtnId = "";
 		window.__dshVoiceByokToggleDictation = (targetInputId, btnId, showToastFn, onComposerInputFn) => {
-			const cfg = configRef.current;
-			const stageOverride = resolveFeatureStageConfig(String(cfg?.prefs?.chatSttTarget || (cfg?.prefs?.useByokForChatStt ? "follow_walk" : "native")), "stt", cfg?.activeProfile, cfg?.credentials || []);
+			const stageOverride = resolveChatSttStageOverride();
 			if (!stageOverride) return false;
 			const btn = document.getElementById(btnId);
 			const input = document.getElementById(targetInputId);
@@ -5505,21 +5904,13 @@ function VoiceCopilotSheets() {
 				const activeRec = chatDictRecorder;
 				chatDictRecorder = null;
 				chatDictBtnId = "";
-				activeRec.stopAsync().then((rec) => {
+				new Promise((resolve) => setTimeout(resolve, 150)).then(() => activeRec.stopAsync()).then((rec) => {
 					if (!rec || rec.byteLength < 1200) {
 						showToastFn("⏹ 录音太短，已取消");
 						return;
 					}
 					showToastFn("👂 云端语音识别中…");
-					return apiCall("/api/voice/stt", {
-						method: "POST",
-						body: JSON.stringify({
-							audioBase64: rec.wavBase64,
-							mimeType: "audio/wav",
-							profileId: cfg.activeProfile.id,
-							stageOverride
-						})
-					}).then((r) => r.json().catch(() => ({ ok: false }))).then((data) => {
+					return postCloudSttWithRetry(rec.wavBase64, stageOverride).then((data) => {
 						if (data?.ok && String(data.text || "").trim()) {
 							const sep = input.value && !/\s$/.test(input.value) ? " " : "";
 							input.value = `${input.value}${sep}${String(data.text).trim()}`;
@@ -5527,14 +5918,14 @@ function VoiceCopilotSheets() {
 							showToastFn(`✅ 识别完成 (${data.latencyMs ?? 0}ms)`);
 						} else if (data?.silence) showToastFn("未检测到清晰人声");
 						else showToastFn(`⚠️ 云端识别失败：${data?.error || "请检查密钥"}`);
-					}).catch(() => showToastFn("⚠️ 网络异常，云端识别失败"));
-				});
+					});
+				}).catch(() => showToastFn("⚠️ 网络异常，云端识别失败"));
 				return true;
 			}
 			chatDictRecorder = new WalkWavRecorder();
 			chatDictBtnId = btnId;
 			btn?.classList.add("recording");
-			showToastFn("🎙️ BYOK 录音中…说完再点一次发送转写");
+			showToastFn("🎙️ 云端录音中…说完再点一次发送转写");
 			chatDictRecorder.start({ autoVad: false }).catch((err) => {
 				btn?.classList.remove("recording");
 				chatDictRecorder = null;
@@ -5550,6 +5941,7 @@ function VoiceCopilotSheets() {
 			clearTimeout(initTimer);
 			if (typeof document !== "undefined") document.removeEventListener("visibilitychange", onVisSyncNative);
 			playerRef.current?.stop();
+			bargeInMonitorRef.current?.stop();
 			recorderRef.current?.stop();
 			setWalkBackgroundKeepAlive(false, false, false);
 			wakeRef.current?.disable();
@@ -5692,6 +6084,10 @@ function VoiceCopilotSheets() {
 				keepAudioSessionAfter: micReadyForAutoListen,
 				allowNativeFallback: nextItem.kind === "approval"
 			});
+			if (bargeInTriggeredRef.current) {
+				startedAutoListen = true;
+				return;
+			}
 			const canListenAfterSpeak = wantsAutoListen ? micReadyForAutoListen || await canNativeAutoListenNow() : false;
 			if (canListenAfterSpeak && walkOpenRef.current && walkPhaseRef.current === "idle") {
 				startedAutoListen = true;
@@ -5756,6 +6152,7 @@ function VoiceCopilotSheets() {
 		return () => window.removeEventListener("dsh:hub-state", onHubState);
 	}, []);
 	const stopAllListening = () => {
+		bargeInMonitorRef.current?.stop();
 		if (recorderRef.current?.isRecording()) recorderRef.current.stop();
 		if (nativeRecRef.current) {
 			try {
@@ -5764,6 +6161,52 @@ function VoiceCopilotSheets() {
 			nativeRecRef.current = null;
 		}
 		setMicLevel(0);
+	};
+	const handleVerifiedBargeInCandidate = async (rec) => {
+		if (!walkOpenRef.current || walkPhaseRef.current !== "speaking" || bargeInTriggeredRef.current || bargeInVerifyingRef.current) return;
+		if (!rec?.wavBase64 || rec.byteLength < 2e3) return;
+		bargeInVerifyingRef.current = true;
+		playerRef.current?.setVolume(.25);
+		try {
+			const cfg = configRef.current;
+			const res = await apiCall("/api/voice/stt", {
+				method: "POST",
+				body: JSON.stringify({
+					audioBase64: rec.wavBase64,
+					mimeType: "audio/wav",
+					profileId: cfg.activeProfile.id
+				})
+			});
+			const data = await res.json().catch(() => null);
+			if (!walkOpenRef.current || walkPhaseRef.current !== "speaking" || bargeInTriggeredRef.current) return;
+			const rawText = res.ok && data?.ok && !data?.silence ? String(data.text || "").trim() : "";
+			const verdict = evaluateBargeInUtterance(rawText, activeSpeakingTextRef.current);
+			if (!verdict.accept) {
+				postNativeVoiceDiag("barge_in_rejected", `reason=${verdict.reason} txt=${rawText.slice(0, 32)}`);
+				playerRef.current?.setVolume(1);
+				return;
+			}
+			bargeInTriggeredRef.current = true;
+			bargeInMonitorRef.current?.stop();
+			playerRef.current?.stop();
+			playerRef.current?.setVolume(1);
+			postNativeVoiceDiag("barge_in_accepted", `reason=${verdict.reason} stopOnly=${verdict.stopOnly ? 1 : 0} len=${verdict.cleaned.length}`);
+			if (verdict.stopOnly) {
+				setLastUserText(verdict.cleaned);
+				setLastActionBadge("🔇 已语音打断播报");
+				setWalkPhase("idle");
+				playEarcon("done");
+				if (cfg.prefs.duckMusicMode !== false) setWalkAudioSessionMode("ambient");
+				return;
+			}
+			playEarcon("pin_ok");
+			const wavKb = Math.max(1, Math.round(rec.byteLength / 1024));
+			handleWalkUserText(verdict.cleaned, data?.latencyMs ?? 0, wavKb);
+		} catch {
+			if (walkPhaseRef.current === "speaking" && !bargeInTriggeredRef.current) playerRef.current?.setVolume(1);
+		} finally {
+			bargeInVerifyingRef.current = false;
+		}
 	};
 	const speakWalkReply = async (chunks, onFirstTtsMs, opts = {}) => {
 		const cfg = configRef.current;
@@ -5774,32 +6217,54 @@ function VoiceCopilotSheets() {
 			return;
 		}
 		const useCloud = cfg.activeProfile?.tts?.provider && cfg.activeProfile.tts.provider !== "native";
+		const hasCloudStt = Boolean(cfg.activeProfile?.stt?.provider && cfg.activeProfile.stt.provider !== "native");
+		activeSpeakingTextRef.current = (chunks || []).join(" ");
+		bargeInTriggeredRef.current = false;
+		bargeInVerifyingRef.current = false;
+		playerRef.current?.setVolume(1);
 		setWalkPhase("speaking");
-		await playerRef.current.speakChunksProgressive(chunks, {
-			useCloudTts: Boolean(useCloud),
-			allowNativeFallback: Boolean(opts.allowNativeFallback),
-			speechRate: cfg.prefs.speechRate || 1,
-			duckMusicMode: duckMusic,
-			keepAudioSessionAfter: Boolean(opts.keepAudioSessionAfter),
-			fetchTts: async (text, signal) => {
-				return (await apiCall("/api/voice/tts", {
-					method: "POST",
-					signal,
-					body: JSON.stringify({
-						text,
-						profileId: cfg.activeProfile.id
-					})
-				})).json().catch(() => ({ ok: false }));
-			},
-			onFirstLatency: onFirstTtsMs,
-			onCloudTtsError: () => {
-				toast("⚠️ 豆包语音偶发波动，已跳过该段（未混入机器音）");
-			},
-			onStateChange: (playing) => {
-				if (!playing && walkPhaseRef.current === "speaking") setWalkPhase("idle");
-			}
+		if (Boolean(opts.enableBargeIn !== false && walkOpenRef.current && cfg.prefs.autoListenAfterBriefing && hasCloudStt)) canNativeAutoListenNow().then((canNow) => {
+			if (!canNow || !walkOpenRef.current || walkPhaseRef.current !== "speaking" || bargeInTriggeredRef.current) return;
+			bargeInMonitorRef.current?.start({
+				minSpeechMs: 420,
+				vadSilenceMs: 700,
+				maxDurationMs: 1e4,
+				rmsThreshold: .028,
+				onCandidate: (rec) => {
+					handleVerifiedBargeInCandidate(rec);
+				}
+			});
 		});
-		if (walkPhaseRef.current === "speaking") setWalkPhase("idle");
+		try {
+			await playerRef.current.speakChunksProgressive(chunks, {
+				useCloudTts: Boolean(useCloud),
+				allowNativeFallback: Boolean(opts.allowNativeFallback),
+				speechRate: cfg.prefs.speechRate || 1,
+				duckMusicMode: duckMusic,
+				keepAudioSessionAfter: Boolean(opts.keepAudioSessionAfter),
+				fetchTts: async (text, signal) => {
+					return (await apiCall("/api/voice/tts", {
+						method: "POST",
+						signal,
+						body: JSON.stringify({
+							text,
+							profileId: cfg.activeProfile.id
+						})
+					})).json().catch(() => ({ ok: false }));
+				},
+				onFirstLatency: onFirstTtsMs,
+				onCloudTtsError: () => {
+					toast("⚠️ 豆包语音偶发波动，已跳过该段（未混入机器音）");
+				},
+				onStateChange: (playing) => {
+					if (!playing && walkPhaseRef.current === "speaking") setWalkPhase("idle");
+				}
+			});
+		} finally {
+			bargeInMonitorRef.current?.stop();
+			playerRef.current?.setVolume(1);
+			if (walkPhaseRef.current === "speaking") setWalkPhase("idle");
+		}
 	};
 	const handleWalkUserText = async (spokenText, sttMs = null, wavKb = null) => {
 		const clean = String(spokenText || "").trim();
@@ -5877,6 +6342,7 @@ function VoiceCopilotSheets() {
 			await speakWalkReply(chunks, (ttsMs) => {
 				setLastLatencyBadge([...baseMetrics, `TTS ${ttsMs}ms`].join(" · "));
 			}, { keepAudioSessionAfter: shouldAutoListen });
+			if (bargeInTriggeredRef.current) return;
 			if ((wantsAutoListen ? shouldAutoListen || await canNativeAutoListenNow() : false) && walkOpenRef.current && walkPhaseRef.current === "idle") {
 				postNativeVoiceDiag("auto_listen_after_turn", `phase=${walkPhaseRef.current}`);
 				startWalkListening({ isAutoFollowUp: true });
@@ -10221,6 +10687,9 @@ var dictationFinalizeFn = null;
 var dictationFinalizeResolve = null;
 var dictationFinalizeTimer = null;
 var dictationSettleTimer = null;
+var activeByokHoldSession = null;
+var byokHoldMode = false;
+var byokHoldProviderLabel = "云端";
 var CJK_CHAR_RE = /[\u4e00-\u9fa5]/;
 var PUNCT_OR_SPACE_RE = /[，。！？、；：,.!?;:\s…~～—\-()（）[\]【】"'“”‘’]/;
 var LEADING_PARTICLE_RE = /^[的了着过吗呢吧啊呀呗嘛嘞啦]/;
@@ -10545,6 +11014,9 @@ function updateWechatOverlayUI() {
 				if (liveText) {
 					trEl.textContent = liveText;
 					trEl.classList.remove("is-placeholder");
+				} else if (byokHoldMode) {
+					trEl.textContent = holdStopping ? `👂 ${byokHoldProviderLabel}正在精准转写…` : holdZone === "cancel" ? "松开手指，取消录音" : `🎙️ ${byokHoldProviderLabel}云端听写中…`;
+					trEl.classList.add("is-placeholder");
 				} else {
 					trEl.textContent = "正在听你说话…";
 					trEl.classList.add("is-placeholder");
@@ -10552,10 +11024,10 @@ function updateWechatOverlayUI() {
 			}
 			const statusEl = document.getElementById("wechatOverlayStatus");
 			if (statusEl) {
-				if (holdStopping) statusEl.textContent = holdZone === "edit" ? "正在转文字…" : "正在发送…";
+				if (holdStopping) statusEl.textContent = byokHoldMode ? holdZone === "edit" ? `${byokHoldProviderLabel}识别后填入输入框…` : `${byokHoldProviderLabel}识别完成后发送…` : holdZone === "edit" ? "正在转文字…" : "正在发送…";
 				else if (holdZone === "cancel") statusEl.textContent = "松开手指，取消发送";
 				else if (holdZone === "edit") statusEl.textContent = "松开手指，填入输入框修改";
-				else statusEl.textContent = "松开 立即发送";
+				else statusEl.textContent = byokHoldMode ? `松开 ${byokHoldProviderLabel}识别发送` : "松开 立即发送";
 			}
 		}
 	}
@@ -10699,6 +11171,12 @@ function stopVoiceInput() {
 	dictationFinalizeFn = null;
 	const pendingResolve = dictationFinalizeResolve;
 	dictationFinalizeResolve = null;
+	const byokSess = activeByokHoldSession;
+	activeByokHoldSession = null;
+	byokHoldMode = false;
+	if (byokSess) try {
+		byokSess.cancel();
+	} catch {}
 	detachHoldWindowListeners();
 	if (voicePauseTimer) {
 		clearTimeout(voicePauseTimer);
@@ -10810,15 +11288,17 @@ function startHoldVoice(startX, startY, deps) {
 		showToast("⏳ 当前会话正在执行或为观察模式，暂不可说话");
 		return false;
 	}
+	const byokStt = win && win.__dshVoiceByokStt;
+	const useByokHold = Boolean(byokStt && typeof byokStt.canUse === "function" && byokStt.canUse());
 	const SpeechRecognitionCtor = win && (win.SpeechRecognition || win.webkitSpeechRecognition);
-	if (!SpeechRecognitionCtor || webSpeechServiceBlocked) {
+	if (!useByokHold && (!SpeechRecognitionCtor || webSpeechServiceBlocked)) {
 		const fallbackMsg = webSpeechServiceBlocked ? "🎙️ 桌面图标模式受苹果限制无法按住说话：请用 Safari 打开，或点键盘右下角「🎤」说话" : "🎙️ 当前浏览器不支持直接语音识别，已切回键盘，请用键盘「🎤」说话";
 		setWechatVoiceMode(false, false, true);
 		focusInputWithVisualPulse(input, "globalPromptInput", fallbackMsg, showToast);
 		return false;
 	}
 	if (holdStopping && !holdFinalized) finalizeHoldSession();
-	if (voiceSessionActive || activeVoiceRecognition || holdActive) stopVoiceInput();
+	if (voiceSessionActive || activeVoiceRecognition || holdActive || activeByokHoldSession) stopVoiceInput();
 	const vh = Number(win?.innerHeight) || 844;
 	holdActive = true;
 	holdStopping = false;
@@ -10840,6 +11320,25 @@ function startHoldVoice(startX, startY, deps) {
 	try {
 		if (nav && typeof nav.vibrate === "function") nav.vibrate(12);
 	} catch {}
+	if (useByokHold) {
+		byokHoldMode = true;
+		byokHoldProviderLabel = (typeof byokStt.getProviderLabel === "function" ? byokStt.getProviderLabel() : "") || "云端";
+		const session = byokStt.createSession();
+		activeByokHoldSession = session;
+		attachHoldWindowListeners();
+		updateWechatOverlayUI();
+		voiceWatchdogTimer = setTimeout(() => {
+			if (holdActive) endHoldVoice(deps);
+		}, 6e4);
+		session.start().catch((err) => {
+			if (activeByokHoldSession !== session) return;
+			holdHadFatalError = true;
+			stopVoiceInput();
+			showToast(err?.message || "🎙️ 无法打开麦克风，请检查系统权限");
+		});
+		return true;
+	}
+	byokHoldMode = false;
 	attachHoldWindowListeners();
 	updateWechatOverlayUI();
 	const resolvedLang = resolveSpeechLang();
@@ -11019,6 +11518,66 @@ function endHoldVoice(deps) {
 		stopVoiceInput();
 		if (input) input.value = baseDraft;
 		showToast("👆 请按住按钮说话，松开立即发送");
+		return;
+	}
+	if (byokHoldMode && activeByokHoldSession) {
+		const session = activeByokHoldSession;
+		activeByokHoldSession = null;
+		const finalZone = holdZone;
+		const baseDraft = holdBaseDraft;
+		const depsSnap = activeHoldDeps;
+		const providerLbl = byokHoldProviderLabel || "云端";
+		if (voiceWatchdogTimer) {
+			clearTimeout(voiceWatchdogTimer);
+			voiceWatchdogTimer = null;
+		}
+		holdActive = false;
+		holdStopping = true;
+		voiceSessionActive = false;
+		updateWechatOverlayUI();
+		session.stopAndTranscribe({ tailGraceMs: 150 }).then((res) => {
+			if (holdFinalized) return;
+			holdStopping = false;
+			byokHoldMode = false;
+			holdFinalized = true;
+			activeHoldDeps = null;
+			updateWechatOverlayUI();
+			if (res?.cancelled) return;
+			const onComposerInput = depsSnap?.onComposerInput || (win && win.onComposerInput ? win.onComposerInput : () => {});
+			const sendPrompt = depsSnap?.sendPrompt || (win && win.sendPromptToActiveSession ? win.sendPromptToActiveSession : () => {});
+			const input = typeof document !== "undefined" && document ? document.getElementById("globalPromptInput") : null;
+			if (!res?.ok) {
+				if (input) input.value = baseDraft;
+				showToast(`⚠️ ${providerLbl}识别失败：${res?.error || "请检查网络与密钥"}`);
+				return;
+			}
+			const spoken = String(res.text || "").trim();
+			if (!spoken || res.silence) {
+				if (input) input.value = baseDraft;
+				showToast("🎙️ 未听到清晰人声，请按住重试");
+				return;
+			}
+			const mergedText = joinDraftAndSpeech(baseDraft, spoken);
+			if (finalZone === "edit") {
+				if (input) input.value = mergedText;
+				returnToVoiceAfterSend = true;
+				setWechatVoiceMode(false, false, true);
+				onComposerInput();
+				showToast("✍️ 已转为文字，修改后点「发送」即可");
+				return;
+			}
+			if (input) input.value = mergedText;
+			onComposerInput();
+			sendPrompt();
+		}).catch((err) => {
+			if (holdFinalized) return;
+			holdStopping = false;
+			byokHoldMode = false;
+			holdFinalized = true;
+			activeHoldDeps = null;
+			updateWechatOverlayUI();
+			showToast(`⚠️ ${providerLbl}语音识别异常：${err?.message || "网络失败"}`);
+		});
 		return;
 	}
 	holdActive = false;
@@ -13353,6 +13912,8 @@ function createTriageDeckController(deps) {
 	let isLongPress = false;
 	let isRecording = false;
 	let speechRec = null;
+	let byokSpeechSession = null;
+	let byokSpeechMeta = null;
 	let listenersBound = false;
 	let modalSheetBound = false;
 	let activeModalKind = "";
@@ -13762,6 +14323,33 @@ function createTriageDeckController(deps) {
 	}
 	function startLiveSpeechDictation(vm, draft) {
 		stopTriageSpeechIfActive();
+		const byokStt = typeof window !== "undefined" ? window.__dshVoiceByokStt : null;
+		if (byokStt && typeof byokStt.canUse === "function" && byokStt.canUse()) {
+			if (byokSpeechSession) {
+				try {
+					byokSpeechSession.cancel();
+				} catch {}
+				byokSpeechSession = null;
+			}
+			const session = byokStt.createSession();
+			const providerLbl = (typeof byokStt.getProviderLabel === "function" ? byokStt.getProviderLabel() : "") || "云端";
+			byokSpeechSession = session;
+			byokSpeechMeta = {
+				draft,
+				baseText: String(draft.customText || "").trim(),
+				providerLbl
+			};
+			deps.showToast?.(isEn() ? `🎙️ Recording (${providerLbl})… release to transcribe` : `🎙️ ${providerLbl}录音中…松手转文字`);
+			session.start().catch((err) => {
+				if (byokSpeechSession !== session) return;
+				byokSpeechSession = null;
+				byokSpeechMeta = null;
+				isRecording = false;
+				deps.showToast?.(err?.message || (isEn() ? "Unable to open microphone" : "无法打开麦克风"));
+				render({ force: true });
+			});
+			return;
+		}
 		const SpeechCtor = typeof window !== "undefined" && (window.SpeechRecognition || window.webkitSpeechRecognition);
 		if (!SpeechCtor) {
 			isRecording = false;
@@ -13811,7 +14399,39 @@ function createTriageDeckController(deps) {
 			render({ force: true });
 		}
 	}
-	function stopLiveSpeechDictation() {
+	function stopLiveSpeechDictation(cancelOnly = false) {
+		if (byokSpeechSession) {
+			const session = byokSpeechSession;
+			const meta = byokSpeechMeta;
+			byokSpeechSession = null;
+			byokSpeechMeta = null;
+			isRecording = false;
+			render({ force: true });
+			if (cancelOnly) {
+				try {
+					session.cancel();
+				} catch {}
+				return;
+			}
+			const lbl = meta?.providerLbl || "云端";
+			deps.showToast?.(isEn() ? "👂 Transcribing…" : `👂 ${lbl}识别中…`);
+			session.stopAndTranscribe({ tailGraceMs: 150 }).then((res) => {
+				if (res?.cancelled) return;
+				if (res?.ok && String(res.text || "").trim() && meta?.draft) {
+					const spoken = String(res.text).trim();
+					meta.draft.customText = meta.baseText ? `${meta.baseText} ${spoken}` : spoken;
+					const ta = document.getElementById("triageCustomTextarea");
+					if (ta) ta.value = meta.draft.customText;
+					syncConfirmBtnOnly();
+					render({ force: true });
+					deps.showToast?.(isEn() ? `✅ Transcribed (${res.latencyMs ?? 0}ms)` : `✅ 识别完成 (${res.latencyMs ?? 0}ms)`);
+				} else if (res?.silence || res?.tooShort) deps.showToast?.(isEn() ? "No clear speech detected" : "未检测到清晰人声");
+				else deps.showToast?.(isEn() ? `⚠️ Transcription failed: ${res?.error || "check key"}` : `⚠️ ${lbl}识别失败：${res?.error || "请检查网络与密钥"}`);
+			}).catch(() => {
+				deps.showToast?.(isEn() ? "⚠️ Network error during transcription" : "⚠️ 网络异常，语音识别失败");
+			});
+			return;
+		}
 		if (speechRec) {
 			const r = speechRec;
 			speechRec = null;
@@ -14401,7 +15021,7 @@ function createTriageDeckController(deps) {
 		},
 		closeTriageDeckMode() {
 			flushAllGraceCommits();
-			stopLiveSpeechDictation();
+			stopLiveSpeechDictation(true);
 			stopTriageSpeechIfActive();
 			closeDetailModal();
 			isOpen = false;
@@ -14503,7 +15123,7 @@ function createTriageDeckController(deps) {
 		},
 		triageCustomCancel() {
 			clearTimeout(lpTimer);
-			if (isRecording) stopLiveSpeechDictation();
+			if (isRecording) stopLiveSpeechDictation(true);
 		},
 		triageConfirmBtnDown() {
 			const top = getOrderedActiveCards()[0];

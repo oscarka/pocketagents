@@ -52,6 +52,7 @@ export interface NativeAudioBridgeApi {
     opts?: { duckMusic?: boolean; keepSessionAfter?: boolean },
   ) => Promise<boolean>;
   stopPlayback?: (restoreIdle?: boolean) => Promise<boolean>;
+  setPlaybackVolume?: (volume: number) => Promise<boolean>;
   playEarcon?: (kind: EarconKind) => Promise<boolean>;
   startRecording?: (opts?: {
     autoVad?: boolean;
@@ -60,7 +61,14 @@ export interface NativeAudioBridgeApi {
     maxDurationMs?: number;
   }) => Promise<boolean>;
   stopRecording?: () => Promise<WavRecordingResult | null>;
-  on?: (eventName: 'level' | 'recordingAutoStop', fn: (detail: any) => void) => () => void;
+  startBargeInMonitor?: (opts?: {
+    minSpeechMs?: number;
+    vadSilenceMs?: number;
+    maxDurationMs?: number;
+    rmsThreshold?: number;
+  }) => Promise<boolean>;
+  stopBargeInMonitor?: () => Promise<boolean>;
+  on?: (eventName: 'level' | 'recordingAutoStop' | 'bargeInCandidate', fn: (detail: any) => void) => () => void;
 }
 
 export function getNativeAudioBridge(): NativeAudioBridgeApi | null {
@@ -168,6 +176,18 @@ export function notifyNativeBackgroundWakeDone(): void {
     const bridge = getNativeAudioBridge();
     if (bridge?.notifyBackgroundWakeDone) {
       void bridge.notifyBackgroundWakeDone().catch(() => {});
+    }
+  } catch {
+    // ignore
+  }
+}
+
+export function setNativePlaybackVolume(volume: number): void {
+  try {
+    const bridge = getNativeAudioBridge();
+    if (bridge?.setPlaybackVolume) {
+      const clamped = Math.max(0.05, Math.min(1, Number(volume) || 1));
+      void bridge.setPlaybackVolume(clamped).catch(() => {});
     }
   } catch {
     // ignore
@@ -647,14 +667,254 @@ export class WalkWavRecorder {
   }
 }
 
+export class WalkBargeInMonitor {
+  private active = false;
+  private nativeMode = false;
+  private nativeUnsubs: Array<() => void> = [];
+  private stream: MediaStream | null = null;
+  private audioCtx: AudioContext | null = null;
+  private sourceNode: MediaStreamAudioSourceNode | null = null;
+  private procNode: ScriptProcessorNode | null = null;
+  private silentGain: GainNode | null = null;
+
+  private clearNativeListeners(): void {
+    for (const fn of this.nativeUnsubs) {
+      try { fn(); } catch {}
+    }
+    this.nativeUnsubs = [];
+  }
+
+  isActive(): boolean {
+    return this.active;
+  }
+
+  async start(opts: {
+    minSpeechMs?: number;
+    vadSilenceMs?: number;
+    maxDurationMs?: number;
+    rmsThreshold?: number;
+    onCandidate: (result: WavRecordingResult) => void;
+  }): Promise<boolean> {
+    if (this.active) return true;
+    const minSpeechMs = Math.max(250, Number(opts.minSpeechMs) || 420);
+    const vadSilenceMs = Math.max(450, Number(opts.vadSilenceMs) || 700);
+    const maxDurationMs = Math.max(3000, Number(opts.maxDurationMs) || 10000);
+    const rmsThreshold = Number(opts.rmsThreshold) || 0.028;
+
+    const nativeBridge = getNativeAudioBridge();
+    if (isNativeIosShell()) {
+      // Only enable full-duplex native barge-in when PocketAgentsShell v1.1.6+ exposes startBargeInMonitor
+      // (never call WebKit getUserMedia inside iOS WKWebView, which conflicts with AVAudioSession).
+      if (!nativeBridge?.startBargeInMonitor || !nativeBridge.on) {
+        return false;
+      }
+      this.active = true;
+      this.nativeMode = true;
+      this.clearNativeListeners();
+      this.nativeUnsubs.push(
+        nativeBridge.on('bargeInCandidate', detail => {
+          if (!this.active) return;
+          if (detail && typeof detail === 'object' && detail.wavBase64) {
+            opts.onCandidate(detail as WavRecordingResult);
+          }
+        }),
+      );
+      try {
+        const ok = await nativeBridge.startBargeInMonitor({
+          minSpeechMs,
+          vadSilenceMs,
+          maxDurationMs,
+          rmsThreshold,
+        });
+        if (!ok) {
+          this.active = false;
+          this.nativeMode = false;
+          this.clearNativeListeners();
+          return false;
+        }
+        return true;
+      } catch {
+        this.active = false;
+        this.nativeMode = false;
+        this.clearNativeListeners();
+        return false;
+      }
+    }
+
+    // Standard browser path (Safari / Chrome): rely on hardware AEC (`echoCancellation: true`)
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+      return false;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          channelCount: 1,
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
+      const Ctor = (window as any).AudioContext || (window as any).webkitAudioContext;
+      if (!Ctor) {
+        stream.getTracks().forEach(t => t.stop());
+        return false;
+      }
+      const ctx: AudioContext = new Ctor();
+      if (ctx.state === 'suspended') {
+        await ctx.resume().catch(() => {});
+      }
+      const sampleRate = ctx.sampleRate || 48000;
+      const preRollMaxSamples = Math.round(sampleRate * 0.35);
+      let preRoll: Float32Array[] = [];
+      let preRollSamples = 0;
+      let capturing = false;
+      let speechStreakMs = 0;
+      let captureStartedAt = 0;
+      let lastVoiceAt = 0;
+      let capturedChunks: Float32Array[] = [];
+
+      const flushCaptured = () => {
+        if (!capturing || !capturedChunks.length) return;
+        const durationMs = Math.max(0, Date.now() - captureStartedAt);
+        const chunks = capturedChunks;
+        capturing = false;
+        speechStreakMs = 0;
+        capturedChunks = [];
+        preRoll = [];
+        preRollSamples = 0;
+        let total = 0;
+        for (const c of chunks) total += c.length;
+        const merged = new Float32Array(total);
+        let offset = 0;
+        for (const c of chunks) {
+          merged.set(c, offset);
+          offset += c.length;
+        }
+        const pcm16 = downsampleFloat32To16kInt16(merged, sampleRate, 16000);
+        const wavBytes = encodeInt16ToWavBytes(pcm16, 16000);
+        opts.onCandidate({
+          wavBase64: uint8ToBase64(wavBytes),
+          byteLength: wavBytes.length,
+          durationMs,
+          sampleRate: 16000,
+          hadSpeech: true,
+        });
+      };
+
+      const source = ctx.createMediaStreamSource(stream);
+      const proc = ctx.createScriptProcessor(2048, 1, 1);
+      const silentGain = ctx.createGain();
+      silentGain.gain.value = 0;
+
+      proc.onaudioprocess = ev => {
+        if (!this.active) return;
+        const input = ev.inputBuffer.getChannelData(0);
+        const copy = new Float32Array(input.length);
+        copy.set(input);
+        const frameMs = (copy.length / sampleRate) * 1000;
+
+        let sumSq = 0;
+        for (let i = 0; i < copy.length; i += 1) sumSq += copy[i] * copy[i];
+        const rms = Math.sqrt(sumSq / Math.max(1, copy.length));
+        const now = Date.now();
+
+        if (!capturing) {
+          preRoll.push(copy);
+          preRollSamples += copy.length;
+          while (preRollSamples > preRollMaxSamples && preRoll.length > 1) {
+            const removed = preRoll.shift()!;
+            preRollSamples -= removed.length;
+          }
+          if (rms >= rmsThreshold) {
+            speechStreakMs += frameMs;
+            if (speechStreakMs >= minSpeechMs) {
+              capturing = true;
+              captureStartedAt = now;
+              lastVoiceAt = now;
+              capturedChunks = preRoll.slice();
+              preRoll = [];
+              preRollSamples = 0;
+            }
+          } else {
+            speechStreakMs = Math.max(0, speechStreakMs - frameMs * 1.5);
+          }
+        } else {
+          capturedChunks.push(copy);
+          if (rms >= rmsThreshold * 0.65) {
+            lastVoiceAt = now;
+          }
+          if (now - lastVoiceAt >= vadSilenceMs || now - captureStartedAt >= maxDurationMs) {
+            flushCaptured();
+          }
+        }
+      };
+
+      source.connect(proc);
+      proc.connect(silentGain);
+      silentGain.connect(ctx.destination);
+
+      this.stream = stream;
+      this.audioCtx = ctx;
+      this.sourceNode = source;
+      this.procNode = proc;
+      this.silentGain = silentGain;
+      this.active = true;
+      this.nativeMode = false;
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  stop(): void {
+    if (!this.active) return;
+    this.active = false;
+    if (this.nativeMode) {
+      this.nativeMode = false;
+      this.clearNativeListeners();
+      const nativeBridge = getNativeAudioBridge();
+      void nativeBridge?.stopBargeInMonitor?.().catch(() => {});
+      return;
+    }
+    try {
+      this.procNode?.disconnect();
+      this.sourceNode?.disconnect();
+      this.silentGain?.disconnect();
+    } catch {}
+    try {
+      this.stream?.getTracks().forEach(t => t.stop());
+    } catch {}
+    try {
+      void this.audioCtx?.close();
+    } catch {}
+    this.procNode = null;
+    this.sourceNode = null;
+    this.silentGain = null;
+    this.stream = null;
+    this.audioCtx = null;
+  }
+}
+
 export class WalkSpeechPlayer {
   private runId = 0;
   private activeAudio: HTMLAudioElement | null = null;
   private activeSource: AudioBufferSourceNode | null = null;
+  private activeGain: GainNode | null = null;
   private playbackCtx: AudioContext | null = null;
   private activeObjectUrl = '';
   private abortCtrl: AbortController | null = null;
   private playing = false;
+  private currentVolume = 1.0;
+
+  setVolume(volume: number): void {
+    const v = Math.max(0.05, Math.min(1, Number(volume) || 1));
+    this.currentVolume = v;
+    try {
+      if (this.activeAudio) this.activeAudio.volume = v;
+      if (this.activeGain) this.activeGain.gain.value = v;
+    } catch {}
+    setNativePlaybackVolume(v);
+  }
 
   /**
    * Call synchronously inside a user tap/click handler BEFORE any async fetch()
@@ -771,11 +1031,18 @@ export class WalkSpeechPlayer {
         if (this.runId !== myRun) return false;
         return await new Promise<boolean>(resolve => {
           const src = this.playbackCtx!.createBufferSource();
+          const gain = this.playbackCtx!.createGain();
+          gain.gain.value = this.currentVolume;
           src.buffer = decoded;
-          src.connect(this.playbackCtx!.destination);
+          src.connect(gain);
+          gain.connect(this.playbackCtx!.destination);
           this.activeSource = src;
+          this.activeGain = gain;
           src.onended = () => {
-            if (this.activeSource === src) this.activeSource = null;
+            if (this.activeSource === src) {
+              this.activeSource = null;
+              this.activeGain = null;
+            }
             resolve(this.runId === myRun);
           };
           src.start(0);

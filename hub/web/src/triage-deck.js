@@ -476,6 +476,8 @@ export function createTriageDeckController(deps) {
   let isLongPress = false;
   let isRecording = false;
   let speechRec = null;
+  let byokSpeechSession = null;
+  let byokSpeechMeta = null;
   let listenersBound = false;
   let modalSheetBound = false;
   let activeModalKind = '';
@@ -974,9 +976,38 @@ export function createTriageDeckController(deps) {
     setTimeout(() => document.getElementById('triageCustomTextarea')?.focus(), 50);
   }
 
-  // ---- Voice Dictation via Web Speech API (Isolated from ChatStage) ----
+  // ---- Voice Dictation via Cloud BYOK STT (Doubao / Gemini) with Web Speech fallback ----
   function startLiveSpeechDictation(vm, draft) {
     stopTriageSpeechIfActive();
+    const byokStt = typeof window !== 'undefined' ? window.__dshVoiceByokStt : null;
+    if (byokStt && typeof byokStt.canUse === 'function' && byokStt.canUse()) {
+      if (byokSpeechSession) {
+        try { byokSpeechSession.cancel(); } catch { }
+        byokSpeechSession = null;
+      }
+      const session = byokStt.createSession();
+      const providerLbl =
+        (typeof byokStt.getProviderLabel === 'function' ? byokStt.getProviderLabel() : '') || '云端';
+      byokSpeechSession = session;
+      byokSpeechMeta = {
+        draft,
+        baseText: String(draft.customText || '').trim(),
+        providerLbl,
+      };
+      deps.showToast?.(
+        isEn() ? `🎙️ Recording (${providerLbl})… release to transcribe` : `🎙️ ${providerLbl}录音中…松手转文字`
+      );
+      void session.start().catch(err => {
+        if (byokSpeechSession !== session) return;
+        byokSpeechSession = null;
+        byokSpeechMeta = null;
+        isRecording = false;
+        deps.showToast?.(err?.message || (isEn() ? 'Unable to open microphone' : '无法打开麦克风'));
+        render({ force: true });
+      });
+      return;
+    }
+
     const SpeechCtor = typeof window !== 'undefined' && (window.SpeechRecognition || window.webkitSpeechRecognition);
     if (!SpeechCtor) {
       isRecording = false;
@@ -1037,7 +1068,47 @@ export function createTriageDeckController(deps) {
     }
   }
 
-  function stopLiveSpeechDictation() {
+  function stopLiveSpeechDictation(cancelOnly = false) {
+    if (byokSpeechSession) {
+      const session = byokSpeechSession;
+      const meta = byokSpeechMeta;
+      byokSpeechSession = null;
+      byokSpeechMeta = null;
+      isRecording = false;
+      render({ force: true });
+      if (cancelOnly) {
+        try { session.cancel(); } catch { }
+        return;
+      }
+      const lbl = meta?.providerLbl || '云端';
+      deps.showToast?.(isEn() ? '👂 Transcribing…' : `👂 ${lbl}识别中…`);
+      void session
+        .stopAndTranscribe({ tailGraceMs: 150 })
+        .then(res => {
+          if (res?.cancelled) return;
+          if (res?.ok && String(res.text || '').trim() && meta?.draft) {
+            const spoken = String(res.text).trim();
+            meta.draft.customText = meta.baseText ? `${meta.baseText} ${spoken}` : spoken;
+            const ta = document.getElementById('triageCustomTextarea');
+            if (ta) ta.value = meta.draft.customText;
+            syncConfirmBtnOnly();
+            render({ force: true });
+            deps.showToast?.(isEn() ? `✅ Transcribed (${res.latencyMs ?? 0}ms)` : `✅ 识别完成 (${res.latencyMs ?? 0}ms)`);
+          } else if (res?.silence || res?.tooShort) {
+            deps.showToast?.(isEn() ? 'No clear speech detected' : '未检测到清晰人声');
+          } else {
+            deps.showToast?.(
+              isEn()
+                ? `⚠️ Transcription failed: ${res?.error || 'check key'}`
+                : `⚠️ ${lbl}识别失败：${res?.error || '请检查网络与密钥'}`
+            );
+          }
+        })
+        .catch(() => {
+          deps.showToast?.(isEn() ? '⚠️ Network error during transcription' : '⚠️ 网络异常，语音识别失败');
+        });
+      return;
+    }
     if (speechRec) {
       const r = speechRec;
       speechRec = null;
@@ -1781,7 +1852,7 @@ export function createTriageDeckController(deps) {
       },
       closeTriageDeckMode() {
         flushAllGraceCommits();
-        stopLiveSpeechDictation();
+        stopLiveSpeechDictation(true);
         stopTriageSpeechIfActive();
         closeDetailModal();
         isOpen = false;
@@ -1888,7 +1959,7 @@ export function createTriageDeckController(deps) {
       },
       triageCustomCancel() {
         clearTimeout(lpTimer);
-        if (isRecording) stopLiveSpeechDictation();
+        if (isRecording) stopLiveSpeechDictation(true);
       },
       triageConfirmBtnDown() {
         const top = getOrderedActiveCards()[0];

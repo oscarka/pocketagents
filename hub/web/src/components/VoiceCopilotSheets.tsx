@@ -2,6 +2,7 @@ import { h, Fragment } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { applyLangToDom, getLangPref } from '../utils/i18n.js';
 import {
+  WalkBargeInMonitor,
   WalkWavRecorder,
   WalkSpeechPlayer,
   WalkWakeLockManager,
@@ -19,6 +20,7 @@ import {
   setWalkAudioSessionMode,
   setWalkBackgroundKeepAlive,
 } from '../voice/walkAudio';
+import { evaluateBargeInUtterance } from '../voice/bargeInGate.js';
 import {
   VoiceProviderSheet,
   type VoiceConfigState,
@@ -261,9 +263,13 @@ export function VoiceCopilotSheets() {
   }, [walkOpen, walkExpanded, walkPhase]);
 
   const recorderRef = useRef<WalkWavRecorder | null>(null);
+  const bargeInMonitorRef = useRef<WalkBargeInMonitor | null>(null);
   const playerRef = useRef<WalkSpeechPlayer | null>(null);
   const wakeRef = useRef<WalkWakeLockManager | null>(null);
   const nativeRecRef = useRef<any>(null);
+  const activeSpeakingTextRef = useRef('');
+  const bargeInTriggeredRef = useRef(false);
+  const bargeInVerifyingRef = useRef(false);
   const voiceSessionIdRef = useRef(`walk_${Math.random().toString(36).slice(2, 10)}`);
   const seenApprovalsRef = useRef<Set<string>>(new Set());
   const seenCompletedRef = useRef<Set<string>>(new Set());
@@ -293,6 +299,7 @@ export function VoiceCopilotSheets() {
   useEffect(() => { configRef.current = config; }, [config]);
 
   if (!recorderRef.current) recorderRef.current = new WalkWavRecorder();
+  if (!bargeInMonitorRef.current) bargeInMonitorRef.current = new WalkBargeInMonitor();
   if (!playerRef.current) playerRef.current = new WalkSpeechPlayer();
   if (!wakeRef.current) wakeRef.current = new WalkWakeLockManager();
 
@@ -607,7 +614,97 @@ export function VoiceCopilotSheets() {
       playerRef.current?.stop();
     };
 
-    // Independent Chat Voice Dictation helper: routes via `chatSttTarget` ('native' | 'follow_walk' | 'cred:<id>')
+    // Independent Chat Voice Dictation & Hold-to-Talk helper: routes via `chatSttTarget` ('native' | 'follow_walk' | 'cred:<id>')
+    const resolveChatSttStageOverride = () => {
+      const cfg = configRef.current;
+      const sttTarget = String(cfg?.prefs?.chatSttTarget || (cfg?.prefs?.useByokForChatStt ? 'follow_walk' : 'native'));
+      return resolveFeatureStageConfig(sttTarget, 'stt', cfg?.activeProfile, cfg?.credentials || []);
+    };
+    const postCloudSttWithRetry = async (wavBase64: string, stageOverride: any) => {
+      const cfg = configRef.current;
+      let lastRes: any = { ok: false, error: '网络异常' };
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        if (attempt > 0) {
+          await new Promise(resolve => setTimeout(resolve, 350));
+        }
+        try {
+          const r = await apiCall('/api/voice/stt', {
+            method: 'POST',
+            body: JSON.stringify({
+              audioBase64: wavBase64,
+              mimeType: 'audio/wav',
+              profileId: cfg.activeProfile.id,
+              ...(stageOverride ? { stageOverride } : {}),
+            }),
+          });
+          const data = await r.json().catch(() => ({ ok: false, error: `HTTP ${r.status}` }));
+          if (r.ok && data?.ok) return data;
+          lastRes = data || { ok: false, error: `HTTP ${r.status}` };
+          if (r.status >= 500 || r.status === 429) continue;
+          return lastRes;
+        } catch (err: any) {
+          lastRes = { ok: false, error: err?.message || '网络异常' };
+        }
+      }
+      return lastRes;
+    };
+
+    (window as any).__dshVoiceByokStt = {
+      canUse: () => Boolean(resolveChatSttStageOverride()),
+      getProviderLabel: () => {
+        const st = resolveChatSttStageOverride();
+        if (!st) return '';
+        if (st.provider === 'volcengine_asr') return '豆包';
+        if (st.provider === 'gemini') return 'Gemini';
+        return '云端';
+      },
+      createSession: ({ onLevel }: { onLevel?: (lvl: number) => void } = {}) => {
+        const stageOverride = resolveChatSttStageOverride();
+        const rec = new WalkWavRecorder();
+        let cancelled = false;
+        let started = false;
+        let stopped = false;
+        return {
+          start: async () => {
+            if (!stageOverride) throw new Error('未配置云端语音听写');
+            if (cancelled || stopped) return;
+            setWalkAudioSessionMode('play-and-record');
+            started = true;
+            await rec.start({ autoVad: false, maxDurationMs: 60000, onLevel });
+          },
+          cancel: () => {
+            cancelled = true;
+            stopped = true;
+            try { rec.stop(); } catch {}
+            if (configRef.current?.prefs?.duckMusicMode !== false) {
+              setWalkAudioSessionMode('ambient');
+            }
+          },
+          stopAndTranscribe: async ({ tailGraceMs = 150 }: { tailGraceMs?: number } = {}) => {
+            if (cancelled || stopped || !started) {
+              return { ok: true, text: '', silence: true, cancelled: true };
+            }
+            stopped = true;
+            if (tailGraceMs > 0) {
+              await new Promise(resolve => setTimeout(resolve, tailGraceMs));
+            }
+            if (cancelled) {
+              try { rec.stop(); } catch {}
+              return { ok: true, text: '', silence: true, cancelled: true };
+            }
+            const wav = await rec.stopAsync().catch(() => null);
+            if (configRef.current?.prefs?.duckMusicMode !== false) {
+              setWalkAudioSessionMode('ambient');
+            }
+            if (!wav || wav.byteLength < 1200) {
+              return { ok: true, text: '', silence: true, tooShort: true };
+            }
+            return postCloudSttWithRetry(wav.wavBase64, stageOverride);
+          },
+        };
+      },
+    };
+
     let chatDictRecorder: WalkWavRecorder | null = null;
     let chatDictBtnId = '';
     (window as any).__dshVoiceByokToggleDictation = (
@@ -616,9 +713,7 @@ export function VoiceCopilotSheets() {
       showToastFn: (m: string) => void,
       onComposerInputFn: () => void,
     ) => {
-      const cfg = configRef.current;
-      const sttTarget = String(cfg?.prefs?.chatSttTarget || (cfg?.prefs?.useByokForChatStt ? 'follow_walk' : 'native'));
-      const stageOverride = resolveFeatureStageConfig(sttTarget, 'stt', cfg?.activeProfile, cfg?.credentials || []);
+      const stageOverride = resolveChatSttStageOverride();
       if (!stageOverride) {
         return false;
       }
@@ -632,23 +727,15 @@ export function VoiceCopilotSheets() {
         const activeRec = chatDictRecorder;
         chatDictRecorder = null;
         chatDictBtnId = '';
-        void activeRec.stopAsync().then(rec => {
-          if (!rec || rec.byteLength < 1200) {
-            showToastFn('⏹ 录音太短，已取消');
-            return;
-          }
-          showToastFn('👂 云端语音识别中…');
-          return apiCall('/api/voice/stt', {
-            method: 'POST',
-            body: JSON.stringify({
-              audioBase64: rec.wavBase64,
-              mimeType: 'audio/wav',
-              profileId: cfg.activeProfile.id,
-              stageOverride,
-            }),
-          })
-            .then(r => r.json().catch(() => ({ ok: false })))
-            .then(data => {
+        void new Promise(resolve => setTimeout(resolve, 150))
+          .then(() => activeRec.stopAsync())
+          .then(rec => {
+            if (!rec || rec.byteLength < 1200) {
+              showToastFn('⏹ 录音太短，已取消');
+              return;
+            }
+            showToastFn('👂 云端语音识别中…');
+            return postCloudSttWithRetry(rec.wavBase64, stageOverride).then(data => {
               if (data?.ok && String(data.text || '').trim()) {
                 const sep = input.value && !/\s$/.test(input.value) ? ' ' : '';
                 input.value = `${input.value}${sep}${String(data.text).trim()}`;
@@ -659,16 +746,16 @@ export function VoiceCopilotSheets() {
               } else {
                 showToastFn(`⚠️ 云端识别失败：${data?.error || '请检查密钥'}`);
               }
-            })
-            .catch(() => showToastFn('⚠️ 网络异常，云端识别失败'));
-        });
+            });
+          })
+          .catch(() => showToastFn('⚠️ 网络异常，云端识别失败'));
         return true;
       }
 
       chatDictRecorder = new WalkWavRecorder();
       chatDictBtnId = btnId;
       btn?.classList.add('recording');
-      showToastFn('🎙️ BYOK 录音中…说完再点一次发送转写');
+      showToastFn('🎙️ 云端录音中…说完再点一次发送转写');
       void chatDictRecorder.start({ autoVad: false }).catch((err: any) => {
         btn?.classList.remove('recording');
         chatDictRecorder = null;
@@ -689,6 +776,7 @@ export function VoiceCopilotSheets() {
         document.removeEventListener('visibilitychange', onVisSyncNative);
       }
       playerRef.current?.stop();
+      bargeInMonitorRef.current?.stop();
       recorderRef.current?.stop();
       void setWalkBackgroundKeepAlive(false, false, false);
       void wakeRef.current?.disable();
@@ -886,6 +974,11 @@ export function VoiceCopilotSheets() {
         allowNativeFallback: nextItem.kind === 'approval',
       });
 
+      if (bargeInTriggeredRef.current) {
+        startedAutoListen = true;
+        return;
+      }
+
       const canListenAfterSpeak = wantsAutoListen
         ? (micReadyForAutoListen || await canNativeAutoListenNow())
         : false;
@@ -975,6 +1068,7 @@ export function VoiceCopilotSheets() {
   }, []);
 
   const stopAllListening = () => {
+    bargeInMonitorRef.current?.stop();
     if (recorderRef.current?.isRecording()) {
       recorderRef.current.stop();
     }
@@ -985,10 +1079,75 @@ export function VoiceCopilotSheets() {
     setMicLevel(0);
   };
 
+  const handleVerifiedBargeInCandidate = async (rec: { wavBase64: string; byteLength: number }) => {
+    if (
+      !walkOpenRef.current
+      || walkPhaseRef.current !== 'speaking'
+      || bargeInTriggeredRef.current
+      || bargeInVerifyingRef.current
+    ) {
+      return;
+    }
+    if (!rec?.wavBase64 || rec.byteLength < 2000) return;
+    bargeInVerifyingRef.current = true;
+    // Softly lower TTS volume while Doubao verifies the utterance — NEVER hard-stop until verified!
+    playerRef.current?.setVolume(0.25);
+    try {
+      const cfg = configRef.current;
+      const res = await apiCall('/api/voice/stt', {
+        method: 'POST',
+        body: JSON.stringify({
+          audioBase64: rec.wavBase64,
+          mimeType: 'audio/wav',
+          profileId: cfg.activeProfile.id,
+        }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!walkOpenRef.current || walkPhaseRef.current !== 'speaking' || bargeInTriggeredRef.current) {
+        return;
+      }
+      const rawText = res.ok && data?.ok && !data?.silence ? String(data.text || '').trim() : '';
+      const verdict = evaluateBargeInUtterance(rawText, activeSpeakingTextRef.current);
+      if (!verdict.accept) {
+        postNativeVoiceDiag('barge_in_rejected', `reason=${verdict.reason} txt=${rawText.slice(0, 32)}`);
+        playerRef.current?.setVolume(1.0);
+        return;
+      }
+
+      // Verified real user speech! Stop TTS cleanly and execute immediately.
+      bargeInTriggeredRef.current = true;
+      bargeInMonitorRef.current?.stop();
+      playerRef.current?.stop();
+      playerRef.current?.setVolume(1.0);
+      postNativeVoiceDiag('barge_in_accepted', `reason=${verdict.reason} stopOnly=${verdict.stopOnly ? 1 : 0} len=${verdict.cleaned.length}`);
+
+      if (verdict.stopOnly) {
+        setLastUserText(verdict.cleaned);
+        setLastActionBadge('🔇 已语音打断播报');
+        setWalkPhase('idle');
+        playEarcon('done');
+        if (cfg.prefs.duckMusicMode !== false) {
+          setWalkAudioSessionMode('ambient');
+        }
+        return;
+      }
+
+      playEarcon('pin_ok');
+      const wavKb = Math.max(1, Math.round(rec.byteLength / 1024));
+      void handleWalkUserText(verdict.cleaned, data?.latencyMs ?? 0, wavKb);
+    } catch {
+      if (walkPhaseRef.current === 'speaking' && !bargeInTriggeredRef.current) {
+        playerRef.current?.setVolume(1.0);
+      }
+    } finally {
+      bargeInVerifyingRef.current = false;
+    }
+  };
+
   const speakWalkReply = async (
     chunks: string[],
     onFirstTtsMs?: (ms: number) => void,
-    opts: { keepAudioSessionAfter?: boolean; allowNativeFallback?: boolean } = {},
+    opts: { keepAudioSessionAfter?: boolean; allowNativeFallback?: boolean; enableBargeIn?: boolean } = {},
   ) => {
     const cfg = configRef.current;
     const duckMusic = cfg.prefs.duckMusicMode !== false;
@@ -1000,33 +1159,69 @@ export function VoiceCopilotSheets() {
       return;
     }
     const useCloud = cfg.activeProfile?.tts?.provider && cfg.activeProfile.tts.provider !== 'native';
+    const hasCloudStt = Boolean(cfg.activeProfile?.stt?.provider && cfg.activeProfile.stt.provider !== 'native');
+    activeSpeakingTextRef.current = (chunks || []).join(' ');
+    bargeInTriggeredRef.current = false;
+    bargeInVerifyingRef.current = false;
+    playerRef.current?.setVolume(1.0);
     setWalkPhase('speaking');
-    await playerRef.current!.speakChunksProgressive(chunks, {
-      useCloudTts: Boolean(useCloud),
-      allowNativeFallback: Boolean(opts.allowNativeFallback),
-      speechRate: cfg.prefs.speechRate || 1.0,
-      duckMusicMode: duckMusic,
-      keepAudioSessionAfter: Boolean(opts.keepAudioSessionAfter),
-      fetchTts: async (text, signal) => {
-        const r = await apiCall('/api/voice/tts', {
-          method: 'POST',
-          signal,
-          body: JSON.stringify({ text, profileId: cfg.activeProfile.id }),
-        });
-        return r.json().catch(() => ({ ok: false }));
-      },
-      onFirstLatency: onFirstTtsMs,
-      onCloudTtsError: () => {
-        toast('⚠️ 豆包语音偶发波动，已跳过该段（未混入机器音）');
-      },
-      onStateChange: playing => {
-        if (!playing && walkPhaseRef.current === 'speaking') {
-          setWalkPhase('idle');
+
+    // Start verified voice barge-in monitor while speaking (only stops playback after Doubao confirms
+    // a real command or >=4-char non-echo utterance — ignores coughs, fillers, and speaker echo!)
+    const shouldMonitorBargeIn = Boolean(
+      opts.enableBargeIn !== false
+      && walkOpenRef.current
+      && cfg.prefs.autoListenAfterBriefing
+      && hasCloudStt,
+    );
+    if (shouldMonitorBargeIn) {
+      void canNativeAutoListenNow().then(canNow => {
+        if (!canNow || !walkOpenRef.current || walkPhaseRef.current !== 'speaking' || bargeInTriggeredRef.current) {
+          return;
         }
-      },
-    });
-    if (walkPhaseRef.current === 'speaking') {
-      setWalkPhase('idle');
+        void bargeInMonitorRef.current?.start({
+          minSpeechMs: 420,
+          vadSilenceMs: 700,
+          maxDurationMs: 10000,
+          rmsThreshold: 0.028,
+          onCandidate: rec => {
+            void handleVerifiedBargeInCandidate(rec);
+          },
+        });
+      });
+    }
+
+    try {
+      await playerRef.current!.speakChunksProgressive(chunks, {
+        useCloudTts: Boolean(useCloud),
+        allowNativeFallback: Boolean(opts.allowNativeFallback),
+        speechRate: cfg.prefs.speechRate || 1.0,
+        duckMusicMode: duckMusic,
+        keepAudioSessionAfter: Boolean(opts.keepAudioSessionAfter),
+        fetchTts: async (text, signal) => {
+          const r = await apiCall('/api/voice/tts', {
+            method: 'POST',
+            signal,
+            body: JSON.stringify({ text, profileId: cfg.activeProfile.id }),
+          });
+          return r.json().catch(() => ({ ok: false }));
+        },
+        onFirstLatency: onFirstTtsMs,
+        onCloudTtsError: () => {
+          toast('⚠️ 豆包语音偶发波动，已跳过该段（未混入机器音）');
+        },
+        onStateChange: playing => {
+          if (!playing && walkPhaseRef.current === 'speaking') {
+            setWalkPhase('idle');
+          }
+        },
+      });
+    } finally {
+      bargeInMonitorRef.current?.stop();
+      playerRef.current?.setVolume(1.0);
+      if (walkPhaseRef.current === 'speaking') {
+        setWalkPhase('idle');
+      }
     }
   };
 
@@ -1126,6 +1321,10 @@ export function VoiceCopilotSheets() {
         },
         { keepAudioSessionAfter: shouldAutoListen },
       );
+
+      if (bargeInTriggeredRef.current) {
+        return;
+      }
 
       const shouldAutoListenAfterSpeak = wantsAutoListen
         ? (shouldAutoListen || await canNativeAutoListenNow())
