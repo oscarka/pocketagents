@@ -7,13 +7,17 @@ export const PROTOCOL_LABELS = {
   gemini: 'Gemini 原生',
   volcengine_asr: '火山听写',
   volcengine_tts: '火山播报',
+  dashscope: '阿里云百炼',
+  deepgram: 'Deepgram',
 };
 
 export const STAGE_CAPABILITIES = {
-  openai_compat: ['stt', 'brain', 'tts'],
+  openai_compat: ['stt', 'brain', 'tts', 'realtime'],
   gemini: ['stt', 'brain', 'tts'],
   volcengine_asr: ['stt'],
   volcengine_tts: ['tts'],
+  dashscope: ['stt', 'brain', 'realtime'],
+  deepgram: ['stt'],
 };
 
 export const VOICE_PROVIDER_PRESETS = [
@@ -90,16 +94,51 @@ export const VOICE_PROVIDER_PRESETS = [
     key: 'volcengine_voice',
     icon: '👂',
     title: '火山豆包语音',
-    sub: '中文听写 ASR + 拟人播报 TTS',
+    sub: '中文流式听写 2.0 + 拟人播报',
     provider: 'volcengine_asr',
-    label: '火山豆包识别 (ASR)',
+    label: '火山豆包流式听写',
     baseUrl: 'https://openspeech.bytedance.com/api/v3/auc/bigmodel/recognize/flash',
     defaultModel: '',
     defaultVoice: '',
-    resourceId: 'volc.bigasr.auc_turbo',
+    resourceId: 'volc.seedasr.sauc.duration',
     alsoCreateTts: true,
     modelChips: [],
     keyPlaceholder: '粘贴火山引擎「语音技术」API Key',
+  },
+  {
+    key: 'dashscope',
+    icon: '☁️',
+    title: '阿里云百炼',
+    sub: '千问实时听写 / 1-Key Omni 通话',
+    provider: 'dashscope',
+    label: '阿里云百炼',
+    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    defaultModel: 'qwen3-asr-flash-realtime',
+    defaultVoice: 'Tina',
+    resourceId: '',
+    modelChips: [
+      { label: '千问纯实时听写 (qwen3-asr-flash-realtime)', value: 'qwen3-asr-flash-realtime' },
+      { label: '千问一键实时通话 (qwen3.8-omni-flash-realtime)', value: 'qwen3.8-omni-flash-realtime' },
+      { label: '千问极速大脑 (qwen-flash)', value: 'qwen-flash' },
+    ],
+    keyPlaceholder: '粘贴阿里云百炼 API Key（例：sk-...）',
+  },
+  {
+    key: 'deepgram',
+    icon: '🎙️',
+    title: 'Deepgram',
+    sub: '全球首选流式听写 · 新号送 $200',
+    provider: 'deepgram',
+    label: 'Deepgram Nova-3',
+    baseUrl: 'https://api.deepgram.com/v1',
+    defaultModel: 'nova-3',
+    defaultVoice: '',
+    resourceId: '',
+    modelChips: [
+      { label: 'nova-3 (多语种推荐)', value: 'nova-3' },
+      { label: 'nova-2', value: 'nova-2' },
+    ],
+    keyPlaceholder: '粘贴 Deepgram API Key',
   },
   {
     key: 'siliconflow',
@@ -158,6 +197,12 @@ export const TTS_VOICE_OPTIONS = {
     { label: '阳光男声', value: 'zh_male_m191_uranus_bigtts' },
     { label: '涛诚 稳重男声', value: 'zh_male_taocheng_uranus_bigtts' },
   ],
+  dashscope: [
+    { label: 'Tina (自然女声)', value: 'Tina' },
+    { label: 'Cherry (清甜女声)', value: 'Cherry' },
+    { label: 'Serena (知性女声)', value: 'Serena' },
+    { label: 'Ethan (温和男声)', value: 'Ethan' },
+  ],
   gemini: [
     { label: 'Kore (知性女声)', value: 'Kore' },
     { label: 'Puck (轻快)', value: 'Puck' },
@@ -165,9 +210,9 @@ export const TTS_VOICE_OPTIONS = {
     { label: 'Zephyr (清亮)', value: 'Zephyr' },
   ],
   openai_compat: [
+    { label: 'shimmer (自然)', value: 'shimmer' },
     { label: 'alloy (中性)', value: 'alloy' },
     { label: 'nova (清晰女声)', value: 'nova' },
-    { label: 'shimmer (柔和)', value: 'shimmer' },
     { label: 'coral (自然)', value: 'coral' },
   ],
 };
@@ -189,6 +234,10 @@ export function extractHostFromUrl(rawUrl = '') {
 
 export function inferDefaultBrainModel(cred) {
   if (!cred) return 'rule-router';
+  if (cred.provider === 'dashscope') {
+    const m = String(cred.defaultModel || '').trim();
+    return m && !/asr|omni|realtime/i.test(m) ? m : 'qwen-flash';
+  }
   if (cred.defaultModel && String(cred.defaultModel).trim()) {
     return String(cred.defaultModel).trim();
   }
@@ -215,6 +264,14 @@ export function inferStageModelForCred(cred, stage) {
   if (cred.provider === 'volcengine_tts') {
     return String(cred.resourceId || '').trim() || 'seed-tts-2.0';
   }
+  if (cred.provider === 'dashscope') {
+    if (stage === 'stt') return /asr/i.test(m) ? m : 'qwen3-asr-flash-realtime';
+    if (stage === 'realtime') return /omni/i.test(m) ? m : 'qwen3.8-omni-flash-realtime';
+    return inferDefaultBrainModel(cred);
+  }
+  if (cred.provider === 'deepgram') {
+    return m || 'nova-3';
+  }
   if (cred.provider === 'gemini') {
     if (stage === 'tts') {
       return /tts/i.test(m) ? m : 'gemini-2.5-flash-preview-tts';
@@ -225,6 +282,9 @@ export function inferStageModelForCred(cred, stage) {
   if (stage === 'stt') {
     if (/whisper|transcribe|asr|audio|sensevoice/i.test(m)) return m;
     return 'gpt-4o-mini-transcribe';
+  }
+  if (stage === 'realtime') {
+    return /realtime/i.test(m) ? m : 'gpt-realtime-mini';
   }
   if (stage === 'tts') {
     if (/tts|speech|cosyvoice|fish/i.test(m)) return m;
@@ -451,10 +511,17 @@ export function computeSmartDefaultSelection(cred, currentSelection, extraPaired
     next.ttsVal = val;
     return next;
   }
-  if (cred.provider === 'volcengine_asr') {
+  if (cred.provider === 'volcengine_asr' || cred.provider === 'deepgram') {
     next.sttVal = val;
-    if (extraPairedTtsCred?.id) {
+    if (cred.provider === 'volcengine_asr' && extraPairedTtsCred?.id) {
       next.ttsVal = `cred:${extraPairedTtsCred.id}`;
+    }
+    return next;
+  }
+  if (cred.provider === 'dashscope') {
+    next.sttVal = val;
+    if (next.brainVal === 'native') {
+      next.brainVal = val;
     }
     return next;
   }
@@ -650,5 +717,79 @@ export function getCredentialFeatureUsages(credId, activeProfile, prefs = {}, cr
   if (String(prefs?.chatTtsTarget || '') === `cred:${credId}`) {
     tags.push({ key: 'chat_tts', label: '聊天·说', tone: 'tts' });
   }
+  if (prefs?.voiceMode === 'realtime' && String(prefs?.realtimeCredId || '') === credId) {
+    tags.push({ key: 'realtime', label: '一键实时', tone: 'brain' });
+  }
   return tags;
+}
+
+export function isCredentialRealtimeCapable(cred) {
+  if (!cred) return false;
+  if (cred.provider === 'dashscope') return true;
+  if (cred.provider === 'openai_compat') {
+    return extractHostFromUrl(cred.baseUrl).toLowerCase() === 'api.openai.com';
+  }
+  return false;
+}
+
+export function isCredentialStreamingStt(cred, stageCfg = null) {
+  if (!cred) return false;
+  if (cred.provider === 'dashscope' || cred.provider === 'deepgram') return true;
+  if (cred.provider === 'volcengine_asr') {
+    const resId = String(stageCfg?.model || cred.resourceId || '').toLowerCase();
+    const url = String(cred.baseUrl || '').toLowerCase();
+    return resId.includes('.sauc') || url.includes('/sauc/');
+  }
+  if (cred.provider === 'openai_compat') {
+    return extractHostFromUrl(cred.baseUrl).toLowerCase() === 'api.openai.com';
+  }
+  return false;
+}
+
+export function resolveClientStreamCapability(voiceCfg) {
+  const prefs = voiceCfg?.prefs || {};
+  const creds = Array.isArray(voiceCfg?.credentials) ? voiceCfg.credentials : [];
+  const prof = voiceCfg?.activeProfile || null;
+  const mode = String(prefs.voiceMode || 'pipeline').toLowerCase();
+
+  if (mode === 'realtime') {
+    const cred = (prefs.realtimeCredId && creds.find(c => c.id === prefs.realtimeCredId))
+      || creds.find(c => isCredentialRealtimeCapable(c))
+      || null;
+    if (!cred) {
+      return {
+        supported: false,
+        mode: 'realtime',
+        label: '',
+        reason: '请先添加阿里云百炼或 OpenAI 官方 Key',
+      };
+    }
+    const label = cred.provider === 'dashscope'
+      ? `一键全包 · ${prefs.realtimeModel || 'Qwen Omni'}`
+      : `一键全包 · ${prefs.realtimeModel || 'OpenAI Realtime'}`;
+    return { supported: true, mode: 'realtime', label, credId: cred.id, reason: '' };
+  }
+
+  if (prefs.streamingSttEnabled === false) {
+    return { supported: false, mode: 'pipeline', label: '', reason: '已关闭实时流式听写' };
+  }
+  const sttCred = resolveStageCred(prof?.stt, creds);
+  if (!sttCred || !isCredentialStreamingStt(sttCred, prof?.stt)) {
+    return {
+      supported: false,
+      mode: 'pipeline',
+      label: '',
+      reason: sttCred?.provider === 'volcengine_asr'
+        ? '当前为火山录音版（auc），把 Resource ID 切为 volc.seedasr.sauc.duration 即可开启实时流式免提'
+        : '配置豆包流式 2.0 / 阿里云百炼 / Deepgram / OpenAI 即可开启实时流式免提',
+    };
+  }
+  const earLabel = sttCred.provider === 'volcengine_asr'
+    ? '豆包流式 2.0'
+    : sttCred.provider === 'dashscope'
+      ? '千问实时听写'
+      : sttCred.provider === 'deepgram'
+        ? 'Deepgram 流式'
+        : 'OpenAI 实时听写';
+  return { supported: true, mode: 'pipeline', label: `实时流式 · ${earLabel}`, credId: sttCred.id, reason: '' };
 }

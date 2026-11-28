@@ -49,17 +49,17 @@ export const VOICE_PROVIDER_CATALOG = [
   },
   {
     id: 'volcengine_asr',
-    name: '火山豆包语音识别 (Flash ASR)',
+    name: '火山豆包语音识别 (流式 2.0 / 录音 ASR)',
     shortName: '火山 ASR',
     capabilities: ['stt'],
     authMode: 'volcengine',
     defaultBaseUrl: 'https://openspeech.bytedance.com/api/v3/auc/bigmodel/recognize/flash',
     defaultResourceId: 'volc.bigasr.auc_turbo',
     sampleModels: {
-      stt: ['volc.seedasr.auc', 'volc.bigasr.auc_turbo', 'volc.bigasr.auc'],
+      stt: ['volc.seedasr.sauc.duration', 'volc.seedasr.auc', 'volc.bigasr.auc_turbo', 'volc.bigasr.auc'],
     },
     sampleVoices: [],
-    hint: '支持 API Key 或 AppID + Access Token 鉴权，16kHz WAV 极速识别（静音自动返回 20000003）',
+    hint: '支持流式实时 2.0（volc.seedasr.sauc.duration，边说边出字幕免提对话）及录音版（volc.seedasr.auc）',
   },
   {
     id: 'volcengine_tts',
@@ -80,6 +80,41 @@ export const VOICE_PROVIDER_CATALOG = [
       'zh_male_taocheng_uranus_bigtts',
     ],
     hint: '支持 3.0 新版（仅 API Key，voice.cn-beijing.volces.com）与 2.0 经典版（API Key 或 AppID + Token）',
+  },
+  {
+    id: 'dashscope',
+    name: '阿里云百炼（千问实时听写 / Omni 通话）',
+    shortName: '阿里云百炼',
+    capabilities: ['stt', 'brain', 'realtime'],
+    authMode: 'apiKey',
+    defaultBaseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    baseUrlExamples: [
+      { label: '百炼北京默认', url: 'https://dashscope.aliyuncs.com/compatible-mode/v1' },
+      { label: '百炼新加坡国际', url: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1' },
+    ],
+    sampleModels: {
+      stt: ['qwen3-asr-flash-realtime'],
+      realtime: ['qwen3.8-omni-flash-realtime', 'qwen-omni-turbo-realtime'],
+      brain: ['qwen-flash', 'qwen-turbo', 'qwen-plus'],
+    },
+    sampleVoices: ['Tina', 'Cherry', 'Serena', 'Ethan', 'Chelsie'],
+    hint: '1 把百炼 Key 两种用法：① 只当实时打字员（qwen3-asr-flash-realtime，大脑照用 DeepSeek/Claude）；② 一键全包实时通话（Qwen Omni）',
+  },
+  {
+    id: 'deepgram',
+    name: 'Deepgram（全球流式听写 · Nova-3）',
+    shortName: 'Deepgram',
+    capabilities: ['stt'],
+    authMode: 'apiKey',
+    defaultBaseUrl: 'https://api.deepgram.com/v1',
+    baseUrlExamples: [
+      { label: 'Deepgram 全球默认', url: 'https://api.deepgram.com/v1' },
+    ],
+    sampleModels: {
+      stt: ['nova-3', 'nova-2'],
+    },
+    sampleVoices: [],
+    hint: '国外首选流式实时听写，新账号送 $200 永久额度，中英混杂与代码词极准',
   },
 ]
 
@@ -114,6 +149,11 @@ export const DEFAULT_NATIVE_PROFILE = Object.freeze({
 
 export const DEFAULT_VOICE_PREFS = Object.freeze({
   activeProfileId: 'native',
+  voiceMode: 'pipeline', // 'pipeline' (自由混搭：实时打字员+任意大脑+播音员) | 'realtime' (一键全包实时通话)
+  realtimeCredId: '',
+  realtimeModel: '',
+  realtimeVoice: '',
+  streamingSttEnabled: true,
   l2Policy: 'pin', // 'pin' | 'screen_only'
   proactiveBriefing: 'approvals', // 'approvals' | 'all' | 'manual'
   briefingDetail: 'detailed', // 'detailed' | 'verbatim' | 'concise'
@@ -129,8 +169,9 @@ export const DEFAULT_VOICE_PREFS = Object.freeze({
   speechRate: 1.0,
 })
 
-const ALLOWED_PROVIDERS = new Set(['openai_compat', 'gemini', 'volcengine_asr', 'volcengine_tts'])
+const ALLOWED_PROVIDERS = new Set(['openai_compat', 'gemini', 'volcengine_asr', 'volcengine_tts', 'dashscope', 'deepgram'])
 const ALLOWED_STAGE_PROVIDERS = new Set(['native', ...ALLOWED_PROVIDERS])
+const ALLOWED_VOICE_MODES = new Set(['pipeline', 'realtime'])
 const ALLOWED_THINKING = new Set(['off', 'low', 'medium', 'high', 'default'])
 const ALLOWED_L2_POLICIES = new Set(['pin', 'screen_only'])
 const ALLOWED_BRIEFING = new Set(['approvals', 'all', 'manual'])
@@ -277,6 +318,25 @@ export async function assertSafeVoiceTargetUrl(
   }
 }
 
+export async function assertSafeVoiceWsUrl(
+  rawUrl = '',
+  { allowLocal = shouldAllowLocalVoiceUrls(), resolveDns = true } = {},
+) {
+  const s = String(rawUrl ?? '').trim()
+  if (!s) throw new Error('Invalid Voice WebSocket URL')
+  let parsed
+  try {
+    parsed = new URL(s)
+  } catch {
+    throw new Error('Invalid Voice WebSocket URL')
+  }
+  if (parsed.protocol !== 'wss:' && parsed.protocol !== 'ws:') {
+    throw new Error('Blocked unsafe Voice WebSocket URL (protocol must be ws/wss)')
+  }
+  const httpEquivalent = s.replace(/^wss:/i, 'https:').replace(/^ws:/i, 'http:')
+  return assertSafeVoiceTargetUrl(httpEquivalent, { allowLocal, resolveDns })
+}
+
 function sanitizeUrl(url = '') {
   const s = String(url ?? '').trim()
   if (!s) return ''
@@ -348,8 +408,14 @@ function normalizePrefs(input = {}) {
   const speechRate = Number(input?.speechRate)
   const chatSttTarget = normalizeFeatureTarget(input?.chatSttTarget, Boolean(input?.useByokForChatStt))
   const chatTtsTarget = normalizeFeatureTarget(input?.chatTtsTarget, Boolean(input?.useByokForChatTts))
+  const rawVoiceMode = String(input?.voiceMode || 'pipeline').trim().toLowerCase()
   return {
     activeProfileId: String(input?.activeProfileId || 'native').trim().slice(0, 80) || 'native',
+    voiceMode: ALLOWED_VOICE_MODES.has(rawVoiceMode) ? rawVoiceMode : 'pipeline',
+    realtimeCredId: String(input?.realtimeCredId || '').trim().slice(0, 80),
+    realtimeModel: String(input?.realtimeModel || '').trim().slice(0, 120),
+    realtimeVoice: String(input?.realtimeVoice || '').trim().slice(0, 80),
+    streamingSttEnabled: input?.streamingSttEnabled !== undefined ? Boolean(input.streamingSttEnabled) : true,
     l2Policy: ALLOWED_L2_POLICIES.has(String(input?.l2Policy || '')) ? String(input.l2Policy) : 'pin',
     proactiveBriefing: ALLOWED_BRIEFING.has(String(input?.proactiveBriefing || ''))
       ? String(input.proactiveBriefing)
@@ -791,6 +857,12 @@ export class VoiceVault {
     if (this.state.prefs.chatTtsTarget === `cred:${cleanId}`) {
       this.state.prefs.chatTtsTarget = 'native'
       this.state.prefs.useByokForChatTts = false
+    }
+    if (this.state.prefs.realtimeCredId === cleanId) {
+      this.state.prefs.realtimeCredId = ''
+      if (this.state.prefs.voiceMode === 'realtime') {
+        this.state.prefs.voiceMode = 'pipeline'
+      }
     }
     await this.persist()
     return { ok: true, deletedId: cleanId, config: this.toPublicState() }

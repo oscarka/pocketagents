@@ -20,6 +20,8 @@ import { HubCore } from './hub-core.js'
 import { captureStateDigest, buildStateDelta } from './delta-state.js'
 import { VoiceVault } from './voice-vault.js'
 import { VoiceCopilotEngine } from './voice-copilot.js'
+import { VoiceStreamGateway, resolveVoiceStreamPlan } from './voice-stream-gateway.js'
+import { rejectUpgradeSocket } from './ws-lite.js'
 import { GoalCopilotBridge } from './goal-copilot-bridge.js'
 import {
   buildDeviceDigest,
@@ -366,6 +368,7 @@ export function createHubServer({
   voiceVaultFile,
   voiceVaultSecret = process.env.VOICE_VAULT_SECRET || '',
   voiceFetch = globalThis.fetch,
+  voiceConnectWs = null,
   sseMaxLifetimeMs = Number(process.env.HUB_SSE_MAX_LIFETIME_MS) || 240_000,
   sseMinIntervalMs = Number.isFinite(Number(process.env.HUB_SSE_MIN_INTERVAL_MS))
     ? Number(process.env.HUB_SSE_MIN_INTERVAL_MS)
@@ -397,6 +400,15 @@ export function createHubServer({
     hub,
     vault: voiceVault,
     fetchImpl: voiceFetch,
+    connectWs: voiceConnectWs,
+    now: hub.now,
+  })
+  const voiceStreamGateway = new VoiceStreamGateway({
+    hub,
+    vault: voiceVault,
+    voiceCopilot,
+    logger,
+    ...(voiceConnectWs ? { connectWs: voiceConnectWs } : {}),
     now: hub.now,
   })
   const resolvedCopilotConfigFile = hub.stateFile
@@ -1907,11 +1919,21 @@ export function createHubServer({
 
         if (method === 'GET' && pathname === '/api/voice/config') {
           const voiceSessionId = urlObj.searchParams.get('sessionId') || 'default'
+          const plan = resolveVoiceStreamPlan(voiceVault)
           return {
             status: 200,
             json: {
               ok: true,
               ...voiceVault.toPublicState(),
+              streamCapability: {
+                supported: Boolean(plan.supported),
+                mode: plan.mode || 'pipeline',
+                adapter: plan.adapter || '',
+                providerLabel: plan.providerLabel || '',
+                model: plan.model || '',
+                voice: plan.voice || '',
+                reason: plan.supported ? '' : (plan.reason || ''),
+              },
               activePin: voiceCopilot.getActivePinChallenge(voiceSessionId),
               activeDraft: voiceCopilot.getActiveDraft(voiceSessionId),
             },
@@ -2986,7 +3008,35 @@ export function createHubServer({
     })()
   }
 
-  return { server, hub, voiceVault, voiceCopilot, dispatchRequest, fetchAdapter }
+  server.on('upgrade', (req, socket, head) => {
+    socket.on('error', () => { })
+    let urlObj
+    try {
+      urlObj = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`)
+    } catch {
+      rejectUpgradeSocket(socket, 400, 'Bad Request')
+      return
+    }
+    if (urlObj.pathname !== '/api/voice/stream') {
+      rejectUpgradeSocket(socket, 404, 'Not Found')
+      return
+    }
+    if (!checkAuth(req.headers, urlObj)) {
+      const wsClientIp = resolveClientIp(req.headers, req.socket?.remoteAddress || '', {
+        ...(trustProxy !== undefined ? { trustProxy } : {}),
+      })
+      if (checkApiAuthRateLimited(wsClientIp)) {
+        rejectUpgradeSocket(socket, 429, 'Too Many Requests')
+        return
+      }
+      recordApiAuthFailure(wsClientIp)
+      rejectUpgradeSocket(socket, 401, 'Unauthorized: valid HUB_TOKEN required')
+      return
+    }
+    voiceStreamGateway.handleUpgrade(req, socket, head)
+  })
+
+  return { server, hub, voiceVault, voiceCopilot, voiceStreamGateway, dispatchRequest, fetchAdapter }
 }
 
 function renderServiceWorkerJs(buildInfo = {}) {

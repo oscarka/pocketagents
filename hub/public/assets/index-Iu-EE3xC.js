@@ -4029,19 +4029,516 @@ function evaluateBargeInUtterance(transcript = "", currentlySpokenText = "", opt
 		cleaned
 	};
 }
+// hub/web/src/voice/streamAudio.ts
+var PCM16_WORKLET_CODE = `
+class PocketAgentsPcm16Processor extends AudioWorkletProcessor {
+  constructor() {
+    super();
+    this.pending = [];
+    this.cursor = 0;
+    this.output = [];
+    this.ratio = sampleRate / 16000;
+  }
+
+  process(inputs) {
+    const channel = inputs[0]?.[0];
+    if (!channel || channel.length === 0) return true;
+    for (let i = 0; i < channel.length; i += 1) {
+      this.pending.push(channel[i]);
+    }
+    while (this.cursor + this.ratio <= this.pending.length) {
+      let value;
+      if (this.ratio >= 1) {
+        const start = Math.floor(this.cursor);
+        const end = Math.max(start + 1, Math.floor(this.cursor + this.ratio));
+        let sum = 0;
+        for (let i = start; i < end; i += 1) sum += this.pending[i];
+        value = sum / (end - start);
+      } else {
+        const start = Math.floor(this.cursor);
+        const frac = this.cursor - start;
+        const next = Math.min(start + 1, this.pending.length - 1);
+        value = this.pending[start] * (1 - frac) + this.pending[next] * frac;
+      }
+      this.output.push(Math.max(-1, Math.min(1, value)));
+      this.cursor += this.ratio;
+
+      // 1600 samples = 100ms @ 16kHz = 3200 bytes PCM16
+      if (this.output.length >= 1600) {
+        const pcm = new Int16Array(1600);
+        let peak = 0;
+        for (let i = 0; i < 1600; i += 1) {
+          const s = this.output[i];
+          const a = Math.abs(s);
+          if (a > peak) peak = a;
+          pcm[i] = s < 0 ? Math.round(s * 0x8000) : Math.round(s * 0x7fff);
+        }
+        this.output.splice(0, 1600);
+        this.port.postMessage({ level: peak, pcm16: pcm.buffer }, [pcm.buffer]);
+      }
+    }
+    const consumed = Math.floor(this.cursor);
+    if (consumed > 0) {
+      this.pending.splice(0, consumed);
+      this.cursor -= consumed;
+    }
+    return true;
+  }
+}
+registerProcessor('pocketagents-pcm16-input', PocketAgentsPcm16Processor);
+`;
+function decodeBase64ToBytes(b64) {
+	const clean = String(b64 || "").replace(/^data:[^;]+;base64,/i, "").trim();
+	const bin = atob(clean);
+	const out = new Uint8Array(bin.length);
+	for (let i = 0; i < bin.length; i += 1) out[i] = bin.charCodeAt(i);
+	return out;
+}
+function downsampleFloat32ToPcm16(input, inRate, outRate = 16e3) {
+	if (input.length === 0) return {
+		pcm: /* @__PURE__ */ new Int16Array(0),
+		level: 0
+	};
+	const ratio = Math.max(.25, inRate / outRate);
+	const outLen = Math.max(1, Math.floor(input.length / ratio));
+	const pcm = new Int16Array(outLen);
+	let peak = 0;
+	for (let i = 0; i < outLen; i += 1) {
+		const start = Math.floor(i * ratio);
+		const end = Math.min(input.length, Math.max(start + 1, Math.floor((i + 1) * ratio)));
+		let sum = 0;
+		for (let j = start; j < end; j += 1) sum += input[j];
+		const sample = Math.max(-1, Math.min(1, sum / (end - start)));
+		const a = Math.abs(sample);
+		if (a > peak) peak = a;
+		pcm[i] = sample < 0 ? Math.round(sample * 32768) : Math.round(sample * 32767);
+	}
+	return {
+		pcm,
+		level: peak
+	};
+}
+var Pcm24kStreamPlayer = class {
+	ctx = null;
+	nextTime = 0;
+	activeNodes = /* @__PURE__ */ new Set();
+	playbackRate = 1;
+	onSpeakingChange;
+	constructor(onSpeakingChange) {
+		this.onSpeakingChange = onSpeakingChange;
+	}
+	ensureContext() {
+		if (typeof window === "undefined") return null;
+		const Ctor = window.AudioContext || window.webkitAudioContext;
+		if (!Ctor) return null;
+		if (!this.ctx || this.ctx.state === "closed") this.ctx = new Ctor();
+		if (this.ctx && this.ctx.state === "suspended") this.ctx.resume().catch(() => {});
+		return this.ctx;
+	}
+	setPlaybackRate(rate) {
+		this.playbackRate = Math.max(.75, Math.min(2, Number(rate) || 1));
+	}
+	enqueuePcm16Base64(b64, sampleRate = 24e3) {
+		const ctx = this.ensureContext();
+		if (!ctx || !b64) return;
+		const bytes = decodeBase64ToBytes(b64);
+		const sampleCount = Math.floor(bytes.byteLength / 2);
+		if (sampleCount <= 0) return;
+		const view = new DataView(bytes.buffer, bytes.byteOffset, sampleCount * 2);
+		const floats = new Float32Array(sampleCount);
+		for (let i = 0; i < sampleCount; i += 1) floats[i] = view.getInt16(i * 2, true) / 32768;
+		const audioBuf = ctx.createBuffer(1, sampleCount, sampleRate);
+		audioBuf.copyToChannel(floats, 0);
+		const src = ctx.createBufferSource();
+		src.buffer = audioBuf;
+		try {
+			src.playbackRate.value = this.playbackRate;
+		} catch {}
+		src.connect(ctx.destination);
+		const now = ctx.currentTime;
+		const startAt = Math.max(now + .015, this.nextTime);
+		const dur = audioBuf.duration / this.playbackRate;
+		this.nextTime = startAt + dur;
+		const wasEmpty = this.activeNodes.size === 0;
+		this.activeNodes.add(src);
+		if (wasEmpty) this.onSpeakingChange?.(true);
+		src.onended = () => {
+			this.activeNodes.delete(src);
+			if (this.activeNodes.size === 0) this.onSpeakingChange?.(false);
+		};
+		try {
+			src.start(startAt);
+		} catch {
+			this.activeNodes.delete(src);
+		}
+	}
+	clear() {
+		for (const node of this.activeNodes) try {
+			node.onended = null;
+			node.stop();
+		} catch {}
+		this.activeNodes.clear();
+		if (this.ctx) this.nextTime = this.ctx.currentTime;
+		else this.nextTime = 0;
+		this.onSpeakingChange?.(false);
+	}
+	dispose() {
+		this.clear();
+		if (this.ctx) {
+			try {
+				this.ctx.close();
+			} catch {}
+			this.ctx = null;
+		}
+	}
+};
+var WalkVoiceStreamClient = class {
+	ws = null;
+	micStream = null;
+	inputCtx = null;
+	workletNode = null;
+	scriptNode = null;
+	workletBlobUrl = "";
+	pcmPlayer = null;
+	speechPlayer = null;
+	cb = {};
+	active = false;
+	ready = false;
+	currentEpoch = 1;
+	mode = "pipeline";
+	speechRate = 1;
+	chunkQueue = [];
+	drainingChunks = false;
+	isActive() {
+		return this.active;
+	}
+	isReady() {
+		return this.active && this.ready;
+	}
+	setPlaybackRate(rate) {
+		this.speechRate = Math.max(.75, Math.min(2, Number(rate) || 1));
+		this.pcmPlayer?.setPlaybackRate(this.speechRate);
+		this.speechPlayer?.setPlaybackRate(this.speechRate);
+	}
+	async start(opts) {
+		this.stop();
+		this.active = true;
+		this.ready = false;
+		this.cb = opts.callbacks || {};
+		this.speechPlayer = opts.speechPlayer || null;
+		this.speechRate = Math.max(.75, Math.min(2, Number(opts.speechRate) || 1));
+		this.pcmPlayer = new Pcm24kStreamPlayer((speaking) => {
+			if (this.active) this.cb.onSpeakingChange?.(speaking);
+		});
+		this.pcmPlayer.setPlaybackRate(this.speechRate);
+		if (!navigator?.mediaDevices?.getUserMedia) {
+			this.active = false;
+			throw new Error("当前浏览器不支持麦克风流式采集（需要 HTTPS）");
+		}
+		this.micStream = await navigator.mediaDevices.getUserMedia({ audio: {
+			channelCount: 1,
+			echoCancellation: true,
+			noiseSuppression: true,
+			autoGainControl: true
+		} });
+		if (!this.active) {
+			this.stop();
+			return;
+		}
+		const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+		const tok = encodeURIComponent(String(opts.authToken || "").trim());
+		const wsUrl = `${proto}//${window.location.host}/api/voice/stream${tok ? `?token=${tok}` : ""}`;
+		await new Promise((resolve, reject) => {
+			let settled = false;
+			const ws = new WebSocket(wsUrl);
+			ws.binaryType = "arraybuffer";
+			this.ws = ws;
+			const timer = setTimeout(() => {
+				if (!settled) {
+					settled = true;
+					reject(/* @__PURE__ */ new Error("连接实时语音通道超时，请检查网络或 Nginx WebSocket 代理"));
+				}
+			}, 15e3);
+			ws.onopen = () => {
+				ws.send(JSON.stringify({
+					type: "start",
+					voiceSessionId: opts.voiceSessionId,
+					profileId: opts.profileId || "",
+					mode: opts.mode || "auto",
+					activeHostId: opts.activeHostId || "",
+					activeSessionId: opts.activeSessionId || "",
+					focusedApproval: opts.focusedApproval || null
+				}));
+			};
+			ws.onmessage = (ev) => {
+				if (typeof ev.data !== "string") return;
+				let msg;
+				try {
+					msg = JSON.parse(ev.data);
+				} catch {
+					return;
+				}
+				if (!msg || typeof msg !== "object") return;
+				if (msg.type === "ready") {
+					this.ready = true;
+					this.mode = msg.mode === "realtime" ? "realtime" : "pipeline";
+					if (typeof msg.epoch === "number") this.currentEpoch = msg.epoch;
+					if (!settled) {
+						settled = true;
+						clearTimeout(timer);
+						resolve();
+					}
+					this.cb.onReady?.({
+						mode: this.mode,
+						adapter: String(msg.adapter || ""),
+						providerLabel: String(msg.providerLabel || ""),
+						model: String(msg.model || ""),
+						voice: String(msg.voice || "")
+					});
+					return;
+				}
+				if (msg.type === "error") {
+					const errText = String(msg.message || "实时语音通道异常");
+					if (!settled && msg.fatal) {
+						settled = true;
+						clearTimeout(timer);
+						reject(new Error(errText));
+						return;
+					}
+					this.cb.onError?.(errText, Boolean(msg.fatal));
+					if (msg.fatal) this.stop();
+					return;
+				}
+				this._handleServerEvent(msg);
+			};
+			ws.onerror = () => {
+				if (!settled) {
+					settled = true;
+					clearTimeout(timer);
+					reject(/* @__PURE__ */ new Error("无法建立实时语音 WebSocket 连接"));
+				}
+			};
+			ws.onclose = () => {
+				clearTimeout(timer);
+				if (!settled) {
+					settled = true;
+					reject(/* @__PURE__ */ new Error("实时语音连接已断开"));
+					return;
+				}
+				const wasActive = this.active;
+				this._cleanupMediaAndSocket();
+				if (wasActive) this.cb.onClose?.();
+			};
+		});
+		if (!this.active) {
+			this.stop();
+			return;
+		}
+		await this._startPcmCapture();
+	}
+	async _startPcmCapture() {
+		if (!this.micStream || !this.active) return;
+		const Ctor = window.AudioContext || window.webkitAudioContext;
+		if (!Ctor) throw new Error("浏览器不支持 Web Audio");
+		const ctx = new Ctor();
+		this.inputCtx = ctx;
+		if (ctx.state === "suspended") await ctx.resume().catch(() => {});
+		const source = ctx.createMediaStreamSource(this.micStream);
+		const muteGain = ctx.createGain();
+		muteGain.gain.value = 0;
+		const sendPcmBuffer = (buf, level) => {
+			if (!this.active) return;
+			this.cb.onLevel?.(Math.min(1, Math.max(0, level * 2.2)));
+			if (this.ws && this.ws.readyState === WebSocket.OPEN && this.ready) this.ws.send(buf);
+		};
+		if (ctx.audioWorklet && typeof AudioWorkletNode !== "undefined") try {
+			const blob = new Blob([PCM16_WORKLET_CODE], { type: "application/javascript" });
+			this.workletBlobUrl = URL.createObjectURL(blob);
+			await ctx.audioWorklet.addModule(this.workletBlobUrl);
+			if (!this.active) return;
+			const node = new AudioWorkletNode(ctx, "pocketagents-pcm16-input");
+			this.workletNode = node;
+			node.port.onmessage = (ev) => {
+				const payload = ev.data;
+				if (payload?.pcm16 instanceof ArrayBuffer) sendPcmBuffer(payload.pcm16, Number(payload.level) || 0);
+			};
+			source.connect(node);
+			node.connect(muteGain);
+			muteGain.connect(ctx.destination);
+			return;
+		} catch {}
+		const scriptNode = ctx.createScriptProcessor(4096, 1, 1);
+		this.scriptNode = scriptNode;
+		scriptNode.onaudioprocess = (ev) => {
+			if (!this.active) return;
+			const { pcm, level } = downsampleFloat32ToPcm16(ev.inputBuffer.getChannelData(0), ctx.sampleRate, 16e3);
+			if (pcm.byteLength > 0) sendPcmBuffer(pcm.buffer, level);
+		};
+		source.connect(scriptNode);
+		scriptNode.connect(muteGain);
+		muteGain.connect(ctx.destination);
+	}
+	_clearAudioOutput() {
+		this.chunkQueue = [];
+		this.pcmPlayer?.clear();
+		this.speechPlayer?.stop();
+		this.cb.onSpeakingChange?.(false);
+	}
+	async _drainEncodedAudioQueue() {
+		if (this.drainingChunks) return;
+		this.drainingChunks = true;
+		this.cb.onSpeakingChange?.(true);
+		try {
+			while (this.active && this.chunkQueue.length > 0) {
+				const next = this.chunkQueue.shift();
+				if (next.epoch !== this.currentEpoch) continue;
+				if (this.speechPlayer) {
+					this.speechPlayer.setPlaybackRate(this.speechRate);
+					await this.speechPlayer.playAudioBase64(next.audioBase64, next.mimeType);
+				}
+			}
+		} finally {
+			this.drainingChunks = false;
+			if (this.chunkQueue.length === 0) this.cb.onSpeakingChange?.(false);
+		}
+	}
+	_handleServerEvent(msg) {
+		const evEpoch = typeof msg.epoch === "number" ? msg.epoch : this.currentEpoch;
+		switch (msg.type) {
+			case "clear_output":
+				if (typeof msg.epoch === "number") this.currentEpoch = msg.epoch;
+				this._clearAudioOutput();
+				break;
+			case "speech_started":
+				this.cb.onSpeechStarted?.();
+				break;
+			case "speech_stopped":
+				this.cb.onSpeechStopped?.();
+				break;
+			case "transcript_partial":
+				this.cb.onPartial?.(String(msg.text || ""));
+				break;
+			case "transcript_final":
+				this.cb.onFinal?.(String(msg.text || ""), Number(msg.sttMs) || 0);
+				break;
+			case "turn_thinking":
+				this.cb.onThinking?.(String(msg.text || ""));
+				break;
+			case "turn_result":
+				this.cb.onTurnResult?.(msg.turn, Boolean(msg.fromRealtimeTool));
+				break;
+			case "assistant_delta":
+				this.cb.onAssistantDelta?.(String(msg.delta || ""));
+				break;
+			case "assistant_done":
+				this.cb.onAssistantDone?.(String(msg.text || ""));
+				break;
+			case "audio_chunk":
+				if (evEpoch < this.currentEpoch) return;
+				if (msg.format === "pcm16") this.pcmPlayer?.enqueuePcm16Base64(String(msg.audioBase64 || ""), Number(msg.sampleRate) || 24e3);
+				else if (msg.audioBase64) {
+					this.chunkQueue.push({
+						audioBase64: String(msg.audioBase64),
+						mimeType: String(msg.mimeType || "audio/mpeg"),
+						epoch: evEpoch
+					});
+					this._drainEncodedAudioQueue();
+				}
+				break;
+			case "audio_done": if (msg.useNativeTts) this.cb.onSpeakingChange?.(false);
+		}
+	}
+	bargeIn() {
+		this.currentEpoch += 1;
+		this._clearAudioOutput();
+		if (this.ws && this.ws.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify({ type: "barge_in" }));
+	}
+	sendContext(ctx) {
+		if (this.ws && this.ws.readyState === WebSocket.OPEN && this.ready) this.ws.send(JSON.stringify({
+			type: "context",
+			...ctx
+		}));
+	}
+	sendTextTurn(text) {
+		if (!this.ws || this.ws.readyState !== WebSocket.OPEN || !this.ready) return false;
+		this.ws.send(JSON.stringify({
+			type: "text_turn",
+			text
+		}));
+		return true;
+	}
+	_cleanupMediaAndSocket() {
+		this.active = false;
+		this.ready = false;
+		this.chunkQueue = [];
+		this.pcmPlayer?.dispose();
+		this.pcmPlayer = null;
+		if (this.workletNode) {
+			try {
+				this.workletNode.port.onmessage = null;
+				this.workletNode.disconnect();
+			} catch {}
+			this.workletNode = null;
+		}
+		if (this.scriptNode) {
+			try {
+				this.scriptNode.onaudioprocess = null;
+				this.scriptNode.disconnect();
+			} catch {}
+			this.scriptNode = null;
+		}
+		if (this.workletBlobUrl) {
+			try {
+				URL.revokeObjectURL(this.workletBlobUrl);
+			} catch {}
+			this.workletBlobUrl = "";
+		}
+		if (this.inputCtx) {
+			try {
+				this.inputCtx.close();
+			} catch {}
+			this.inputCtx = null;
+		}
+		if (this.micStream) {
+			for (const t of this.micStream.getTracks()) try {
+				t.stop();
+			} catch {}
+			this.micStream = null;
+		}
+		if (this.ws) {
+			try {
+				if (this.ws.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify({ type: "stop" }));
+				this.ws.onopen = null;
+				this.ws.onmessage = null;
+				this.ws.onerror = null;
+				this.ws.onclose = null;
+				this.ws.close();
+			} catch {}
+			this.ws = null;
+		}
+	}
+	stop() {
+		this._cleanupMediaAndSocket();
+		this.cb.onLevel?.(0);
+		this.cb.onSpeakingChange?.(false);
+	}
+};
 // hub/web/src/voice/provider-routing.js
 var PROTOCOL_LABELS = {
 	native: "手机自带免费",
 	openai_compat: "OpenAI 兼容",
 	gemini: "Gemini 原生",
 	volcengine_asr: "火山听写",
-	volcengine_tts: "火山播报"
+	volcengine_tts: "火山播报",
+	dashscope: "阿里云百炼",
+	deepgram: "Deepgram"
 };
 var STAGE_CAPABILITIES = {
 	openai_compat: [
 		"stt",
 		"brain",
-		"tts"
+		"tts",
+		"realtime"
 	],
 	gemini: [
 		"stt",
@@ -4049,7 +4546,13 @@ var STAGE_CAPABILITIES = {
 		"tts"
 	],
 	volcengine_asr: ["stt"],
-	volcengine_tts: ["tts"]
+	volcengine_tts: ["tts"],
+	dashscope: [
+		"stt",
+		"brain",
+		"realtime"
+	],
+	deepgram: ["stt"]
 };
 var TTS_VOICE_OPTIONS = {
 	volcengine_tts: [
@@ -4068,6 +4571,24 @@ var TTS_VOICE_OPTIONS = {
 		{
 			label: "涛诚 稳重男声",
 			value: "zh_male_taocheng_uranus_bigtts"
+		}
+	],
+	dashscope: [
+		{
+			label: "Tina (自然女声)",
+			value: "Tina"
+		},
+		{
+			label: "Cherry (清甜女声)",
+			value: "Cherry"
+		},
+		{
+			label: "Serena (知性女声)",
+			value: "Serena"
+		},
+		{
+			label: "Ethan (温和男声)",
+			value: "Ethan"
 		}
 	],
 	gemini: [
@@ -4090,16 +4611,16 @@ var TTS_VOICE_OPTIONS = {
 	],
 	openai_compat: [
 		{
+			label: "shimmer (自然)",
+			value: "shimmer"
+		},
+		{
 			label: "alloy (中性)",
 			value: "alloy"
 		},
 		{
 			label: "nova (清晰女声)",
 			value: "nova"
-		},
-		{
-			label: "shimmer (柔和)",
-			value: "shimmer"
 		},
 		{
 			label: "coral (自然)",
@@ -4121,6 +4642,10 @@ function extractHostFromUrl(rawUrl = "") {
 }
 function inferDefaultBrainModel(cred) {
 	if (!cred) return "rule-router";
+	if (cred.provider === "dashscope") {
+		const m = String(cred.defaultModel || "").trim();
+		return m && !/asr|omni|realtime/i.test(m) ? m : "qwen-flash";
+	}
 	if (cred.defaultModel && String(cred.defaultModel).trim()) return String(cred.defaultModel).trim();
 	if (cred.provider === "gemini") return "gemini-2.5-flash";
 	const u = String(cred.baseUrl || "").toLowerCase();
@@ -4140,6 +4665,12 @@ function inferStageModelForCred(cred, stage) {
 	const m = String(cred.defaultModel || "").trim();
 	if (cred.provider === "volcengine_asr") return String(cred.resourceId || "").trim() || "volc.bigasr.auc_turbo";
 	if (cred.provider === "volcengine_tts") return String(cred.resourceId || "").trim() || "seed-tts-2.0";
+	if (cred.provider === "dashscope") {
+		if (stage === "stt") return /asr/i.test(m) ? m : "qwen3-asr-flash-realtime";
+		if (stage === "realtime") return /omni/i.test(m) ? m : "qwen3.8-omni-flash-realtime";
+		return inferDefaultBrainModel(cred);
+	}
+	if (cred.provider === "deepgram") return m || "nova-3";
 	if (cred.provider === "gemini") {
 		if (stage === "tts") return /tts/i.test(m) ? m : "gemini-2.5-flash-preview-tts";
 		return m || "gemini-2.5-flash";
@@ -4148,6 +4679,7 @@ function inferStageModelForCred(cred, stage) {
 		if (/whisper|transcribe|asr|audio|sensevoice/i.test(m)) return m;
 		return "gpt-4o-mini-transcribe";
 	}
+	if (stage === "realtime") return /realtime/i.test(m) ? m : "gpt-realtime-mini";
 	if (stage === "tts") {
 		if (/tts|speech|cosyvoice|fish/i.test(m)) return m;
 		return "gpt-4o-mini-tts";
@@ -4334,9 +4866,14 @@ function computeSmartDefaultSelection(cred, currentSelection, extraPairedTtsCred
 		next.ttsVal = val;
 		return next;
 	}
-	if (cred.provider === "volcengine_asr") {
+	if (cred.provider === "volcengine_asr" || cred.provider === "deepgram") {
 		next.sttVal = val;
-		if (extraPairedTtsCred?.id) next.ttsVal = `cred:${extraPairedTtsCred.id}`;
+		if (cred.provider === "volcengine_asr" && extraPairedTtsCred?.id) next.ttsVal = `cred:${extraPairedTtsCred.id}`;
+		return next;
+	}
+	if (cred.provider === "dashscope") {
+		next.sttVal = val;
+		if (next.brainVal === "native") next.brainVal = val;
 		return next;
 	}
 	if (cred.provider === "volcengine_tts") {
@@ -4503,7 +5040,70 @@ function getCredentialFeatureUsages(credId, activeProfile, prefs = {}, credentia
 		label: "聊天·说",
 		tone: "tts"
 	});
+	if (prefs?.voiceMode === "realtime" && String(prefs?.realtimeCredId || "") === credId) tags.push({
+		key: "realtime",
+		label: "一键实时",
+		tone: "brain"
+	});
 	return tags;
+}
+function isCredentialRealtimeCapable(cred) {
+	if (!cred) return false;
+	if (cred.provider === "dashscope") return true;
+	if (cred.provider === "openai_compat") return extractHostFromUrl(cred.baseUrl).toLowerCase() === "api.openai.com";
+	return false;
+}
+function isCredentialStreamingStt(cred, stageCfg = null) {
+	if (!cred) return false;
+	if (cred.provider === "dashscope" || cred.provider === "deepgram") return true;
+	if (cred.provider === "volcengine_asr") {
+		const resId = String(stageCfg?.model || cred.resourceId || "").toLowerCase();
+		const url = String(cred.baseUrl || "").toLowerCase();
+		return resId.includes(".sauc") || url.includes("/sauc/");
+	}
+	if (cred.provider === "openai_compat") return extractHostFromUrl(cred.baseUrl).toLowerCase() === "api.openai.com";
+	return false;
+}
+function resolveClientStreamCapability(voiceCfg) {
+	const prefs = voiceCfg?.prefs || {};
+	const creds = Array.isArray(voiceCfg?.credentials) ? voiceCfg.credentials : [];
+	const prof = voiceCfg?.activeProfile || null;
+	if (String(prefs.voiceMode || "pipeline").toLowerCase() === "realtime") {
+		const cred = prefs.realtimeCredId && creds.find((c) => c.id === prefs.realtimeCredId) || creds.find((c) => isCredentialRealtimeCapable(c)) || null;
+		if (!cred) return {
+			supported: false,
+			mode: "realtime",
+			label: "",
+			reason: "请先添加阿里云百炼或 OpenAI 官方 Key"
+		};
+		return {
+			supported: true,
+			mode: "realtime",
+			label: cred.provider === "dashscope" ? `一键全包 · ${prefs.realtimeModel || "Qwen Omni"}` : `一键全包 · ${prefs.realtimeModel || "OpenAI Realtime"}`,
+			credId: cred.id,
+			reason: ""
+		};
+	}
+	if (prefs.streamingSttEnabled === false) return {
+		supported: false,
+		mode: "pipeline",
+		label: "",
+		reason: "已关闭实时流式听写"
+	};
+	const sttCred = resolveStageCred(prof?.stt, creds);
+	if (!sttCred || !isCredentialStreamingStt(sttCred, prof?.stt)) return {
+		supported: false,
+		mode: "pipeline",
+		label: "",
+		reason: sttCred?.provider === "volcengine_asr" ? "当前为火山录音版（auc），把 Resource ID 切为 volc.seedasr.sauc.duration 即可开启实时流式免提" : "配置豆包流式 2.0 / 阿里云百炼 / Deepgram / OpenAI 即可开启实时流式免提"
+	};
+	return {
+		supported: true,
+		mode: "pipeline",
+		label: `实时流式 · ${sttCred.provider === "volcengine_asr" ? "豆包流式 2.0" : sttCred.provider === "dashscope" ? "千问实时听写" : sttCred.provider === "deepgram" ? "Deepgram 流式" : "OpenAI 实时听写"}`,
+		credId: sttCred.id,
+		reason: ""
+	};
 }
 // hub/web/src/components/VoiceProviderSheet.tsx
 var BackChevronSvg = () => /* @__PURE__ */ k$1("svg", {
@@ -4633,6 +5233,10 @@ function VoiceProviderSheet(props) {
 	const sttCreds = creds.filter((c) => providerSupportsStage(c.provider, "stt"));
 	const brainCreds = creds.filter((c) => providerSupportsStage(c.provider, "brain"));
 	const ttsCreds = creds.filter((c) => providerSupportsStage(c.provider, "tts"));
+	const realtimeCreds = creds.filter((c) => isCredentialRealtimeCapable(c));
+	const voiceMode = config.prefs.voiceMode === "realtime" ? "realtime" : "pipeline";
+	const streamCap = resolveClientStreamCapability(config);
+	const activeRealtimeCred = config.prefs.realtimeCredId && realtimeCreds.find((c) => c.id === config.prefs.realtimeCredId) || realtimeCreds[0] || null;
 	const missingStages = [];
 	if (sttVal.startsWith("missing:")) missingStages.push("听写");
 	if (brainVal.startsWith("missing:")) missingStages.push("大脑");
@@ -4896,10 +5500,11 @@ function VoiceProviderSheet(props) {
 		setDraft((prev) => ({
 			...prev,
 			provider: nextProv,
-			baseUrl: nextProv === "gemini" ? "https://generativelanguage.googleapis.com/v1beta" : nextProv === "volcengine_asr" ? "https://openspeech.bytedance.com/api/v3/auc/bigmodel/recognize/flash" : nextProv === "volcengine_tts" ? "https://voice.cn-beijing.volces.com/api/v3/text-to-speech" : prev.baseUrl && !prev.baseUrl.includes("bytedance") && !prev.baseUrl.includes("googleapis") && !prev.baseUrl.includes("text-to-speech") ? prev.baseUrl : "",
+			baseUrl: nextProv === "gemini" ? "https://generativelanguage.googleapis.com/v1beta" : nextProv === "volcengine_asr" ? "https://openspeech.bytedance.com/api/v3/auc/bigmodel/recognize/flash" : nextProv === "volcengine_tts" ? "https://voice.cn-beijing.volces.com/api/v3/text-to-speech" : nextProv === "dashscope" ? "https://dashscope.aliyuncs.com/compatible-mode/v1" : nextProv === "deepgram" ? "https://api.deepgram.com/v1" : prev.baseUrl && !prev.baseUrl.includes("bytedance") && !prev.baseUrl.includes("googleapis") && !prev.baseUrl.includes("text-to-speech") && !prev.baseUrl.includes("dashscope") && !prev.baseUrl.includes("deepgram") ? prev.baseUrl : "",
 			volcAuthMode: nextProv === "volcengine_tts" ? "apiKey" : prev.volcAuthMode,
-			resourceId: nextProv === "volcengine_asr" ? "volc.seedasr.auc" : nextProv === "volcengine_tts" ? "doubao-seed-tts-3.0" : "",
-			defaultVoice: nextProv === "volcengine_tts" ? "multi_female_tuanzi_v3_uranus_bigtts" : nextProv === "gemini" ? "Kore" : ""
+			resourceId: nextProv === "volcengine_asr" ? "volc.seedasr.sauc.duration" : nextProv === "volcengine_tts" ? "doubao-seed-tts-3.0" : "",
+			defaultModel: nextProv === "dashscope" ? "qwen3-asr-flash-realtime" : nextProv === "deepgram" ? "nova-3" : nextProv === "gemini" ? "gemini-2.5-flash" : "",
+			defaultVoice: nextProv === "volcengine_tts" ? "multi_female_tuanzi_v3_uranus_bigtts" : nextProv === "dashscope" ? "Tina" : nextProv === "gemini" ? "Kore" : ""
 		}));
 	};
 	const handleSaveProvider = async () => {
@@ -5299,17 +5904,81 @@ function VoiceProviderSheet(props) {
 			setRoutingMsg(null);
 			onClearSoundCheckMsg();
 		}
-	}, (soundCheckMsg || routingMsg).text)), /* @__PURE__ */ k$1("div", { class: "vp-sec-head" }, /* @__PURE__ */ k$1("span", { class: "vp-sec-label" }, "本功能调用的模型"), /* @__PURE__ */ k$1("div", { style: "display:inline-flex;align-items:center;gap:10px;" }, activeProf.id !== "native" && /* @__PURE__ */ k$1("button", {
-		type: "button",
-		class: "vp-sec-link",
-		disabled: routingSaving,
-		onClick: () => void persistRouting("native", "native", "native")
-	}, "恢复免费本机"), /* @__PURE__ */ k$1("button", {
+	}, (soundCheckMsg || routingMsg).text)), /* @__PURE__ */ k$1("div", { class: "vp-sec-head" }, /* @__PURE__ */ k$1("span", { class: "vp-sec-label" }, "实时通话模式（二选一）"), /* @__PURE__ */ k$1("button", {
 		type: "button",
 		id: "walkManageModelsPoolBtn",
 		class: "vp-sec-link",
 		onClick: () => openModelsPoolFromFeature("walk")
-	}, "管理模型池 ›"))), /* @__PURE__ */ k$1("div", { class: "vp-ios-card" }, /* @__PURE__ */ k$1("div", { class: "vp-select-row" }, /* @__PURE__ */ k$1("span", { class: "vp-select-label" }, "听写"), /* @__PURE__ */ k$1("select", {
+	}, "管理模型池 ›")), /* @__PURE__ */ k$1("div", {
+		class: "vp-ios-card",
+		style: "padding:10px 12px;margin-bottom:10px;"
+	}, /* @__PURE__ */ k$1("div", {
+		class: "vp-seg-pair",
+		id: "walkVoiceModeToggle"
+	}, /* @__PURE__ */ k$1("button", {
+		type: "button",
+		id: "walkModePipelineBtn",
+		class: `vp-seg-opt ${voiceMode === "pipeline" ? "active" : ""}`,
+		onClick: () => void onUpdatePrefs({ voiceMode: "pipeline" })
+	}, "自由混搭（任意大脑）"), /* @__PURE__ */ k$1("button", {
+		type: "button",
+		id: "walkModeRealtimeBtn",
+		class: `vp-seg-opt ${voiceMode === "realtime" ? "active" : ""}`,
+		onClick: () => {
+			const patch = { voiceMode: "realtime" };
+			if (!config.prefs.realtimeCredId && realtimeCreds[0]) {
+				patch.realtimeCredId = realtimeCreds[0].id;
+				patch.realtimeModel = realtimeCreds[0].provider === "dashscope" ? "qwen3.8-omni-flash-realtime" : "gpt-realtime-mini";
+				patch.realtimeVoice = realtimeCreds[0].provider === "dashscope" ? "Tina" : "shimmer";
+			}
+			onUpdatePrefs(patch);
+		}
+	}, "一键全包（1 Key 实时）")), /* @__PURE__ */ k$1("div", {
+		id: "walkStreamCapabilityNotice",
+		class: `vp-inline-notice ${streamCap.supported ? "ok" : "warn"}`,
+		style: "margin-top:8px;"
+	}, streamCap.supported ? `⚡ 已启用实时流式免提：${streamCap.label}（边说边出字幕，随时插嘴打断）` : `🎙️ ${streamCap.reason}`)), voiceMode === "realtime" ? /* @__PURE__ */ k$1("div", {
+		class: "vp-ios-card",
+		id: "walkRealtimeConfigCard"
+	}, /* @__PURE__ */ k$1("div", { class: "vp-select-row" }, /* @__PURE__ */ k$1("span", { class: "vp-select-label" }, "实时服务商"), /* @__PURE__ */ k$1("select", {
+		id: "voiceRealtimeCredSelect",
+		class: "vp-select-ctrl",
+		value: activeRealtimeCred ? activeRealtimeCred.id : "",
+		onChange: (e) => {
+			const cid = String(e.target.value || "");
+			const picked = realtimeCreds.find((c) => c.id === cid);
+			onUpdatePrefs({
+				voiceMode: "realtime",
+				realtimeCredId: cid,
+				realtimeModel: picked?.provider === "dashscope" ? "qwen3.8-omni-flash-realtime" : "gpt-realtime-mini",
+				realtimeVoice: picked?.provider === "dashscope" ? "Tina" : "shimmer"
+			});
+		}
+	}, realtimeCreds.length === 0 && /* @__PURE__ */ k$1("option", { value: "" }, "请先添加阿里云百炼或 OpenAI Key"), realtimeCreds.map((c) => /* @__PURE__ */ k$1("option", {
+		key: c.id,
+		value: c.id
+	}, `${c.label} (${c.provider === "dashscope" ? "千问 Omni" : "OpenAI"})`)))), activeRealtimeCred && /* @__PURE__ */ k$1(M, null, /* @__PURE__ */ k$1("div", { class: "vp-select-row" }, /* @__PURE__ */ k$1("span", { class: "vp-select-label" }, "实时模型"), /* @__PURE__ */ k$1("select", {
+		id: "voiceRealtimeModelSelect",
+		class: "vp-select-ctrl",
+		value: config.prefs.realtimeModel || (activeRealtimeCred.provider === "dashscope" ? "qwen3.8-omni-flash-realtime" : "gpt-realtime-mini"),
+		onChange: (e) => void onUpdatePrefs({ realtimeModel: e.target.value })
+	}, activeRealtimeCred.provider === "dashscope" ? /* @__PURE__ */ k$1(M, null, /* @__PURE__ */ k$1("option", { value: "qwen3.8-omni-flash-realtime" }, "qwen3.8-omni-flash-realtime (推荐)"), /* @__PURE__ */ k$1("option", { value: "qwen-omni-turbo-realtime" }, "qwen-omni-turbo-realtime")) : /* @__PURE__ */ k$1(M, null, /* @__PURE__ */ k$1("option", { value: "gpt-realtime-mini" }, "gpt-realtime-mini (推荐)"), /* @__PURE__ */ k$1("option", { value: "gpt-4o-realtime-preview" }, "gpt-4o-realtime-preview")))), /* @__PURE__ */ k$1("div", { class: "vp-select-row" }, /* @__PURE__ */ k$1("span", { class: "vp-select-label" }, "通话音色"), /* @__PURE__ */ k$1("select", {
+		id: "voiceRealtimeVoiceSelect",
+		class: "vp-select-ctrl",
+		value: config.prefs.realtimeVoice || (activeRealtimeCred.provider === "dashscope" ? "Tina" : "shimmer"),
+		onChange: (e) => void onUpdatePrefs({ realtimeVoice: e.target.value })
+	}, (activeRealtimeCred.provider === "dashscope" ? TTS_VOICE_OPTIONS.dashscope : TTS_VOICE_OPTIONS.openai_compat).map((v) => /* @__PURE__ */ k$1("option", {
+		key: v.value,
+		value: v.value
+	}, v.label))))), /* @__PURE__ */ k$1("div", {
+		class: "vp-field-hint",
+		style: "padding:8px 14px 12px;margin:0;"
+	}, "只负责语音大管家对话；写代码依然用你 Mac 上原本的 Agent，新建任务核对单与 3 位高危确认码全部共用。")) : /* @__PURE__ */ k$1(M, null, /* @__PURE__ */ k$1("div", { class: "vp-sec-head" }, /* @__PURE__ */ k$1("span", { class: "vp-sec-label" }, "自由混搭（耳朵 + 大脑 + 播报）"), activeProf.id !== "native" && /* @__PURE__ */ k$1("button", {
+		type: "button",
+		class: "vp-sec-link",
+		disabled: routingSaving,
+		onClick: () => void persistRouting("native", "native", "native")
+	}, "恢复免费本机")), /* @__PURE__ */ k$1("div", { class: "vp-ios-card" }, /* @__PURE__ */ k$1("div", { class: "vp-select-row" }, /* @__PURE__ */ k$1("span", { class: "vp-select-label" }, "听写（耳朵）"), /* @__PURE__ */ k$1("select", {
 		id: "voiceStageSttSelect",
 		class: "vp-select-ctrl",
 		disabled: routingSaving,
@@ -5318,7 +5987,7 @@ function VoiceProviderSheet(props) {
 	}, /* @__PURE__ */ k$1("option", { value: "native" }, "手机自带免费"), sttVal.startsWith("missing:") && /* @__PURE__ */ k$1("option", { value: sttVal }, "密钥缺失"), sttCreds.map((c) => /* @__PURE__ */ k$1("option", {
 		key: c.id,
 		value: `cred:${c.id}`
-	}, c.label)))), /* @__PURE__ */ k$1("div", { class: "vp-select-row" }, /* @__PURE__ */ k$1("span", { class: "vp-select-label" }, "大脑"), /* @__PURE__ */ k$1("select", {
+	}, c.label)))), /* @__PURE__ */ k$1("div", { class: "vp-select-row" }, /* @__PURE__ */ k$1("span", { class: "vp-select-label" }, "大脑（思考）"), /* @__PURE__ */ k$1("select", {
 		id: "voiceStageBrainSelect",
 		class: "vp-select-ctrl",
 		disabled: routingSaving,
@@ -5327,7 +5996,7 @@ function VoiceProviderSheet(props) {
 	}, /* @__PURE__ */ k$1("option", { value: "native" }, "本地基础口令"), brainVal.startsWith("missing:") && /* @__PURE__ */ k$1("option", { value: brainVal }, "密钥缺失"), brainCreds.map((c) => /* @__PURE__ */ k$1("option", {
 		key: c.id,
 		value: `cred:${c.id}`
-	}, c.label, " (", c.defaultModel || inferDefaultBrainModel(c), ")")))), /* @__PURE__ */ k$1("div", { class: "vp-select-row" }, /* @__PURE__ */ k$1("span", { class: "vp-select-label" }, "播报"), /* @__PURE__ */ k$1("select", {
+	}, c.label, " (", c.defaultModel || inferDefaultBrainModel(c), ")")))), /* @__PURE__ */ k$1("div", { class: "vp-select-row" }, /* @__PURE__ */ k$1("span", { class: "vp-select-label" }, "播报（嘴巴）"), /* @__PURE__ */ k$1("select", {
 		id: "voiceStageTtsSelect",
 		class: "vp-select-ctrl",
 		disabled: routingSaving,
@@ -5336,7 +6005,7 @@ function VoiceProviderSheet(props) {
 	}, /* @__PURE__ */ k$1("option", { value: "native" }, "手机自带免费"), ttsVal.startsWith("missing:") && /* @__PURE__ */ k$1("option", { value: ttsVal }, "密钥缺失"), ttsCreds.map((c) => /* @__PURE__ */ k$1("option", {
 		key: c.id,
 		value: `cred:${c.id}`
-	}, c.label))))), /* @__PURE__ */ k$1("div", { class: "vp-sec-head" }, /* @__PURE__ */ k$1("span", { class: "vp-sec-label" }, "播报与交互行为")), /* @__PURE__ */ k$1("div", { class: "vp-ios-card" }, /* @__PURE__ */ k$1("div", { class: "vp-select-row" }, /* @__PURE__ */ k$1("span", { class: "vp-select-label" }, "主动播报"), /* @__PURE__ */ k$1("select", {
+	}, c.label)))))), /* @__PURE__ */ k$1("div", { class: "vp-sec-head" }, /* @__PURE__ */ k$1("span", { class: "vp-sec-label" }, "播报与交互行为")), /* @__PURE__ */ k$1("div", { class: "vp-ios-card" }, /* @__PURE__ */ k$1("div", { class: "vp-select-row" }, /* @__PURE__ */ k$1("span", { class: "vp-select-label" }, "主动播报"), /* @__PURE__ */ k$1("select", {
 		class: "vp-select-ctrl",
 		value: config.prefs.proactiveBriefing,
 		onChange: (e) => void onUpdatePrefs({ proactiveBriefing: e.target.value })
@@ -5407,7 +6076,7 @@ function VoiceProviderSheet(props) {
 		disabled: Boolean(draft.id),
 		value: draft.provider,
 		onChange: (e) => handleProtocolChange(e.target.value)
-	}, /* @__PURE__ */ k$1("option", { value: "openai_compat" }, "OpenAI 兼容（标准）"), /* @__PURE__ */ k$1("option", { value: "gemini" }, "Google Gemini 原生"), /* @__PURE__ */ k$1("option", { value: "volcengine_asr" }, "火山豆包听写（ASR）"), /* @__PURE__ */ k$1("option", { value: "volcengine_tts" }, "火山豆包播报（TTS）")), draft.provider === "openai_compat" && /* @__PURE__ */ k$1("div", { class: "vp-field-hint" }, "火山方舟、DeepSeek、OpenAI、智谱、硅基流动、OpenRouter、中转站、Ollama 均走此标准协议")), /* @__PURE__ */ k$1("div", { class: "vp-field" }, /* @__PURE__ */ k$1("label", {
+	}, /* @__PURE__ */ k$1("option", { value: "openai_compat" }, "OpenAI 兼容（DeepSeek / 方舟 / OpenAI 官方）"), /* @__PURE__ */ k$1("option", { value: "volcengine_asr" }, "火山豆包听写（流式 2.0 / 录音 ASR）"), /* @__PURE__ */ k$1("option", { value: "volcengine_tts" }, "火山豆包播报（Seed-TTS 3.0 / 2.0）"), /* @__PURE__ */ k$1("option", { value: "dashscope" }, "阿里云百炼（千问实时听写 / Omni 通话）"), /* @__PURE__ */ k$1("option", { value: "deepgram" }, "Deepgram（全球流式听写 · 新号送 $200）"), /* @__PURE__ */ k$1("option", { value: "gemini" }, "Google Gemini 原生")), draft.provider === "openai_compat" && /* @__PURE__ */ k$1("div", { class: "vp-field-hint" }, "火山方舟、DeepSeek、OpenAI、智谱、硅基流动、OpenRouter、中转站、Ollama 均走此标准协议（填 OpenAI 官方地址后也支持一键实时通话）"), draft.provider === "dashscope" && /* @__PURE__ */ k$1("div", { class: "vp-field-hint" }, "1 把阿里云百炼 Key 两种用法：只选「千问纯听写」大脑可照样用 DeepSeek；切到「一键全包」可直接用 Qwen Omni 实时通话"), draft.provider === "deepgram" && /* @__PURE__ */ k$1("div", { class: "vp-field-hint" }, "国外首选实时流式听写，注册即送 $200 永久免费额度（无需绑卡），中英混杂写代码词极准")), /* @__PURE__ */ k$1("div", { class: "vp-field" }, /* @__PURE__ */ k$1("label", {
 		class: "vp-field-label",
 		for: "vpLabelInput"
 	}, "名称"), /* @__PURE__ */ k$1("input", {
@@ -5518,12 +6187,59 @@ function VoiceProviderSheet(props) {
 		id: "vpDefaultModelInput",
 		class: "vp-input",
 		value: draft.defaultModel,
-		placeholder: draft.provider === "gemini" ? "如：gemini-2.5-flash" : "如：doubao-seed-2-0-lite-260215 / deepseek-chat",
+		placeholder: draft.provider === "gemini" ? "如：gemini-2.5-flash" : draft.provider === "dashscope" ? "qwen3-asr-flash-realtime 或 qwen3.8-omni-flash-realtime" : draft.provider === "deepgram" ? "nova-3" : "如：doubao-seed-2-0-lite-260215 / deepseek-chat",
 		onInput: (e) => setDraft({
 			...draft,
 			defaultModel: e.target.value
 		})
-	})) : /* @__PURE__ */ k$1("div", { class: "vp-field" }, /* @__PURE__ */ k$1("label", {
+	}), draft.provider === "dashscope" && /* @__PURE__ */ k$1("div", {
+		class: "voice-chip-row",
+		style: "margin-top:6px;"
+	}, [
+		{
+			label: "纯实时听写 (qwen3-asr-flash-realtime)",
+			value: "qwen3-asr-flash-realtime"
+		},
+		{
+			label: "一键实时通话 (qwen3.8-omni-flash-realtime)",
+			value: "qwen3.8-omni-flash-realtime"
+		},
+		{
+			label: "极速大脑 (qwen-flash)",
+			value: "qwen-flash"
+		}
+	].map((item) => /* @__PURE__ */ k$1("button", {
+		key: item.value,
+		type: "button",
+		class: `voice-quick-chip ${draft.defaultModel === item.value ? "active" : ""}`,
+		onClick: () => {
+			setDraftTestRes(null);
+			setDraft({
+				...draft,
+				defaultModel: item.value
+			});
+		}
+	}, item.label))), draft.provider === "deepgram" && /* @__PURE__ */ k$1("div", {
+		class: "voice-chip-row",
+		style: "margin-top:6px;"
+	}, [{
+		label: "nova-3 (推荐)",
+		value: "nova-3"
+	}, {
+		label: "nova-2",
+		value: "nova-2"
+	}].map((item) => /* @__PURE__ */ k$1("button", {
+		key: item.value,
+		type: "button",
+		class: `voice-quick-chip ${draft.defaultModel === item.value ? "active" : ""}`,
+		onClick: () => {
+			setDraftTestRes(null);
+			setDraft({
+				...draft,
+				defaultModel: item.value
+			});
+		}
+	}, item.label)))) : /* @__PURE__ */ k$1("div", { class: "vp-field" }, /* @__PURE__ */ k$1("label", {
 		class: "vp-field-label",
 		for: "vpResourceIdInput"
 	}, isVolcTts3Draft ? "Model ID" : "Resource ID"), /* @__PURE__ */ k$1("input", {
@@ -5563,16 +6279,16 @@ function VoiceProviderSheet(props) {
 		style: "margin-top:6px;"
 	}, [
 		{
-			label: "2.0 标准版 (volc.seedasr.auc)",
+			label: "⚡ 2.0 流式实时 (volc.seedasr.sauc.duration)",
+			value: "volc.seedasr.sauc.duration"
+		},
+		{
+			label: "2.0 录音标准版 (volc.seedasr.auc)",
 			value: "volc.seedasr.auc"
 		},
 		{
-			label: "极速版 (volc.bigasr.auc_turbo)",
+			label: "极速录音版 (volc.bigasr.auc_turbo)",
 			value: "volc.bigasr.auc_turbo"
-		},
-		{
-			label: "1.0 标准版 (volc.bigasr.auc)",
-			value: "volc.bigasr.auc"
 		}
 	].map((item) => /* @__PURE__ */ k$1("button", {
 		key: item.value,
@@ -5585,10 +6301,10 @@ function VoiceProviderSheet(props) {
 				resourceId: item.value
 			});
 		}
-	}, item.label))))), (draft.provider === "volcengine_tts" || draft.provider === "gemini") && /* @__PURE__ */ k$1("div", { class: "vp-field" }, /* @__PURE__ */ k$1("label", { class: "vp-field-label" }, "播报音色（可选）"), /* @__PURE__ */ k$1("input", {
+	}, item.label))))), (draft.provider === "volcengine_tts" || draft.provider === "gemini" || draft.provider === "dashscope") && /* @__PURE__ */ k$1("div", { class: "vp-field" }, /* @__PURE__ */ k$1("label", { class: "vp-field-label" }, "播报音色（可选）"), /* @__PURE__ */ k$1("input", {
 		class: "vp-input",
 		value: draft.defaultVoice,
-		placeholder: isVolcTts3Draft ? "multi_female_tuanzi_v3_uranus_bigtts（可在 3.0 音色列表复制）" : draft.provider === "volcengine_tts" ? "zh_female_vv_uranus_bigtts" : "Kore",
+		placeholder: isVolcTts3Draft ? "multi_female_tuanzi_v3_uranus_bigtts（可在 3.0 音色列表复制）" : draft.provider === "volcengine_tts" ? "zh_female_vv_uranus_bigtts" : draft.provider === "dashscope" ? "Tina" : "Kore",
 		onInput: (e) => setDraft({
 			...draft,
 			defaultVoice: e.target.value
@@ -5841,6 +6557,8 @@ function VoiceCopilotSheets() {
 	const [micLevel, setMicLevel] = d(0);
 	const [wakeLocked, setWakeLocked] = d(false);
 	const [lastUserText, setLastUserText] = d("");
+	const [livePartialText, setLivePartialText] = d("");
+	const [streamActiveLabel, setStreamActiveLabel] = d("");
 	const [lastReplyText, setLastReplyText] = d("我在听，直接说话就行：可核对新建任务、审批放行、查进度或操控任意电脑会话。");
 	const [lastActionBadge, setLastActionBadge] = d("");
 	const [lastLatencyBadge, setLastLatencyBadge] = d("");
@@ -5914,6 +6632,8 @@ function VoiceCopilotSheets() {
 		walkPhase
 	]);
 	const recorderRef = T(null);
+	const streamClientRef = T(null);
+	const assistantStreamBufRef = T("");
 	const bargeInMonitorRef = T(null);
 	const playerRef = T(null);
 	const wakeRef = T(null);
@@ -5966,6 +6686,7 @@ function VoiceCopilotSheets() {
 		configRef.current = config;
 	}, [config]);
 	if (!recorderRef.current) recorderRef.current = new WalkWavRecorder();
+	if (!streamClientRef.current) streamClientRef.current = new WalkVoiceStreamClient();
 	if (!bargeInMonitorRef.current) bargeInMonitorRef.current = new WalkBargeInMonitor();
 	if (!playerRef.current) playerRef.current = new WalkSpeechPlayer();
 	if (!wakeRef.current) wakeRef.current = new WalkWakeLockManager();
@@ -5985,6 +6706,7 @@ function VoiceCopilotSheets() {
 						...data.prefs || {}
 					},
 					activeProfile: data.activeProfile || DEFAULT_CONFIG.activeProfile,
+					streamCapability: data.streamCapability || void 0,
 					activePin: data.activePin || null
 				};
 				configLoadedRef.current = true;
@@ -6024,7 +6746,7 @@ function VoiceCopilotSheets() {
 				aiTabActiveRef.current = false;
 				setAiTabActive(false);
 				setWalkExpanded(false);
-				if (walkPhaseRef.current === "listening") stopAllListening();
+				if (walkPhaseRef.current === "listening" || streamClientRef.current?.isActive()) stopAllListening("tab_leave");
 			}
 		};
 		window.addEventListener("dsh:tab-change", onTabChange);
@@ -6404,6 +7126,7 @@ function VoiceCopilotSheets() {
 			clearTimeout(initTimer);
 			if (typeof document !== "undefined") document.removeEventListener("visibilitychange", onVisSyncNative);
 			playerRef.current?.stop();
+			streamClientRef.current?.stop();
 			bargeInMonitorRef.current?.stop();
 			recorderRef.current?.stop();
 			setWalkBackgroundKeepAlive(false, false, false);
@@ -6581,6 +7304,7 @@ function VoiceCopilotSheets() {
 		if (!ctrl || !ctrl.kind) return;
 		if (ctrl.kind === "set_speed" && typeof ctrl.speechRate === "number") {
 			const rate = playerRef.current?.setPlaybackRate(ctrl.speechRate) ?? ctrl.speechRate;
+			streamClientRef.current?.setPlaybackRate(rate);
 			setConfig((prev) => {
 				const next = {
 					...prev,
@@ -6597,6 +7321,9 @@ function VoiceCopilotSheets() {
 		}
 		if (ctrl.kind === "handsfree_pause") {
 			playerRef.current?.stop();
+			streamClientRef.current?.stop();
+			setStreamActiveLabel("");
+			setLivePartialText("");
 			setWalkPhase("idle");
 			toast("⏸️ 已静音待命，轻点圆麦可继续对话");
 			return;
@@ -6876,6 +7603,12 @@ function VoiceCopilotSheets() {
 	}, []);
 	const stopAllListening = (reason = "abort") => {
 		bargeInMonitorRef.current?.stop();
+		if (streamClientRef.current?.isActive()) {
+			postNativeVoiceDiag("stream_stopped", `reason=${reason}`);
+			streamClientRef.current.stop();
+			setStreamActiveLabel("");
+			setLivePartialText("");
+		}
 		if (recorderRef.current?.isRecording()) {
 			const st = recorderRef.current.getLastStats();
 			postNativeVoiceDiag("listen_aborted", `reason=${reason} dur=${st.durMs} frames=${st.frames} min=${st.minLvl} max=${st.maxLvl} floor=${st.noiseFloor} jsSpeech=${st.jsHadSpeech ? 1 : 0}`);
@@ -6888,7 +7621,7 @@ function VoiceCopilotSheets() {
 			nativeRecRef.current = null;
 		}
 		setMicLevel(0);
-		if (walkPhaseRef.current === "listening") setWalkPhase("idle");
+		if (walkPhaseRef.current === "listening" || walkPhaseRef.current === "speaking") setWalkPhase("idle");
 	};
 	const handleVerifiedBargeInCandidate = async (rec) => {
 		if (!walkOpenRef.current || walkPhaseRef.current !== "speaking" || bargeInTriggeredRef.current || bargeInVerifyingRef.current) return;
@@ -7295,9 +8028,173 @@ function VoiceCopilotSheets() {
 			if (duckMusic) setWalkAudioSessionMode("ambient");
 		}
 	};
+	const applyStreamTurnResult = (data, heardText = "", fromRealtimeTool = false) => {
+		if (!data || !data.ok) return;
+		const clean = String(heardText || data.userText || "").trim();
+		const reply = String(data.spokenReply || "").trim();
+		if (reply && !fromRealtimeTool) setLastReplyText(reply);
+		setActivePin(data.pinChallenge || null);
+		if (data.draftCard !== void 0) setActiveDraft(data.draftCard || null);
+		if (data.focusedSession?.hostId && data.focusedSession?.agentId) {
+			focusedSessionRef.current = {
+				hostId: String(data.focusedSession.hostId),
+				agentId: String(data.focusedSession.agentId),
+				title: String(data.focusedSession.title || ""),
+				announcedAt: Date.now()
+			};
+			streamClientRef.current?.sendContext({
+				activeHostId: String(data.focusedSession.hostId),
+				activeSessionId: String(data.focusedSession.agentId),
+				focusedApproval: focusedApprovalRef.current
+			});
+		}
+		if (data.nextFocusedApproval !== void 0) focusedApprovalRef.current = data.nextFocusedApproval || null;
+		else if (data.execution?.executed) focusedApprovalRef.current = null;
+		const pushReceipt = (heard, badge, ok) => {
+			const d = /* @__PURE__ */ new Date();
+			const hh = String(d.getHours()).padStart(2, "0");
+			const mm = String(d.getMinutes()).padStart(2, "0");
+			const ss = String(d.getSeconds()).padStart(2, "0");
+			setWalkReceipts((prev) => [{
+				id: `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+				time: `${hh}:${mm}:${ss}`,
+				heard: (heard || "语音指令").slice(0, 28),
+				badge,
+				ok
+			}, ...prev].slice(0, 3));
+		};
+		if (data.playbackControl && data.playbackControl.kind) {
+			const pc = data.playbackControl;
+			const pcBadge = pc.kind === "set_speed" ? `⏩ 语速 ${pc.speechRate}x` : pc.kind === "handsfree_pause" ? "⏸️ 已静音待命" : pc.kind === "queue_pause" ? "⏸️ 已暂停播报" : "▶️ 播报控制";
+			setLastActionBadge(pcBadge);
+			pushReceipt(clean, pcBadge, true);
+			playEarcon("done");
+			if (pc.kind === "handsfree_pause" || pc.kind === "queue_pause") userPausedHandsFreeRef.current = true;
+			applyPlaybackControl(pc);
+			return;
+		}
+		if (data.fastPath === "l2_pin_matched") {
+			playEarcon("pin_ok");
+			const b = `🔓 确认码通过 · 已放行 ${data.action?.code || ""}`.trim();
+			setLastActionBadge(b);
+			pushReceipt(clean, b, true);
+		} else if (data.action?.type === "stage_new_task" || data.draftCard) {
+			playEarcon("listen");
+			const b = data.draftCard?.status === "awaiting_confirm" ? "📝 等待确认新建任务" : "📝 核对新建任务信息";
+			setLastActionBadge(b);
+			pushReceipt(clean, b, true);
+		} else if (data.execution?.requiresPin) {
+			playEarcon("alert");
+			const b = `⚠️ 高危需念确认码 ${data.pinChallenge?.pin || ""}`.trim();
+			setLastActionBadge(b);
+			pushReceipt(clean, b, false);
+		} else if (data.execution?.executed) {
+			playEarcon("pin_ok");
+			const b = data.execution.type === "create_task" ? "✨ 已新建任务" : `✅ ${data.execution.type}`;
+			setLastActionBadge(b);
+			pushReceipt(clean, b, true);
+		} else if (data.action?.type === "query_status" || data.action?.type === "inspect_session") {
+			const b = "📊 状态播报（未改状态）";
+			setLastActionBadge(b);
+			pushReceipt(clean, b, true);
+		}
+		if (typeof data.latencyMs === "number") setLastLatencyBadge(`⚡ 流式 · 大脑 ${data.latencyMs}ms${data.fastPath ? " ⚡" : ""}`);
+	};
+	const startWalkVoiceStream = async ({ silentOnError = false } = {}) => {
+		if (!walkOpenRef.current || streamClientRef.current?.isActive()) return;
+		const cfg = configRef.current;
+		const snap = summarizeHubState(window.__dshLastHubState);
+		const recentFocused = focusedSessionRef.current && Date.now() - focusedSessionRef.current.announcedAt < 18e4 ? focusedSessionRef.current : null;
+		try {
+			setWalkAudioSessionMode("play-and-record");
+			setWalkPhase("listening");
+			playEarcon("listen");
+			assistantStreamBufRef.current = "";
+			setLivePartialText("");
+			await streamClientRef.current.start({
+				authToken: getVoiceAuthToken(),
+				voiceSessionId: voiceSessionIdRef.current,
+				profileId: cfg.activeProfile.id,
+				mode: cfg.prefs.voiceMode || "auto",
+				activeHostId: recentFocused?.hostId || snap.activeHostId,
+				activeSessionId: recentFocused?.agentId || snap.activeSessionId,
+				focusedApproval: focusedApprovalRef.current,
+				speechRate: cfg.prefs.speechRate || 1,
+				speechPlayer: playerRef.current,
+				callbacks: {
+					onReady: (info) => {
+						const label = info.providerLabel || (info.mode === "realtime" ? "一键实时通话" : "实时流式听写");
+						setStreamActiveLabel(label);
+						setLastActionBadge(`⚡ ${label} 已连通`);
+						postNativeVoiceDiag("stream_ready", `mode=${info.mode} adapter=${info.adapter} model=${info.model}`);
+					},
+					onLevel: (lvl) => setMicLevel(lvl),
+					onSpeechStarted: () => {
+						setLivePartialText("");
+						if (walkPhaseRef.current !== "speaking") setWalkPhase("listening");
+					},
+					onPartial: (txt) => {
+						setLivePartialText(txt);
+					},
+					onFinal: (txt, sttMs) => {
+						setLivePartialText("");
+						setLastUserText(txt);
+						if (sttMs > 0) setLastLatencyBadge(`⚡ 实时听写 ${sttMs}ms`);
+					},
+					onThinking: () => {
+						setWalkPhase("thinking");
+					},
+					onTurnResult: (turn, fromRealtimeTool) => {
+						applyStreamTurnResult(turn, turn?.userText || "", fromRealtimeTool);
+					},
+					onAssistantDelta: (delta) => {
+						assistantStreamBufRef.current += delta;
+						setLastReplyText(assistantStreamBufRef.current);
+					},
+					onAssistantDone: (text) => {
+						assistantStreamBufRef.current = "";
+						if (text) setLastReplyText(text);
+					},
+					onSpeakingChange: (speaking) => {
+						if (speaking) setWalkPhase("speaking");
+						else if (streamClientRef.current?.isActive()) setWalkPhase("listening");
+						else setWalkPhase("idle");
+					},
+					onError: (msg, fatal) => {
+						postNativeVoiceDiag("stream_error", `fatal=${fatal ? 1 : 0} msg=${msg.slice(0, 120)}`);
+						setLastActionBadge(`⚠️ ${msg.slice(0, 32)}`);
+						if (fatal) {
+							setStreamActiveLabel("");
+							setLivePartialText("");
+							setWalkPhase("idle");
+							if (!silentOnError) toast(`⚠️ ${msg}`);
+						}
+					},
+					onClose: () => {
+						setStreamActiveLabel("");
+						setLivePartialText("");
+						setMicLevel(0);
+						if (walkPhaseRef.current !== "idle") setWalkPhase("idle");
+						if (configRef.current?.prefs?.duckMusicMode !== false) setWalkAudioSessionMode("ambient");
+					}
+				}
+			});
+		} catch (err) {
+			setStreamActiveLabel("");
+			setLivePartialText("");
+			setWalkPhase("idle");
+			postNativeVoiceDiag("stream_start_error", `err=${String(err?.message || "unknown").slice(0, 120)}`);
+			if (configRef.current?.prefs?.duckMusicMode !== false) setWalkAudioSessionMode("ambient");
+			if (!silentOnError) toast(err?.message || "无法开启实时流式通话");
+		}
+	};
 	const startWalkListening = async ({ isAutoFollowUp = false, noSpeechTimeoutMs, silentOnNoMic = false } = {}) => {
 		if (!walkOpenRef.current) return;
 		if (walkPhaseRef.current === "transcribing" || walkPhaseRef.current === "thinking" || walkPhaseRef.current === "listening") return;
+		if (resolveClientStreamCapability(configRef.current).supported) {
+			await startWalkVoiceStream({ silentOnError: Boolean(isAutoFollowUp || silentOnNoMic) });
+			return;
+		}
 		if (isAutoFollowUp) {
 			if (!await canNativeAutoListenNow()) {
 				if (configRef.current?.prefs?.duckMusicMode !== false) setWalkAudioSessionMode("ambient");
@@ -7340,6 +8237,19 @@ function VoiceCopilotSheets() {
 	};
 	const toggleWalkMic = async () => {
 		playerRef.current?.unlockAudio();
+		if (streamClientRef.current?.isActive()) {
+			if (walkPhaseRef.current === "speaking") {
+				streamClientRef.current.bargeIn();
+				setWalkPhase("listening");
+				toast("🎙️ 已打断，请直接说话");
+				return;
+			}
+			userPausedHandsFreeRef.current = true;
+			stopAllListening("manual_stream_pause");
+			if (configRef.current?.prefs?.duckMusicMode !== false) setWalkAudioSessionMode("ambient");
+			toast("⏸️ 已暂停实时通话，轻点圆麦随时重连");
+			return;
+		}
 		if (walkPhaseRef.current === "speaking") playerRef.current?.stop();
 		if (walkPhaseRef.current === "listening") {
 			if (recorderRef.current?.isRecording()) {
@@ -7774,8 +8684,13 @@ function VoiceCopilotSheets() {
 				return;
 			}
 			if (walkPhase === "speaking") {
-				playerRef.current?.stop();
-				setWalkPhase("idle");
+				if (streamClientRef.current?.isActive()) {
+					streamClientRef.current.bargeIn();
+					setWalkPhase("listening");
+				} else {
+					playerRef.current?.stop();
+					setWalkPhase("idle");
+				}
 				toast("🔇 已跳过当前播报");
 			}
 		}
@@ -7812,7 +8727,7 @@ function VoiceCopilotSheets() {
 		type: "button",
 		class: "walk-pin-btn-cancel",
 		onClick: () => void handleClearPin(false)
-	}, "取消弹窗"))), /* @__PURE__ */ k$1("div", { class: "walk-subtitle-box" }, lastUserText && /* @__PURE__ */ k$1("div", { class: "walk-user-line" }, `你：${lastUserText}`), /* @__PURE__ */ k$1("div", { class: `walk-reply-line ${isLongReply || activeDraft ? "compact" : ""}` }, lastReplyText), (lastActionBadge || lastLatencyBadge) && /* @__PURE__ */ k$1("div", { class: "walk-meta-row" }, lastActionBadge && /* @__PURE__ */ k$1("span", { class: "walk-action-tag" }, lastActionBadge), lastLatencyBadge && /* @__PURE__ */ k$1("span", { class: "walk-latency-tag" }, lastLatencyBadge)), walkReceipts.length > 0 && !activeDraft && /* @__PURE__ */ k$1("div", {
+	}, "取消弹窗"))), /* @__PURE__ */ k$1("div", { class: "walk-subtitle-box" }, (livePartialText || lastUserText) && /* @__PURE__ */ k$1("div", { class: `walk-user-line ${livePartialText ? "is-live" : ""}` }, livePartialText ? `你（实时）：${livePartialText}` : `你：${lastUserText}`), /* @__PURE__ */ k$1("div", { class: `walk-reply-line ${isLongReply || activeDraft ? "compact" : ""}` }, lastReplyText), (lastActionBadge || lastLatencyBadge) && /* @__PURE__ */ k$1("div", { class: "walk-meta-row" }, lastActionBadge && /* @__PURE__ */ k$1("span", { class: "walk-action-tag" }, lastActionBadge), lastLatencyBadge && /* @__PURE__ */ k$1("span", { class: "walk-latency-tag" }, lastLatencyBadge)), walkReceipts.length > 0 && !activeDraft && /* @__PURE__ */ k$1("div", {
 		class: "walk-receipt-log",
 		"aria-label": "近期语音执行记录"
 	}, walkReceipts.map((rc) => /* @__PURE__ */ k$1("div", {
@@ -7946,7 +8861,7 @@ function VoiceCopilotSheets() {
 		y1: "5",
 		x2: "19",
 		y2: "19"
-	}))), /* @__PURE__ */ k$1("span", { class: "walk-side-lbl" }, "汇报进度"))), /* @__PURE__ */ k$1("div", { class: `walk-mic-caption phase-${walkPhase}` }, walkPhase === "listening" ? config.prefs.autoVad ? `正在听你说…（音量 ${Math.round(micLevel * 100)}%）说完停顿自动发` : `正在录音…（音量 ${Math.round(micLevel * 100)}%）轻点红色方块发送` : walkPhase === "speaking" ? "轻点圆麦随时插话 · 点字幕静音" : walkPhase === "transcribing" || walkPhase === "thinking" ? "正在处理你的语音指令…" : config.prefs.autoVad ? "待命中 · 轻点圆麦开启免提连续对话" : "轻点开始说话 · 戴耳机随时插话"), /* @__PURE__ */ k$1("div", { class: "walk-prefs-wrap" }, walkPrefsOpen && /* @__PURE__ */ k$1("div", {
+	}))), /* @__PURE__ */ k$1("span", { class: "walk-side-lbl" }, "汇报进度"))), /* @__PURE__ */ k$1("div", { class: `walk-mic-caption phase-${walkPhase}` }, streamActiveLabel ? walkPhase === "speaking" ? `⚡ ${streamActiveLabel} · 开口即可随时插嘴打断` : `⚡ ${streamActiveLabel} · 直接说话，边说边出字幕` : walkPhase === "listening" ? config.prefs.autoVad ? `正在听你说…（音量 ${Math.round(micLevel * 100)}%）说完停顿自动发` : `正在录音…（音量 ${Math.round(micLevel * 100)}%）轻点红色方块发送` : walkPhase === "speaking" ? "轻点圆麦随时插话 · 点字幕静音" : walkPhase === "transcribing" || walkPhase === "thinking" ? "正在处理你的语音指令…" : config.prefs.autoVad ? "待命中 · 轻点圆麦开启免提连续对话" : "轻点开始说话 · 戴耳机随时插话"), /* @__PURE__ */ k$1("div", { class: "walk-prefs-wrap" }, walkPrefsOpen && /* @__PURE__ */ k$1("div", {
 		class: "walk-prefs-drawer",
 		role: "region",
 		"aria-label": "随行偏好设置"

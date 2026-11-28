@@ -22,12 +22,13 @@ import {
   setWalkBackgroundKeepAlive,
 } from '../voice/walkAudio';
 import { evaluateBargeInUtterance } from '../voice/bargeInGate.js';
+import { WalkVoiceStreamClient } from '../voice/streamAudio';
 import {
   VoiceProviderSheet,
   type VoiceConfigState,
   type VoicePrefs,
 } from './VoiceProviderSheet';
-import { resolveFeatureStageConfig } from '../voice/provider-routing.js';
+import { resolveClientStreamCapability, resolveFeatureStageConfig } from '../voice/provider-routing.js';
 
 interface PinChallenge {
   id: string;
@@ -220,6 +221,8 @@ export function VoiceCopilotSheets() {
   const [micLevel, setMicLevel] = useState(0);
   const [wakeLocked, setWakeLocked] = useState(false);
   const [lastUserText, setLastUserText] = useState('');
+  const [livePartialText, setLivePartialText] = useState('');
+  const [streamActiveLabel, setStreamActiveLabel] = useState('');
   const [lastReplyText, setLastReplyText] = useState('我在听，直接说话就行：可核对新建任务、审批放行、查进度或操控任意电脑会话。');
   const [lastActionBadge, setLastActionBadge] = useState('');
   const [lastLatencyBadge, setLastLatencyBadge] = useState('');
@@ -304,6 +307,8 @@ export function VoiceCopilotSheets() {
   }, [walkOpen, walkExpanded, walkPhase]);
 
   const recorderRef = useRef<WalkWavRecorder | null>(null);
+  const streamClientRef = useRef<WalkVoiceStreamClient | null>(null);
+  const assistantStreamBufRef = useRef('');
   const bargeInMonitorRef = useRef<WalkBargeInMonitor | null>(null);
   const playerRef = useRef<WalkSpeechPlayer | null>(null);
   const wakeRef = useRef<WalkWakeLockManager | null>(null);
@@ -351,6 +356,7 @@ export function VoiceCopilotSheets() {
   useEffect(() => { configRef.current = config; }, [config]);
 
   if (!recorderRef.current) recorderRef.current = new WalkWavRecorder();
+  if (!streamClientRef.current) streamClientRef.current = new WalkVoiceStreamClient();
   if (!bargeInMonitorRef.current) bargeInMonitorRef.current = new WalkBargeInMonitor();
   if (!playerRef.current) playerRef.current = new WalkSpeechPlayer();
   if (!wakeRef.current) wakeRef.current = new WalkWakeLockManager();
@@ -368,6 +374,7 @@ export function VoiceCopilotSheets() {
           profiles: Array.isArray(data.profiles) && data.profiles.length ? data.profiles : DEFAULT_CONFIG.profiles,
           prefs: { ...DEFAULT_CONFIG.prefs, ...(data.prefs || {}) },
           activeProfile: data.activeProfile || DEFAULT_CONFIG.activeProfile,
+          streamCapability: data.streamCapability || undefined,
           activePin: data.activePin || null,
         };
         configLoadedRef.current = true;
@@ -423,8 +430,8 @@ export function VoiceCopilotSheets() {
         aiTabActiveRef.current = false;
         setAiTabActive(false);
         setWalkExpanded(false);
-        if (walkPhaseRef.current === 'listening') {
-          stopAllListening();
+        if (walkPhaseRef.current === 'listening' || streamClientRef.current?.isActive()) {
+          stopAllListening('tab_leave');
         }
       }
     };
@@ -885,6 +892,7 @@ export function VoiceCopilotSheets() {
         document.removeEventListener('visibilitychange', onVisSyncNative);
       }
       playerRef.current?.stop();
+      streamClientRef.current?.stop();
       bargeInMonitorRef.current?.stop();
       recorderRef.current?.stop();
       void setWalkBackgroundKeepAlive(false, false, false);
@@ -1074,6 +1082,7 @@ export function VoiceCopilotSheets() {
     if (!ctrl || !ctrl.kind) return;
     if (ctrl.kind === 'set_speed' && typeof ctrl.speechRate === 'number') {
       const rate = playerRef.current?.setPlaybackRate(ctrl.speechRate) ?? ctrl.speechRate;
+      streamClientRef.current?.setPlaybackRate(rate);
       setConfig(prev => {
         const next = { ...prev, prefs: { ...prev.prefs, speechRate: rate } };
         configRef.current = next;
@@ -1084,6 +1093,9 @@ export function VoiceCopilotSheets() {
     }
     if (ctrl.kind === 'handsfree_pause') {
       playerRef.current?.stop();
+      streamClientRef.current?.stop();
+      setStreamActiveLabel('');
+      setLivePartialText('');
       setWalkPhase('idle');
       toast('⏸️ 已静音待命，轻点圆麦可继续对话');
       return;
@@ -1450,6 +1462,12 @@ export function VoiceCopilotSheets() {
 
   const stopAllListening = (reason = 'abort') => {
     bargeInMonitorRef.current?.stop();
+    if (streamClientRef.current?.isActive()) {
+      postNativeVoiceDiag('stream_stopped', `reason=${reason}`);
+      streamClientRef.current.stop();
+      setStreamActiveLabel('');
+      setLivePartialText('');
+    }
     if (recorderRef.current?.isRecording()) {
       const st = recorderRef.current.getLastStats();
       postNativeVoiceDiag(
@@ -1463,7 +1481,7 @@ export function VoiceCopilotSheets() {
       nativeRecRef.current = null;
     }
     setMicLevel(0);
-    if (walkPhaseRef.current === 'listening') setWalkPhase('idle');
+    if (walkPhaseRef.current === 'listening' || walkPhaseRef.current === 'speaking') setWalkPhase('idle');
   };
 
   const handleVerifiedBargeInCandidate = async (rec: { wavBase64: string; byteLength: number }) => {
@@ -1996,6 +2014,201 @@ export function VoiceCopilotSheets() {
     }
   };
 
+  const applyStreamTurnResult = (data: any, heardText = '', fromRealtimeTool = false) => {
+    if (!data || !data.ok) return;
+    const clean = String(heardText || data.userText || '').trim();
+    const reply = String(data.spokenReply || '').trim();
+    if (reply && !fromRealtimeTool) {
+      setLastReplyText(reply);
+    }
+    setActivePin(data.pinChallenge || null);
+    if (data.draftCard !== undefined) {
+      setActiveDraft(data.draftCard || null);
+    }
+    if (data.focusedSession?.hostId && data.focusedSession?.agentId) {
+      focusedSessionRef.current = {
+        hostId: String(data.focusedSession.hostId),
+        agentId: String(data.focusedSession.agentId),
+        title: String(data.focusedSession.title || ''),
+        announcedAt: Date.now(),
+      };
+      streamClientRef.current?.sendContext({
+        activeHostId: String(data.focusedSession.hostId),
+        activeSessionId: String(data.focusedSession.agentId),
+        focusedApproval: focusedApprovalRef.current,
+      });
+    }
+    if (data.nextFocusedApproval !== undefined) {
+      focusedApprovalRef.current = data.nextFocusedApproval || null;
+    } else if (data.execution?.executed) {
+      focusedApprovalRef.current = null;
+    }
+
+    const pushReceipt = (heard: string, badge: string, ok: boolean) => {
+      const d = new Date();
+      const hh = String(d.getHours()).padStart(2, '0');
+      const mm = String(d.getMinutes()).padStart(2, '0');
+      const ss = String(d.getSeconds()).padStart(2, '0');
+      setWalkReceipts(prev => [
+        { id: `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, time: `${hh}:${mm}:${ss}`, heard: (heard || '语音指令').slice(0, 28), badge, ok },
+        ...prev,
+      ].slice(0, 3));
+    };
+
+    if (data.playbackControl && data.playbackControl.kind) {
+      const pc = data.playbackControl;
+      const pcBadge =
+        pc.kind === 'set_speed'
+          ? `⏩ 语速 ${pc.speechRate}x`
+          : pc.kind === 'handsfree_pause'
+            ? '⏸️ 已静音待命'
+            : pc.kind === 'queue_pause'
+              ? '⏸️ 已暂停播报'
+              : '▶️ 播报控制';
+      setLastActionBadge(pcBadge);
+      pushReceipt(clean, pcBadge, true);
+      playEarcon('done');
+      if (pc.kind === 'handsfree_pause' || pc.kind === 'queue_pause') {
+        userPausedHandsFreeRef.current = true;
+      }
+      void applyPlaybackControl(pc);
+      return;
+    }
+
+    if (data.fastPath === 'l2_pin_matched') {
+      playEarcon('pin_ok');
+      const b = `🔓 确认码通过 · 已放行 ${data.action?.code || ''}`.trim();
+      setLastActionBadge(b);
+      pushReceipt(clean, b, true);
+    } else if (data.action?.type === 'stage_new_task' || data.draftCard) {
+      playEarcon('listen');
+      const b = data.draftCard?.status === 'awaiting_confirm' ? '📝 等待确认新建任务' : '📝 核对新建任务信息';
+      setLastActionBadge(b);
+      pushReceipt(clean, b, true);
+    } else if (data.execution?.requiresPin) {
+      playEarcon('alert');
+      const b = `⚠️ 高危需念确认码 ${data.pinChallenge?.pin || ''}`.trim();
+      setLastActionBadge(b);
+      pushReceipt(clean, b, false);
+    } else if (data.execution?.executed) {
+      playEarcon('pin_ok');
+      const b = data.execution.type === 'create_task' ? '✨ 已新建任务' : `✅ ${data.execution.type}`;
+      setLastActionBadge(b);
+      pushReceipt(clean, b, true);
+    } else if (data.action?.type === 'query_status' || data.action?.type === 'inspect_session') {
+      const b = '📊 状态播报（未改状态）';
+      setLastActionBadge(b);
+      pushReceipt(clean, b, true);
+    }
+
+    if (typeof data.latencyMs === 'number') {
+      setLastLatencyBadge(`⚡ 流式 · 大脑 ${data.latencyMs}ms${data.fastPath ? ' ⚡' : ''}`);
+    }
+  };
+
+  const startWalkVoiceStream = async ({ silentOnError = false } = {}) => {
+    if (!walkOpenRef.current || streamClientRef.current?.isActive()) return;
+    const cfg = configRef.current;
+    const snap = summarizeHubState((window as any).__dshLastHubState);
+    const recentFocused =
+      focusedSessionRef.current && Date.now() - focusedSessionRef.current.announcedAt < 180_000
+        ? focusedSessionRef.current
+        : null;
+    try {
+      setWalkAudioSessionMode('play-and-record');
+      setWalkPhase('listening');
+      playEarcon('listen');
+      assistantStreamBufRef.current = '';
+      setLivePartialText('');
+
+      await streamClientRef.current!.start({
+        authToken: getVoiceAuthToken(),
+        voiceSessionId: voiceSessionIdRef.current,
+        profileId: cfg.activeProfile.id,
+        mode: cfg.prefs.voiceMode || 'auto',
+        activeHostId: recentFocused?.hostId || snap.activeHostId,
+        activeSessionId: recentFocused?.agentId || snap.activeSessionId,
+        focusedApproval: focusedApprovalRef.current,
+        speechRate: cfg.prefs.speechRate || 1.0,
+        speechPlayer: playerRef.current,
+        callbacks: {
+          onReady: info => {
+            const label = info.providerLabel || (info.mode === 'realtime' ? '一键实时通话' : '实时流式听写');
+            setStreamActiveLabel(label);
+            setLastActionBadge(`⚡ ${label} 已连通`);
+            postNativeVoiceDiag('stream_ready', `mode=${info.mode} adapter=${info.adapter} model=${info.model}`);
+          },
+          onLevel: lvl => setMicLevel(lvl),
+          onSpeechStarted: () => {
+            setLivePartialText('');
+            if (walkPhaseRef.current !== 'speaking') setWalkPhase('listening');
+          },
+          onPartial: txt => {
+            setLivePartialText(txt);
+          },
+          onFinal: (txt, sttMs) => {
+            setLivePartialText('');
+            setLastUserText(txt);
+            if (sttMs > 0) setLastLatencyBadge(`⚡ 实时听写 ${sttMs}ms`);
+          },
+          onThinking: () => {
+            setWalkPhase('thinking');
+          },
+          onTurnResult: (turn, fromRealtimeTool) => {
+            applyStreamTurnResult(turn, turn?.userText || '', fromRealtimeTool);
+          },
+          onAssistantDelta: delta => {
+            assistantStreamBufRef.current += delta;
+            setLastReplyText(assistantStreamBufRef.current);
+          },
+          onAssistantDone: text => {
+            assistantStreamBufRef.current = '';
+            if (text) setLastReplyText(text);
+          },
+          onSpeakingChange: speaking => {
+            if (speaking) {
+              setWalkPhase('speaking');
+            } else if (streamClientRef.current?.isActive()) {
+              setWalkPhase('listening');
+            } else {
+              setWalkPhase('idle');
+            }
+          },
+          onError: (msg, fatal) => {
+            postNativeVoiceDiag('stream_error', `fatal=${fatal ? 1 : 0} msg=${msg.slice(0, 120)}`);
+            setLastActionBadge(`⚠️ ${msg.slice(0, 32)}`);
+            if (fatal) {
+              setStreamActiveLabel('');
+              setLivePartialText('');
+              setWalkPhase('idle');
+              if (!silentOnError) toast(`⚠️ ${msg}`);
+            }
+          },
+          onClose: () => {
+            setStreamActiveLabel('');
+            setLivePartialText('');
+            setMicLevel(0);
+            if (walkPhaseRef.current !== 'idle') setWalkPhase('idle');
+            if (configRef.current?.prefs?.duckMusicMode !== false) {
+              setWalkAudioSessionMode('ambient');
+            }
+          },
+        },
+      });
+    } catch (err: any) {
+      setStreamActiveLabel('');
+      setLivePartialText('');
+      setWalkPhase('idle');
+      postNativeVoiceDiag('stream_start_error', `err=${String(err?.message || 'unknown').slice(0, 120)}`);
+      if (configRef.current?.prefs?.duckMusicMode !== false) {
+        setWalkAudioSessionMode('ambient');
+      }
+      if (!silentOnError) {
+        toast(err?.message || '无法开启实时流式通话');
+      }
+    }
+  };
+
   const startWalkListening = async ({
     isAutoFollowUp = false,
     noSpeechTimeoutMs,
@@ -2003,6 +2216,11 @@ export function VoiceCopilotSheets() {
   }: { isAutoFollowUp?: boolean; noSpeechTimeoutMs?: number; silentOnNoMic?: boolean } = {}) => {
     if (!walkOpenRef.current) return;
     if (walkPhaseRef.current === 'transcribing' || walkPhaseRef.current === 'thinking' || walkPhaseRef.current === 'listening') {
+      return;
+    }
+    const streamCap = resolveClientStreamCapability(configRef.current);
+    if (streamCap.supported) {
+      await startWalkVoiceStream({ silentOnError: Boolean(isAutoFollowUp || silentOnNoMic) });
       return;
     }
     if (isAutoFollowUp) {
@@ -2072,6 +2290,21 @@ export function VoiceCopilotSheets() {
 
   const toggleWalkMic = async () => {
     playerRef.current?.unlockAudio();
+    if (streamClientRef.current?.isActive()) {
+      if (walkPhaseRef.current === 'speaking') {
+        streamClientRef.current.bargeIn();
+        setWalkPhase('listening');
+        toast('🎙️ 已打断，请直接说话');
+        return;
+      }
+      userPausedHandsFreeRef.current = true;
+      stopAllListening('manual_stream_pause');
+      if (configRef.current?.prefs?.duckMusicMode !== false) {
+        setWalkAudioSessionMode('ambient');
+      }
+      toast('⏸️ 已暂停实时通话，轻点圆麦随时重连');
+      return;
+    }
     // Instant Barge-in: tapping orb while speaking cuts off TTS immediately and starts listening!
     if (walkPhaseRef.current === 'speaking') {
       playerRef.current?.stop();
@@ -2559,8 +2792,13 @@ export function VoiceCopilotSheets() {
                 return;
               }
               if (walkPhase === 'speaking') {
-                playerRef.current?.stop();
-                setWalkPhase('idle');
+                if (streamClientRef.current?.isActive()) {
+                  streamClientRef.current.bargeIn();
+                  setWalkPhase('listening');
+                } else {
+                  playerRef.current?.stop();
+                  setWalkPhase('idle');
+                }
                 toast('🔇 已跳过当前播报');
               }
             }}
@@ -2661,7 +2899,11 @@ export function VoiceCopilotSheets() {
             )}
 
             <div class="walk-subtitle-box">
-              {lastUserText && <div class="walk-user-line">{`你：${lastUserText}`}</div>}
+              {(livePartialText || lastUserText) && (
+                <div class={`walk-user-line ${livePartialText ? 'is-live' : ''}`}>
+                  {livePartialText ? `你（实时）：${livePartialText}` : `你：${lastUserText}`}
+                </div>
+              )}
               <div class={`walk-reply-line ${(isLongReply || activeDraft) ? 'compact' : ''}`}>{lastReplyText}</div>
               {(lastActionBadge || lastLatencyBadge) && (
                 <div class="walk-meta-row">
@@ -2798,17 +3040,21 @@ export function VoiceCopilotSheets() {
             </div>
 
             <div class={`walk-mic-caption phase-${walkPhase}`}>
-              {walkPhase === 'listening'
-                ? (config.prefs.autoVad
-                    ? `正在听你说…（音量 ${Math.round(micLevel * 100)}%）说完停顿自动发`
-                    : `正在录音…（音量 ${Math.round(micLevel * 100)}%）轻点红色方块发送`)
-                : walkPhase === 'speaking'
-                  ? '轻点圆麦随时插话 · 点字幕静音'
-                  : walkPhase === 'transcribing' || walkPhase === 'thinking'
-                    ? '正在处理你的语音指令…'
-                    : (config.prefs.autoVad
-                        ? '待命中 · 轻点圆麦开启免提连续对话'
-                        : '轻点开始说话 · 戴耳机随时插话')}
+              {streamActiveLabel
+                ? (walkPhase === 'speaking'
+                    ? `⚡ ${streamActiveLabel} · 开口即可随时插嘴打断`
+                    : `⚡ ${streamActiveLabel} · 直接说话，边说边出字幕`)
+                : walkPhase === 'listening'
+                  ? (config.prefs.autoVad
+                      ? `正在听你说…（音量 ${Math.round(micLevel * 100)}%）说完停顿自动发`
+                      : `正在录音…（音量 ${Math.round(micLevel * 100)}%）轻点红色方块发送`)
+                  : walkPhase === 'speaking'
+                    ? '轻点圆麦随时插话 · 点字幕静音'
+                    : walkPhase === 'transcribing' || walkPhase === 'thinking'
+                      ? '正在处理你的语音指令…'
+                      : (config.prefs.autoVad
+                          ? '待命中 · 轻点圆麦开启免提连续对话'
+                          : '轻点开始说话 · 戴耳机随时插话')}
             </div>
 
             <div class="walk-prefs-wrap">

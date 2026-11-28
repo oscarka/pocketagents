@@ -1437,11 +1437,13 @@ export class VoiceCopilotEngine {
     hub,
     vault,
     fetchImpl = globalThis.fetch,
+    connectWs = null,
     now = () => Date.now(),
   } = {}) {
     this.hub = hub
     this.vault = vault
     this.fetch = fetchImpl
+    this.connectWs = connectWs
     this.now = now
     this.pinStore = new VoicePinChallengeStore({ now })
     this.draftManager = new VoiceNewTaskDraftManager({ now })
@@ -1877,6 +1879,35 @@ export class VoiceCopilotEngine {
       return { ok: true, text, silence: !text, provider, model, credId: cred.id, latencyMs }
     }
 
+    if (provider === 'deepgram') {
+      const model = stageCfg?.model || cred.defaultModel || 'nova-3'
+      const base = (cred.baseUrl || 'https://api.deepgram.com/v1').replace(/\/+$/, '')
+      const url = `${base.endsWith('/listen') ? base : `${base}/listen`}?model=${encodeURIComponent(model)}&smart_format=true&language=multi`
+      const audioBuf = Buffer.from(cleanB64, 'base64')
+      const resp = await fetchWithTimeout(this.fetch, url, {
+        method: 'POST',
+        headers: {
+          Authorization: `Token ${cred.apiKey}`,
+          'Content-Type': mimeType || 'audio/wav',
+        },
+        body: audioBuf,
+      })
+      const latencyMs = this.now() - t0
+      const data = await resp.json().catch(() => ({}))
+      if (!resp.ok) {
+        return {
+          ok: false,
+          provider,
+          model,
+          credId: cred.id,
+          latencyMs,
+          error: data?.err_msg || data?.message || `Deepgram STT HTTP ${resp.status}`,
+        }
+      }
+      const text = String(data?.results?.channels?.[0]?.alternatives?.[0]?.transcript || '').trim()
+      return { ok: true, text, silence: !text, provider, model, credId: cred.id, latencyMs }
+    }
+
     return { ok: false, provider, error: `不支持的 STT 服务商：${provider}`, latencyMs: this.now() - t0 }
   }
 
@@ -1988,9 +2019,16 @@ export class VoiceCopilotEngine {
       return { ok: true, rawText, provider, model, credId: cred.id, latencyMs }
     }
 
-    if (provider === 'openai_compat') {
-      const model = stageCfg?.model || cred.defaultModel || 'gpt-4o-mini'
-      const base = normalizeOpenAiCompatBaseUrl(cred.baseUrl) || 'https://api.openai.com/v1'
+    if (provider === 'openai_compat' || provider === 'dashscope') {
+      const defaultBrainModel = provider === 'dashscope' ? 'qwen-flash' : 'gpt-4o-mini'
+      const rawStageModel = String(stageCfg?.model || cred.defaultModel || '').trim()
+      const model = (provider === 'dashscope' && /asr|omni|realtime/i.test(rawStageModel))
+        ? 'qwen-flash'
+        : (rawStageModel || defaultBrainModel)
+      const fallbackBase = provider === 'dashscope'
+        ? 'https://dashscope.aliyuncs.com/compatible-mode/v1'
+        : 'https://api.openai.com/v1'
+      const base = normalizeOpenAiCompatBaseUrl(cred.baseUrl) || fallbackBase
       const url = `${base}/chat/completions`
       const messages = [
         { role: 'system', content: systemPrompt },
@@ -3606,7 +3644,7 @@ export class VoiceCopilotEngine {
       return `密钥格式不对或未授权：请检查 API Key 是否复制完整（${msg}）`
     }
     if (/resourceid.*not allowed/i.test(lower) && provider === 'volcengine_asr') {
-      return `Resource ID 不正确（不要填控制台里的「实例 ID」）：豆包 2.0 标准版请填 volc.seedasr.auc，极速版请填 volc.bigasr.auc_turbo（${msg}）`
+      return `Resource ID 不正确（不要填控制台里的「实例 ID」）：流式 2.0 请填 volc.seedasr.sauc.duration，录音 2.0 请填 volc.seedasr.auc，极速版请填 volc.bigasr.auc_turbo（${msg}）`
     }
     if (/403|forbidden|permission|not granted|not enabled|resource.*not|45000000|55000000|requested resource/i.test(lower)) {
       if (provider === 'volcengine_tts_v3') {
@@ -3616,7 +3654,7 @@ export class VoiceCopilotEngine {
         return `该火山密钥可能尚未开通「语音合成 Seed-TTS 2.0」权限：可在火山控制台开通，或播报先改用手机自带免费（${msg}）`
       }
       if (provider === 'volcengine_asr') {
-        return `该火山密钥未开通当前 Resource ID 的权限：如果你开通的是「2.0 标准版」，请把 Resource ID 改为 volc.seedasr.auc；如果是「极速版」，请填 volc.bigasr.auc_turbo（${msg}）`
+        return `该火山密钥未开通当前 Resource ID 的权限：如果你开通的是「流式 2.0」，请填 volc.seedasr.sauc.duration；如果是「2.0 录音标准版」，请填 volc.seedasr.auc；「极速版」请填 volc.bigasr.auc_turbo（${msg}）`
       }
       return `无权限访问该接口或模型：请检查账号权限与余额（${msg}）`
     }
@@ -3637,7 +3675,7 @@ export class VoiceCopilotEngine {
 
   _resolveDraftTestCred(draft = {}) {
     const provider = String(draft?.provider || '').trim().toLowerCase()
-    if (!['openai_compat', 'gemini', 'volcengine_asr', 'volcengine_tts'].includes(provider)) {
+    if (!['openai_compat', 'gemini', 'volcengine_asr', 'volcengine_tts', 'dashscope', 'deepgram'].includes(provider)) {
       return { ok: false, error: `不支持的协议类型：${provider || '(空)'}` }
     }
     const existingId = String(draft?.id || '').trim()
@@ -3652,6 +3690,8 @@ export class VoiceCopilotEngine {
       volcengine_tts: isVolcTts3Draft
         ? 'https://voice.cn-beijing.volces.com/api/v3/text-to-speech'
         : 'https://openspeech.bytedance.com/api/v3/tts/unidirectional',
+      dashscope: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+      deepgram: 'https://api.deepgram.com/v1',
     }
     const baseUrlRaw = String(draft?.baseUrl ?? '').trim() || existing?.baseUrl || defaultBaseUrlMap[provider] || ''
     if (provider === 'openai_compat' && !baseUrlRaw) {
@@ -3764,12 +3804,36 @@ export class VoiceCopilotEngine {
   async _runTestCredentialInner(cred, { stage = '', draft = null } = {}) {
     const provider = cred.provider
 
+    if (provider === 'dashscope' || provider === 'deepgram') {
+      const { probeStreamingCredential } = await import('./voice-stream-gateway.js')
+      const probeRes = await probeStreamingCredential(cred, {
+        ...(this.connectWs ? { connectWs: this.connectWs } : {}),
+        now: this.now,
+      })
+      const niceErr = probeRes.ok ? '' : this._explainVoiceError(probeRes.error, provider)
+      return {
+        ...probeRes,
+        error: niceErr || undefined,
+        summary: probeRes.ok ? probeRes.summary : niceErr,
+      }
+    }
+
     if (provider === 'volcengine_asr') {
-      const silentWav = encodePcm16ToWav(Buffer.alloc(16000 * 2 * 0.3), 16000, 1)
-      const asrRes = await this.runSingleStt(
-        { provider, credId: cred.id, model: cred.resourceId || 'volc.bigasr.auc_turbo' },
-        { audioBase64: silentWav.toString('base64'), mimeType: 'audio/wav', credOverride: cred },
-      )
+      const resId = String(cred.resourceId || 'volc.bigasr.auc_turbo').trim() || 'volc.bigasr.auc_turbo'
+      let asrRes
+      if (resId.toLowerCase().includes('.sauc') || String(cred.baseUrl || '').toLowerCase().includes('/sauc/')) {
+        const { probeStreamingCredential } = await import('./voice-stream-gateway.js')
+        asrRes = await probeStreamingCredential(cred, {
+          ...(this.connectWs ? { connectWs: this.connectWs } : {}),
+          now: this.now,
+        })
+      } else {
+        const silentWav = encodePcm16ToWav(Buffer.alloc(16000 * 2 * 0.3), 16000, 1)
+        asrRes = await this.runSingleStt(
+          { provider, credId: cred.id, model: resId },
+          { audioBase64: silentWav.toString('base64'), mimeType: 'audio/wav', credOverride: cred },
+        )
+      }
       const asrErr = asrRes.ok ? '' : this._explainVoiceError(asrRes.error, 'volcengine_asr')
 
       // Optional paired TTS check when configuring Volcengine ASR + TTS together in the editor

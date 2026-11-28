@@ -13,7 +13,9 @@ import {
   getCredentialFeatureUsages,
   getStageSelectValue,
   inferDefaultBrainModel,
+  isCredentialRealtimeCapable,
   providerSupportsStage,
+  resolveClientStreamCapability,
   resolveFeatureStageConfig,
 } from '../voice/provider-routing.js';
 
@@ -54,6 +56,11 @@ export interface VoiceProfile {
 
 export interface VoicePrefs {
   activeProfileId: string;
+  voiceMode?: 'pipeline' | 'realtime';
+  realtimeCredId?: string;
+  realtimeModel?: string;
+  realtimeVoice?: string;
+  streamingSttEnabled?: boolean;
   l2Policy: 'pin' | 'screen_only';
   proactiveBriefing: 'approvals' | 'all' | 'manual';
   briefingDetail?: 'detailed' | 'verbatim' | 'concise';
@@ -76,12 +83,21 @@ export interface VoiceConfigState {
   profiles: VoiceProfile[];
   prefs: VoicePrefs;
   activeProfile: VoiceProfile;
+  streamCapability?: {
+    supported: boolean;
+    mode: string;
+    adapter: string;
+    providerLabel: string;
+    model: string;
+    voice?: string;
+    reason?: string;
+  };
   activePin?: any;
 }
 
 interface ProviderDraft {
   id: string;
-  provider: 'openai_compat' | 'gemini' | 'volcengine_asr' | 'volcengine_tts';
+  provider: 'openai_compat' | 'gemini' | 'volcengine_asr' | 'volcengine_tts' | 'dashscope' | 'deepgram';
   label: string;
   baseUrl: string;
   volcAuthMode: 'apiKey' | 'appToken';
@@ -277,6 +293,12 @@ export function VoiceProviderSheet(props: VoiceProviderSheetProps) {
   const sttCreds = creds.filter(c => providerSupportsStage(c.provider, 'stt'));
   const brainCreds = creds.filter(c => providerSupportsStage(c.provider, 'brain'));
   const ttsCreds = creds.filter(c => providerSupportsStage(c.provider, 'tts'));
+  const realtimeCreds = creds.filter(c => isCredentialRealtimeCapable(c));
+  const voiceMode: 'pipeline' | 'realtime' = config.prefs.voiceMode === 'realtime' ? 'realtime' : 'pipeline';
+  const streamCap = resolveClientStreamCapability(config);
+  const activeRealtimeCred = (config.prefs.realtimeCredId && realtimeCreds.find(c => c.id === config.prefs.realtimeCredId))
+    || realtimeCreds[0]
+    || null;
 
   const missingStages: string[] = [];
   if (sttVal.startsWith('missing:')) missingStages.push('听写');
@@ -543,20 +565,33 @@ export function VoiceProviderSheet(props: VoiceProviderSheetProps) {
           ? 'https://openspeech.bytedance.com/api/v3/auc/bigmodel/recognize/flash'
           : nextProv === 'volcengine_tts'
             ? 'https://voice.cn-beijing.volces.com/api/v3/text-to-speech'
-            : (prev.baseUrl && !prev.baseUrl.includes('bytedance') && !prev.baseUrl.includes('googleapis') && !prev.baseUrl.includes('text-to-speech'))
-              ? prev.baseUrl
-              : '',
+            : nextProv === 'dashscope'
+              ? 'https://dashscope.aliyuncs.com/compatible-mode/v1'
+              : nextProv === 'deepgram'
+                ? 'https://api.deepgram.com/v1'
+                : (prev.baseUrl && !prev.baseUrl.includes('bytedance') && !prev.baseUrl.includes('googleapis') && !prev.baseUrl.includes('text-to-speech') && !prev.baseUrl.includes('dashscope') && !prev.baseUrl.includes('deepgram'))
+                  ? prev.baseUrl
+                  : '',
       volcAuthMode: nextProv === 'volcengine_tts' ? 'apiKey' : prev.volcAuthMode,
       resourceId: nextProv === 'volcengine_asr'
-        ? 'volc.seedasr.auc'
+        ? 'volc.seedasr.sauc.duration'
         : nextProv === 'volcengine_tts'
           ? 'doubao-seed-tts-3.0'
           : '',
+      defaultModel: nextProv === 'dashscope'
+        ? 'qwen3-asr-flash-realtime'
+        : nextProv === 'deepgram'
+          ? 'nova-3'
+          : nextProv === 'gemini'
+            ? 'gemini-2.5-flash'
+            : '',
       defaultVoice: nextProv === 'volcengine_tts'
         ? 'multi_female_tuanzi_v3_uranus_bigtts'
-        : nextProv === 'gemini'
-          ? 'Kore'
-          : '',
+        : nextProv === 'dashscope'
+          ? 'Tina'
+          : nextProv === 'gemini'
+            ? 'Kore'
+            : '',
     }));
   };
 
@@ -1177,94 +1212,217 @@ export function VoiceProviderSheet(props: VoiceProviderSheetProps) {
               )}
             </div>
 
-            {/* 2. 本功能调用的模型（从全局模型池按需挑选） */}
+            {/* 2. 对话模式（自由混搭 vs 一键全包） + 本功能调用的模型 */}
             <div class="vp-sec-head">
-              <span class="vp-sec-label">本功能调用的模型</span>
-              <div style="display:inline-flex;align-items:center;gap:10px;">
-                {activeProf.id !== 'native' && (
-                  <button
-                    type="button"
-                    class="vp-sec-link"
-                    disabled={routingSaving}
-                    onClick={() => void persistRouting('native', 'native', 'native')}
-                  >
-                    恢复免费本机
-                  </button>
-                )}
+              <span class="vp-sec-label">实时通话模式（二选一）</span>
+              <button
+                type="button"
+                id="walkManageModelsPoolBtn"
+                class="vp-sec-link"
+                onClick={() => openModelsPoolFromFeature('walk')}
+              >
+                管理模型池 ›
+              </button>
+            </div>
+            <div class="vp-ios-card" style="padding:10px 12px;margin-bottom:10px;">
+              <div class="vp-seg-pair" id="walkVoiceModeToggle">
                 <button
                   type="button"
-                  id="walkManageModelsPoolBtn"
-                  class="vp-sec-link"
-                  onClick={() => openModelsPoolFromFeature('walk')}
+                  id="walkModePipelineBtn"
+                  class={`vp-seg-opt ${voiceMode === 'pipeline' ? 'active' : ''}`}
+                  onClick={() => void onUpdatePrefs({ voiceMode: 'pipeline' })}
                 >
-                  管理模型池 ›
+                  自由混搭（任意大脑）
+                </button>
+                <button
+                  type="button"
+                  id="walkModeRealtimeBtn"
+                  class={`vp-seg-opt ${voiceMode === 'realtime' ? 'active' : ''}`}
+                  onClick={() => {
+                    const patch: Partial<VoicePrefs> = { voiceMode: 'realtime' };
+                    if (!config.prefs.realtimeCredId && realtimeCreds[0]) {
+                      patch.realtimeCredId = realtimeCreds[0].id;
+                      patch.realtimeModel = realtimeCreds[0].provider === 'dashscope'
+                        ? 'qwen3.8-omni-flash-realtime'
+                        : 'gpt-realtime-mini';
+                      patch.realtimeVoice = realtimeCreds[0].provider === 'dashscope' ? 'Tina' : 'shimmer';
+                    }
+                    void onUpdatePrefs(patch);
+                  }}
+                >
+                  一键全包（1 Key 实时）
                 </button>
               </div>
-            </div>
-            <div class="vp-ios-card">
-              <div class="vp-select-row">
-                <span class="vp-select-label">听写</span>
-                <select
-                  id="voiceStageSttSelect"
-                  class="vp-select-ctrl"
-                  disabled={routingSaving}
-                  value={sttVal}
-                  onChange={(e: any) => handleStageChange('stt', e.target.value)}
-                >
-                  <option value="native">手机自带免费</option>
-                  {sttVal.startsWith('missing:') && (
-                    <option value={sttVal}>密钥缺失</option>
-                  )}
-                  {sttCreds.map(c => (
-                    <option key={c.id} value={`cred:${c.id}`}>
-                      {c.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div class="vp-select-row">
-                <span class="vp-select-label">大脑</span>
-                <select
-                  id="voiceStageBrainSelect"
-                  class="vp-select-ctrl"
-                  disabled={routingSaving}
-                  value={brainVal}
-                  onChange={(e: any) => handleStageChange('brain', e.target.value)}
-                >
-                  <option value="native">本地基础口令</option>
-                  {brainVal.startsWith('missing:') && (
-                    <option value={brainVal}>密钥缺失</option>
-                  )}
-                  {brainCreds.map(c => (
-                    <option key={c.id} value={`cred:${c.id}`}>
-                      {c.label} ({c.defaultModel || inferDefaultBrainModel(c)})
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div class="vp-select-row">
-                <span class="vp-select-label">播报</span>
-                <select
-                  id="voiceStageTtsSelect"
-                  class="vp-select-ctrl"
-                  disabled={routingSaving}
-                  value={ttsVal}
-                  onChange={(e: any) => handleStageChange('tts', e.target.value)}
-                >
-                  <option value="native">手机自带免费</option>
-                  {ttsVal.startsWith('missing:') && (
-                    <option value={ttsVal}>密钥缺失</option>
-                  )}
-                  {ttsCreds.map(c => (
-                    <option key={c.id} value={`cred:${c.id}`}>
-                      {c.label}
-                    </option>
-                  ))}
-                </select>
+              <div
+                id="walkStreamCapabilityNotice"
+                class={`vp-inline-notice ${streamCap.supported ? 'ok' : 'warn'}`}
+                style="margin-top:8px;"
+              >
+                {streamCap.supported
+                  ? `⚡ 已启用实时流式免提：${streamCap.label}（边说边出字幕，随时插嘴打断）`
+                  : `🎙️ ${streamCap.reason}`}
               </div>
             </div>
+
+            {voiceMode === 'realtime' ? (
+              <div class="vp-ios-card" id="walkRealtimeConfigCard">
+                <div class="vp-select-row">
+                  <span class="vp-select-label">实时服务商</span>
+                  <select
+                    id="voiceRealtimeCredSelect"
+                    class="vp-select-ctrl"
+                    value={activeRealtimeCred ? activeRealtimeCred.id : ''}
+                    onChange={(e: any) => {
+                      const cid = String(e.target.value || '');
+                      const picked = realtimeCreds.find(c => c.id === cid);
+                      void onUpdatePrefs({
+                        voiceMode: 'realtime',
+                        realtimeCredId: cid,
+                        realtimeModel: picked?.provider === 'dashscope'
+                          ? 'qwen3.8-omni-flash-realtime'
+                          : 'gpt-realtime-mini',
+                        realtimeVoice: picked?.provider === 'dashscope' ? 'Tina' : 'shimmer',
+                      });
+                    }}
+                  >
+                    {realtimeCreds.length === 0 && (
+                      <option value="">请先添加阿里云百炼或 OpenAI Key</option>
+                    )}
+                    {realtimeCreds.map(c => (
+                      <option key={c.id} value={c.id}>
+                        {`${c.label} (${c.provider === 'dashscope' ? '千问 Omni' : 'OpenAI'})`}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {activeRealtimeCred && (
+                  <Fragment>
+                    <div class="vp-select-row">
+                      <span class="vp-select-label">实时模型</span>
+                      <select
+                        id="voiceRealtimeModelSelect"
+                        class="vp-select-ctrl"
+                        value={config.prefs.realtimeModel || (activeRealtimeCred.provider === 'dashscope' ? 'qwen3.8-omni-flash-realtime' : 'gpt-realtime-mini')}
+                        onChange={(e: any) => void onUpdatePrefs({ realtimeModel: e.target.value })}
+                      >
+                        {activeRealtimeCred.provider === 'dashscope' ? (
+                          <Fragment>
+                            <option value="qwen3.8-omni-flash-realtime">qwen3.8-omni-flash-realtime (推荐)</option>
+                            <option value="qwen-omni-turbo-realtime">qwen-omni-turbo-realtime</option>
+                          </Fragment>
+                        ) : (
+                          <Fragment>
+                            <option value="gpt-realtime-mini">gpt-realtime-mini (推荐)</option>
+                            <option value="gpt-4o-realtime-preview">gpt-4o-realtime-preview</option>
+                          </Fragment>
+                        )}
+                      </select>
+                    </div>
+                    <div class="vp-select-row">
+                      <span class="vp-select-label">通话音色</span>
+                      <select
+                        id="voiceRealtimeVoiceSelect"
+                        class="vp-select-ctrl"
+                        value={config.prefs.realtimeVoice || (activeRealtimeCred.provider === 'dashscope' ? 'Tina' : 'shimmer')}
+                        onChange={(e: any) => void onUpdatePrefs({ realtimeVoice: e.target.value })}
+                      >
+                        {(activeRealtimeCred.provider === 'dashscope'
+                          ? TTS_VOICE_OPTIONS.dashscope
+                          : TTS_VOICE_OPTIONS.openai_compat
+                        ).map(v => (
+                          <option key={v.value} value={v.value}>{v.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </Fragment>
+                )}
+
+                <div class="vp-field-hint" style="padding:8px 14px 12px;margin:0;">
+                  只负责语音大管家对话；写代码依然用你 Mac 上原本的 Agent，新建任务核对单与 3 位高危确认码全部共用。
+                </div>
+              </div>
+            ) : (
+              <Fragment>
+                <div class="vp-sec-head">
+                  <span class="vp-sec-label">自由混搭（耳朵 + 大脑 + 播报）</span>
+                  {activeProf.id !== 'native' && (
+                    <button
+                      type="button"
+                      class="vp-sec-link"
+                      disabled={routingSaving}
+                      onClick={() => void persistRouting('native', 'native', 'native')}
+                    >
+                      恢复免费本机
+                    </button>
+                  )}
+                </div>
+                <div class="vp-ios-card">
+                  <div class="vp-select-row">
+                    <span class="vp-select-label">听写（耳朵）</span>
+                    <select
+                      id="voiceStageSttSelect"
+                      class="vp-select-ctrl"
+                      disabled={routingSaving}
+                      value={sttVal}
+                      onChange={(e: any) => handleStageChange('stt', e.target.value)}
+                    >
+                      <option value="native">手机自带免费</option>
+                      {sttVal.startsWith('missing:') && (
+                        <option value={sttVal}>密钥缺失</option>
+                      )}
+                      {sttCreds.map(c => (
+                        <option key={c.id} value={`cred:${c.id}`}>
+                          {c.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div class="vp-select-row">
+                    <span class="vp-select-label">大脑（思考）</span>
+                    <select
+                      id="voiceStageBrainSelect"
+                      class="vp-select-ctrl"
+                      disabled={routingSaving}
+                      value={brainVal}
+                      onChange={(e: any) => handleStageChange('brain', e.target.value)}
+                    >
+                      <option value="native">本地基础口令</option>
+                      {brainVal.startsWith('missing:') && (
+                        <option value={brainVal}>密钥缺失</option>
+                      )}
+                      {brainCreds.map(c => (
+                        <option key={c.id} value={`cred:${c.id}`}>
+                          {c.label} ({c.defaultModel || inferDefaultBrainModel(c)})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div class="vp-select-row">
+                    <span class="vp-select-label">播报（嘴巴）</span>
+                    <select
+                      id="voiceStageTtsSelect"
+                      class="vp-select-ctrl"
+                      disabled={routingSaving}
+                      value={ttsVal}
+                      onChange={(e: any) => handleStageChange('tts', e.target.value)}
+                    >
+                      <option value="native">手机自带免费</option>
+                      {ttsVal.startsWith('missing:') && (
+                        <option value={ttsVal}>密钥缺失</option>
+                      )}
+                      {ttsCreds.map(c => (
+                        <option key={c.id} value={`cred:${c.id}`}>
+                          {c.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </Fragment>
+            )}
 
             {/* 3. 播报与交互行为 */}
             <div class="vp-sec-head">
@@ -1432,14 +1590,26 @@ export function VoiceProviderSheet(props: VoiceProviderSheetProps) {
                   value={draft.provider}
                   onChange={(e: any) => handleProtocolChange(e.target.value)}
                 >
-                  <option value="openai_compat">OpenAI 兼容（标准）</option>
+                  <option value="openai_compat">OpenAI 兼容（DeepSeek / 方舟 / OpenAI 官方）</option>
+                  <option value="volcengine_asr">火山豆包听写（流式 2.0 / 录音 ASR）</option>
+                  <option value="volcengine_tts">火山豆包播报（Seed-TTS 3.0 / 2.0）</option>
+                  <option value="dashscope">阿里云百炼（千问实时听写 / Omni 通话）</option>
+                  <option value="deepgram">Deepgram（全球流式听写 · 新号送 $200）</option>
                   <option value="gemini">Google Gemini 原生</option>
-                  <option value="volcengine_asr">火山豆包听写（ASR）</option>
-                  <option value="volcengine_tts">火山豆包播报（TTS）</option>
                 </select>
                 {draft.provider === 'openai_compat' && (
                   <div class="vp-field-hint">
-                    火山方舟、DeepSeek、OpenAI、智谱、硅基流动、OpenRouter、中转站、Ollama 均走此标准协议
+                    火山方舟、DeepSeek、OpenAI、智谱、硅基流动、OpenRouter、中转站、Ollama 均走此标准协议（填 OpenAI 官方地址后也支持一键实时通话）
+                  </div>
+                )}
+                {draft.provider === 'dashscope' && (
+                  <div class="vp-field-hint">
+                    1 把阿里云百炼 Key 两种用法：只选「千问纯听写」大脑可照样用 DeepSeek；切到「一键全包」可直接用 Qwen Omni 实时通话
+                  </div>
+                )}
+                {draft.provider === 'deepgram' && (
+                  <div class="vp-field-hint">
+                    国外首选实时流式听写，注册即送 $200 永久免费额度（无需绑卡），中英混杂写代码词极准
                   </div>
                 )}
               </div>
@@ -1609,10 +1779,55 @@ export function VoiceProviderSheet(props: VoiceProviderSheetProps) {
                     placeholder={
                       draft.provider === 'gemini'
                         ? '如：gemini-2.5-flash'
-                        : '如：doubao-seed-2-0-lite-260215 / deepseek-chat'
+                        : draft.provider === 'dashscope'
+                          ? 'qwen3-asr-flash-realtime 或 qwen3.8-omni-flash-realtime'
+                          : draft.provider === 'deepgram'
+                            ? 'nova-3'
+                            : '如：doubao-seed-2-0-lite-260215 / deepseek-chat'
                     }
                     onInput={(e: any) => setDraft({ ...draft, defaultModel: e.target.value })}
                   />
+                  {draft.provider === 'dashscope' && (
+                    <div class="voice-chip-row" style="margin-top:6px;">
+                      {[
+                        { label: '纯实时听写 (qwen3-asr-flash-realtime)', value: 'qwen3-asr-flash-realtime' },
+                        { label: '一键实时通话 (qwen3.8-omni-flash-realtime)', value: 'qwen3.8-omni-flash-realtime' },
+                        { label: '极速大脑 (qwen-flash)', value: 'qwen-flash' },
+                      ].map(item => (
+                        <button
+                          key={item.value}
+                          type="button"
+                          class={`voice-quick-chip ${draft.defaultModel === item.value ? 'active' : ''}`}
+                          onClick={() => {
+                            setDraftTestRes(null);
+                            setDraft({ ...draft, defaultModel: item.value });
+                          }}
+                        >
+                          {item.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {draft.provider === 'deepgram' && (
+                    <div class="voice-chip-row" style="margin-top:6px;">
+                      {[
+                        { label: 'nova-3 (推荐)', value: 'nova-3' },
+                        { label: 'nova-2', value: 'nova-2' },
+                      ].map(item => (
+                        <button
+                          key={item.value}
+                          type="button"
+                          class={`voice-quick-chip ${draft.defaultModel === item.value ? 'active' : ''}`}
+                          onClick={() => {
+                            setDraftTestRes(null);
+                            setDraft({ ...draft, defaultModel: item.value });
+                          }}
+                        >
+                          {item.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div class="vp-field">
@@ -1664,9 +1879,9 @@ export function VoiceProviderSheet(props: VoiceProviderSheetProps) {
                       )}
                       <div class="voice-chip-row" style="margin-top:6px;">
                         {[
-                          { label: '2.0 标准版 (volc.seedasr.auc)', value: 'volc.seedasr.auc' },
-                          { label: '极速版 (volc.bigasr.auc_turbo)', value: 'volc.bigasr.auc_turbo' },
-                          { label: '1.0 标准版 (volc.bigasr.auc)', value: 'volc.bigasr.auc' },
+                          { label: '⚡ 2.0 流式实时 (volc.seedasr.sauc.duration)', value: 'volc.seedasr.sauc.duration' },
+                          { label: '2.0 录音标准版 (volc.seedasr.auc)', value: 'volc.seedasr.auc' },
+                          { label: '极速录音版 (volc.bigasr.auc_turbo)', value: 'volc.bigasr.auc_turbo' },
                         ].map(item => (
                           <button
                             key={item.value}
@@ -1686,7 +1901,7 @@ export function VoiceProviderSheet(props: VoiceProviderSheetProps) {
                 </div>
               )}
 
-              {(draft.provider === 'volcengine_tts' || draft.provider === 'gemini') && (
+              {(draft.provider === 'volcengine_tts' || draft.provider === 'gemini' || draft.provider === 'dashscope') && (
                 <div class="vp-field">
                   <label class="vp-field-label">播报音色（可选）</label>
                   <input
@@ -1697,7 +1912,9 @@ export function VoiceProviderSheet(props: VoiceProviderSheetProps) {
                         ? 'multi_female_tuanzi_v3_uranus_bigtts（可在 3.0 音色列表复制）'
                         : draft.provider === 'volcengine_tts'
                           ? 'zh_female_vv_uranus_bigtts'
-                          : 'Kore'
+                          : draft.provider === 'dashscope'
+                            ? 'Tina'
+                            : 'Kore'
                     }
                     onInput={(e: any) => setDraft({ ...draft, defaultVoice: e.target.value })}
                   />
