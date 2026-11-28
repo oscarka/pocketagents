@@ -97,6 +97,11 @@ test('Voice Harness v1: multi-turn new-task validation with NEW workspace creati
   assert.equal(vault.state.prefs.speechRate, 1.25)
 
   // 2. Multi-turn new task with NEW workspace + mid-draft host switch correction + 0ms commit
+  const bareNew = await engine.runBrainTurn({ text: '帮我新建个任务', voiceSessionId: 'vh_bare' })
+  assert.equal(bareNew.fastPath, 'draft_start', '"帮我新建个任务" must trigger draft_start immediately')
+  assert.equal(bareNew.draftCard.status, 'collecting')
+  assert.match(bareNew.spokenReply, /哪台电脑/)
+
   const s1 = await engine.runBrainTurn({ text: '帮我新建一个任务查一下登录超时', voiceSessionId: 'vh2' })
   assert.equal(s1.fastPath, 'draft_start')
   assert.equal(s1.execution.executed, false)

@@ -1973,6 +1973,10 @@ export function createHubServer({
             logger?.warn?.(
               `[voice] stt failed provider=${outcome.provider || '?'} model=${outcome.model || ''} latency=${outcome.latencyMs ?? 0}ms err=${String(outcome.error || '').slice(0, 260)}`,
             )
+          } else {
+            logger?.info?.(
+              `[voice] stt ok provider=${outcome.provider || '?'} silence=${outcome.silence ? 1 : 0} len=${String(outcome.text || '').length} text=${JSON.stringify(String(outcome.text || '').slice(0, 40))} ms=${outcome.latencyMs ?? 0}`,
+            )
           }
           return { status: outcome.ok ? 200 : 502, json: outcome }
         }

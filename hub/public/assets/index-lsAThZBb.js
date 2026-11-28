@@ -5729,6 +5729,8 @@ function VoiceCopilotSheets() {
 	const aiTabActiveRef = T(false);
 	const walkTextInputOpenRef = T(false);
 	const userPausedHandsFreeRef = T(false);
+	const lastKeepAliveSigRef = T("");
+	const keepAlivePromiseRef = T(null);
 	const configRef = T(config);
 	const configLoadedRef = T(false);
 	const setWalkOpen = (next) => {
@@ -5799,9 +5801,10 @@ function VoiceCopilotSheets() {
 				setWalkOpen(true);
 				setWalkExpanded(true);
 				(async () => {
-					if (!configLoadedRef.current) await refreshConfig(true);
-					else refreshConfig(true);
-					await new Promise((resolve) => setTimeout(resolve, 140));
+					await refreshConfig(true);
+					await new Promise((resolve) => setTimeout(resolve, 120));
+					if (keepAlivePromiseRef.current) await keepAlivePromiseRef.current.catch(() => {});
+					await new Promise((resolve) => setTimeout(resolve, 60));
 					if (aiTabActiveRef.current && walkOpenRef.current && walkPhaseRef.current === "idle" && configRef.current?.prefs?.autoVad && !userPausedHandsFreeRef.current && !walkTextInputOpenRef.current) startWalkListening({
 						isAutoFollowUp: true,
 						noSpeechTimeoutMs: 14e3,
@@ -6221,7 +6224,8 @@ function VoiceCopilotSheets() {
 			drainingBriefingRef.current = false;
 			focusedApprovalRef.current = null;
 			focusedSessionRef.current = null;
-			setWalkBackgroundKeepAlive(false, false, false, "manual");
+			lastKeepAliveSigRef.current = "";
+			keepAlivePromiseRef.current = setWalkBackgroundKeepAlive(false, false, false, "manual");
 			setWalkAudioSessionMode("auto");
 			wakeRef.current?.disable();
 			setWakeLocked(false);
@@ -6237,7 +6241,17 @@ function VoiceCopilotSheets() {
 		const proactiveBriefing = configRef.current?.prefs?.proactiveBriefing || "approvals";
 		const walkUsesCloudTts = (configRef.current?.activeProfile?.tts?.provider || "native") !== "native";
 		if (duckMusic) setWalkAudioSessionMode("ambient");
-		setWalkBackgroundKeepAlive(true, duckMusic, keepMicWarm, proactiveBriefing, walkUsesCloudTts, buildWalkNativeExtraOpts(configRef.current));
+		const extraOpts = buildWalkNativeExtraOpts(configRef.current);
+		const keepAliveSig = JSON.stringify([
+			true,
+			duckMusic,
+			keepMicWarm,
+			proactiveBriefing,
+			walkUsesCloudTts,
+			extraOpts
+		]);
+		lastKeepAliveSigRef.current = keepAliveSig;
+		if (walkPhaseRef.current !== "listening" && walkPhaseRef.current !== "speaking") keepAlivePromiseRef.current = setWalkBackgroundKeepAlive(true, duckMusic, keepMicWarm, proactiveBriefing, walkUsesCloudTts, extraOpts);
 		drainNativeSpokenBriefings().then((items) => {
 			if (items.length > 0 && typeof window.__dshOnNativeBackgroundBriefingsSynced === "function") window.__dshOnNativeBackgroundBriefingsSynced(items);
 		});
@@ -6261,9 +6275,26 @@ function VoiceCopilotSheets() {
 	}, [walkOpen]);
 	A(() => {
 		if (!walkOpen) return;
-		setWalkBackgroundKeepAlive(true, config.prefs.duckMusicMode !== false, Boolean(config.prefs.autoListenAfterBriefing), config.prefs.proactiveBriefing || "approvals", (config.activeProfile?.tts?.provider || "native") !== "native", buildWalkNativeExtraOpts(config));
+		if (walkPhase === "listening" || walkPhase === "speaking" || walkPhaseRef.current === "listening" || walkPhaseRef.current === "speaking") return;
+		const duckMusic = config.prefs.duckMusicMode !== false;
+		const keepMicWarm = Boolean(config.prefs.autoListenAfterBriefing);
+		const proactiveBriefing = config.prefs.proactiveBriefing || "approvals";
+		const walkUsesCloudTts = (config.activeProfile?.tts?.provider || "native") !== "native";
+		const extraOpts = buildWalkNativeExtraOpts(config);
+		const sig = JSON.stringify([
+			true,
+			duckMusic,
+			keepMicWarm,
+			proactiveBriefing,
+			walkUsesCloudTts,
+			extraOpts
+		]);
+		if (sig === lastKeepAliveSigRef.current) return;
+		lastKeepAliveSigRef.current = sig;
+		keepAlivePromiseRef.current = setWalkBackgroundKeepAlive(true, duckMusic, keepMicWarm, proactiveBriefing, walkUsesCloudTts, extraOpts);
 	}, [
 		walkOpen,
+		walkPhase,
 		config.prefs.duckMusicMode,
 		config.prefs.autoListenAfterBriefing,
 		config.prefs.proactiveBriefing,
@@ -6921,9 +6952,11 @@ function VoiceCopilotSheets() {
 	const handleWalkWavReady = async (rec, isAutoFollowUp = false) => {
 		setMicLevel(0);
 		const duckMusic = configRef.current?.prefs?.duckMusicMode !== false;
+		postNativeVoiceDiag("wav_ready", `auto=${isAutoFollowUp ? 1 : 0} timeout=${rec.silentTimeout ? 1 : 0} speech=${rec.hadSpeech ? 1 : 0} bytes=${rec.byteLength}`);
 		if (rec.silentTimeout || isAutoFollowUp && !rec.hadSpeech) {
 			postNativeVoiceDiag("auto_listen_silent_exit", `timeout=${rec.silentTimeout ? 1 : 0} hadSpeech=${rec.hadSpeech ? 1 : 0} bytes=${rec.byteLength}`);
 			setWalkPhase("idle");
+			if (aiTabActiveRef.current) setLastActionBadge("⏸️ 暂未听到说话 · 已待命");
 			if (duckMusic) setWalkAudioSessionMode("ambient");
 			if (walkOpenRef.current && briefingQueueRef.current.length > 0) setTimeout(() => {
 				drainBriefingQueue();
@@ -6951,6 +6984,7 @@ function VoiceCopilotSheets() {
 				ok: false,
 				error: `HTTP ${res.status}`
 			}));
+			postNativeVoiceDiag("stt_done", `ok=${res.ok && data?.ok ? 1 : 0} silence=${data?.silence ? 1 : 0} len=${String(data?.text || "").length} ms=${data?.latencyMs ?? 0}`);
 			if (!res.ok || !data?.ok) {
 				playEarcon("alert");
 				setWalkPhase("idle");
