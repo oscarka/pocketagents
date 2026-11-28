@@ -174,6 +174,17 @@ export function notifyNativeBackgroundWakeDone(): void {
   }
 }
 
+export function postNativeVoiceDiag(event: string, detail = '', latencyMs = 0): void {
+  try {
+    const bridge = getNativeAudioBridge();
+    if (bridge?.postDiagEvent) {
+      void bridge.postDiagEvent(String(event || 'web_log'), String(detail || ''), Number(latencyMs) || 0).catch(() => {});
+    }
+  } catch {
+    // ignore
+  }
+}
+
 /**
  * Tell the native iOS shell that WKWebView is awake and actively generating cloud TTS
  * (e.g. Doubao / Volcengine Seed-TTS), cancelling the premature native Siri fallback timer.
@@ -516,7 +527,7 @@ export class WalkWavRecorder {
       opts.onLevel?.(normalizedLevel);
 
       const now = Date.now();
-      if (rms > 0.018) {
+      if (rms > 0.012) {
         this.hadSpeech = true;
         this.lastVoiceAt = now;
       } else if (autoVad && this.hadSpeech && now - this.startedAt > 550 && now - this.lastVoiceAt >= vadSilenceMs) {

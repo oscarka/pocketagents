@@ -2647,6 +2647,12 @@ function notifyNativeBackgroundWakeDone() {
 		if (bridge?.notifyBackgroundWakeDone) bridge.notifyBackgroundWakeDone().catch(() => {});
 	} catch {}
 }
+function postNativeVoiceDiag(event, detail = "", latencyMs = 0) {
+	try {
+		const bridge = getNativeAudioBridge();
+		if (bridge?.postDiagEvent) bridge.postDiagEvent(String(event || "web_log"), String(detail || ""), Number(latencyMs) || 0).catch(() => {});
+	} catch {}
+}
 /**
 * Tell the native iOS shell that WKWebView is awake and actively generating cloud TTS
 * (e.g. Doubao / Volcengine Seed-TTS), cancelling the premature native Siri fallback timer.
@@ -2911,7 +2917,7 @@ var WalkWavRecorder = class {
 			const normalizedLevel = Math.min(1, rms * 7.5);
 			opts.onLevel?.(normalizedLevel);
 			const now = Date.now();
-			if (rms > .018) {
+			if (rms > .012) {
 				this.hadSpeech = true;
 				this.lastVoiceAt = now;
 			} else if (autoVad && this.hadSpeech && now - this.startedAt > 550 && now - this.lastVoiceAt >= vadSilenceMs) {
@@ -5131,7 +5137,7 @@ function summarizeHubState(state) {
 	};
 }
 function VoiceCopilotSheets() {
-	const [walkOpen, setWalkOpen] = d(false);
+	const [walkOpen, setWalkOpenState] = d(false);
 	const [walkExpanded, setWalkExpanded] = d(false);
 	const [chatScreenOpen, setChatScreenOpen] = d(false);
 	const [labOpen, setLabOpen] = d(false);
@@ -5140,7 +5146,7 @@ function VoiceCopilotSheets() {
 	const [loadingCfg, setLoadingCfg] = d(false);
 	const [soundChecking, setSoundChecking] = d(false);
 	const [soundCheckMsg, setSoundCheckMsg] = d(null);
-	const [walkPhase, setWalkPhase] = d("idle");
+	const [walkPhase, setWalkPhaseState] = d("idle");
 	const [micLevel, setMicLevel] = d(0);
 	const [wakeLocked, setWakeLocked] = d(false);
 	const [lastUserText, setLastUserText] = d("");
@@ -5225,6 +5231,14 @@ function VoiceCopilotSheets() {
 	const walkPhaseRef = T(walkPhase);
 	const configRef = T(config);
 	const configLoadedRef = T(false);
+	const setWalkOpen = (next) => {
+		walkOpenRef.current = next;
+		setWalkOpenState(next);
+	};
+	const setWalkPhase = (next) => {
+		walkPhaseRef.current = next;
+		setWalkPhaseState(next);
+	};
 	A(() => {
 		walkOpenRef.current = walkOpen;
 	}, [walkOpen]);
@@ -5291,8 +5305,10 @@ function VoiceCopilotSheets() {
 			setLabOpen(false);
 		};
 		window.__dshRefreshVoiceConfig = () => refreshConfig(true);
-		const applyNativeSpokenBriefings = (items) => {
+		const applyNativeSpokenBriefings = (items, { triggerAutoListen = false } = {}) => {
 			if (!Array.isArray(items) || items.length === 0) return true;
+			let latestFreshSpokenKind = "";
+			let latestFreshSpokenAt = 0;
 			for (const item of items) {
 				if (!item || typeof item !== "object") continue;
 				const kind = String(item.kind || "");
@@ -5325,13 +5341,19 @@ function VoiceCopilotSheets() {
 					setLastReplyText(spokenReply);
 					setLastActionBadge(kind === "approval" ? `🔔 ${item.approval?.slot ? `${item.approval.slot}号` : "后台已播"}待审批 ${code}` : `✅ 后台已播报${item.summarizedByBrain ? " · AI 摘要" : ""}`);
 				}
+				if (spokenAt > latestFreshSpokenAt && (kind === "approval" || kind === "completed")) {
+					latestFreshSpokenAt = spokenAt;
+					latestFreshSpokenKind = kind;
+				}
 			}
+			const isFresh = latestFreshSpokenAt > 0 && Math.abs(Date.now() - latestFreshSpokenAt) < 4500;
+			if (triggerAutoListen && isFresh && latestFreshSpokenKind && walkOpenRef.current && walkPhaseRef.current === "idle" && configRef.current?.prefs?.autoListenAfterBriefing) startWalkListening({ isAutoFollowUp: true });
 			return true;
 		};
-		window.__dshOnNativeBackgroundBriefingsSynced = applyNativeSpokenBriefings;
+		window.__dshOnNativeBackgroundBriefingsSynced = (items) => applyNativeSpokenBriefings(items, { triggerAutoListen: true });
 		const onVisSyncNative = () => {
 			if (typeof document !== "undefined" && document.visibilityState === "visible") drainNativeSpokenBriefings().then((items) => {
-				if (items.length > 0) applyNativeSpokenBriefings(items);
+				if (items.length > 0) applyNativeSpokenBriefings(items, { triggerAutoListen: false });
 			});
 		};
 		if (typeof document !== "undefined") document.addEventListener("visibilitychange", onVisSyncNative);
@@ -5664,15 +5686,18 @@ function VoiceCopilotSheets() {
 			playEarcon(nextItem.kind === "approval" ? "approval" : "done");
 			setLastReplyText(spokenText);
 			setLastActionBadge(nextItem.kind === "approval" ? `🔔 ${data?.approval?.slot ? `${data.approval.slot}号` : "新"}待审批 ${nextItem.code || ""}` : `✅ 任务完成${data?.summarizedByBrain ? " · AI 摘要" : ""}`);
-			const micReadyForAutoListen = Boolean(cfg.prefs.autoListenAfterBriefing && walkOpenRef.current && (nextItem.kind === "approval" || nextItem.kind === "completed" || Boolean(data?.expectReply))) ? await canNativeAutoListenNow() : false;
+			const wantsAutoListen = Boolean(cfg.prefs.autoListenAfterBriefing && walkOpenRef.current && (nextItem.kind === "approval" || nextItem.kind === "completed" || Boolean(data?.expectReply)));
+			const micReadyForAutoListen = wantsAutoListen ? await canNativeAutoListenNow() : false;
 			await speakWalkReply(chunks, void 0, {
 				keepAudioSessionAfter: micReadyForAutoListen,
 				allowNativeFallback: nextItem.kind === "approval"
 			});
-			if (micReadyForAutoListen && walkOpenRef.current && walkPhaseRef.current === "idle") {
+			const canListenAfterSpeak = wantsAutoListen ? micReadyForAutoListen || await canNativeAutoListenNow() : false;
+			if (canListenAfterSpeak && walkOpenRef.current && walkPhaseRef.current === "idle") {
 				startedAutoListen = true;
+				postNativeVoiceDiag("auto_listen_after_briefing", `kind=${nextItem.kind} phase=${walkPhaseRef.current}`);
 				startWalkListening({ isAutoFollowUp: true });
-			}
+			} else if (wantsAutoListen) postNativeVoiceDiag("auto_listen_skipped", `kind=${nextItem.kind} can=${canListenAfterSpeak ? 1 : 0} open=${walkOpenRef.current ? 1 : 0} phase=${walkPhaseRef.current}`);
 		} catch {
 			if (configRef.current?.prefs?.duckMusicMode !== false && walkOpenRef.current) setWalkAudioSessionMode("ambient");
 		} finally {
@@ -5774,6 +5799,7 @@ function VoiceCopilotSheets() {
 				if (!playing && walkPhaseRef.current === "speaking") setWalkPhase("idle");
 			}
 		});
+		if (walkPhaseRef.current === "speaking") setWalkPhase("idle");
 	};
 	const handleWalkUserText = async (spokenText, sttMs = null, wavKb = null) => {
 		const clean = String(spokenText || "").trim();
@@ -5846,12 +5872,15 @@ function VoiceCopilotSheets() {
 			if (sttMs !== null) baseMetrics.push(`STT ${sttMs}ms`);
 			baseMetrics.push(`大脑 ${data.latencyMs ?? 0}ms${data.fastPath ? " ⚡" : ""}`);
 			setLastLatencyBadge(baseMetrics.join(" · "));
-			const shouldAutoListen = Boolean(data.expectReply && configRef.current.prefs.autoListenAfterBriefing && walkOpenRef.current) ? await canNativeAutoListenNow() : false;
+			const wantsAutoListen = Boolean(data.expectReply && configRef.current.prefs.autoListenAfterBriefing && walkOpenRef.current);
+			const shouldAutoListen = wantsAutoListen ? await canNativeAutoListenNow() : false;
 			await speakWalkReply(chunks, (ttsMs) => {
 				setLastLatencyBadge([...baseMetrics, `TTS ${ttsMs}ms`].join(" · "));
 			}, { keepAudioSessionAfter: shouldAutoListen });
-			if (shouldAutoListen && walkOpenRef.current && walkPhaseRef.current === "idle") startWalkListening({ isAutoFollowUp: true });
-			else if (walkOpenRef.current && walkPhaseRef.current === "idle" && briefingQueueRef.current.length > 0) setTimeout(() => {
+			if ((wantsAutoListen ? shouldAutoListen || await canNativeAutoListenNow() : false) && walkOpenRef.current && walkPhaseRef.current === "idle") {
+				postNativeVoiceDiag("auto_listen_after_turn", `phase=${walkPhaseRef.current}`);
+				startWalkListening({ isAutoFollowUp: true });
+			} else if (walkOpenRef.current && walkPhaseRef.current === "idle" && briefingQueueRef.current.length > 0) setTimeout(() => {
 				drainBriefingQueue();
 			}, 350);
 		} catch (err) {
@@ -5866,11 +5895,13 @@ function VoiceCopilotSheets() {
 		setMicLevel(0);
 		const duckMusic = configRef.current?.prefs?.duckMusicMode !== false;
 		if (rec.silentTimeout || isAutoFollowUp && !rec.hadSpeech) {
+			postNativeVoiceDiag("auto_listen_silent_exit", `timeout=${rec.silentTimeout ? 1 : 0} hadSpeech=${rec.hadSpeech ? 1 : 0} bytes=${rec.byteLength}`);
 			setWalkPhase("idle");
 			if (duckMusic) setWalkAudioSessionMode("ambient");
 			if (walkOpenRef.current && briefingQueueRef.current.length > 0) setTimeout(() => {
 				drainBriefingQueue();
 			}, 350);
+			else notifyNativeBackgroundWakeDone();
 			return;
 		}
 		const wavKb = Math.max(1, Math.round(rec.byteLength / 1024));
@@ -5997,21 +6028,26 @@ function VoiceCopilotSheets() {
 		}
 		try {
 			setWalkAudioSessionMode("play-and-record");
-			playEarcon("listen");
 			setWalkPhase("listening");
+			playEarcon("listen");
+			await new Promise((resolve) => setTimeout(resolve, 210));
+			if (!walkOpenRef.current || walkPhaseRef.current !== "listening") return;
 			await recorderRef.current.start({
 				autoVad: isAutoFollowUp ? true : configRef.current.prefs.autoVad,
 				vadSilenceMs: configRef.current.prefs.vadSilenceMs || 850,
-				noSpeechTimeoutMs: isAutoFollowUp ? 5500 : 0,
+				noSpeechTimeoutMs: isAutoFollowUp ? 7e3 : 0,
 				onLevel: (lvl) => setMicLevel(lvl),
 				onAutoStop: (res) => {
 					handleWalkWavReady(res, isAutoFollowUp);
 				}
 			});
+			postNativeVoiceDiag("listen_started", `auto=${isAutoFollowUp ? 1 : 0} vad=${isAutoFollowUp ? 1 : configRef.current.prefs.autoVad ? 1 : 0}`);
 		} catch (err) {
 			setWalkPhase("idle");
+			postNativeVoiceDiag("listen_start_error", `auto=${isAutoFollowUp ? 1 : 0} err=${String(err?.message || "unknown").slice(0, 120)}`);
 			if (configRef.current?.prefs?.duckMusicMode !== false) setWalkAudioSessionMode("ambient");
 			if (!isAutoFollowUp) toast(err?.message || "无法打开麦克风，请检查浏览器权限");
+			else notifyNativeBackgroundWakeDone();
 		}
 	};
 	const toggleWalkMic = async () => {

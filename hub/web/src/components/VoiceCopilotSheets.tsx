@@ -15,6 +15,7 @@ import {
   isNativeIosShell,
   notifyNativeBackgroundWakeDone,
   playEarcon,
+  postNativeVoiceDiag,
   setWalkAudioSessionMode,
   setWalkBackgroundKeepAlive,
 } from '../voice/walkAudio';
@@ -168,7 +169,7 @@ function summarizeHubState(state: any) {
 }
 
 export function VoiceCopilotSheets() {
-  const [walkOpen, setWalkOpen] = useState(false); // Mode active (engine + background audio + briefings)
+  const [walkOpen, setWalkOpenState] = useState(false); // Mode active (engine + background audio + briefings)
   const [walkExpanded, setWalkExpanded] = useState(false); // Full-screen canvas vs minimized Apple Music-style Mini Bar
   const [chatScreenOpen, setChatScreenOpen] = useState(false);
   const [labOpen, setLabOpen] = useState(false);
@@ -179,7 +180,7 @@ export function VoiceCopilotSheets() {
   const [soundCheckMsg, setSoundCheckMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   // Walk mode live state
-  const [walkPhase, setWalkPhase] = useState<'idle' | 'listening' | 'transcribing' | 'thinking' | 'speaking'>('idle');
+  const [walkPhase, setWalkPhaseState] = useState<'idle' | 'listening' | 'transcribing' | 'thinking' | 'speaking'>('idle');
   const [micLevel, setMicLevel] = useState(0);
   const [wakeLocked, setWakeLocked] = useState(false);
   const [lastUserText, setLastUserText] = useState('');
@@ -276,6 +277,17 @@ export function VoiceCopilotSheets() {
   const configRef = useRef(config);
   const configLoadedRef = useRef(false);
 
+  // Synchronous ref + state updaters so async post-TTS transitions (e.g. speakWalkReply -> startWalkListening)
+  // NEVER observe a stale 'speaking' phase or stale walkOpen flag before Preact flushes its next render/effect commit!
+  const setWalkOpen = (next: boolean) => {
+    walkOpenRef.current = next;
+    setWalkOpenState(next);
+  };
+  const setWalkPhase = (next: 'idle' | 'listening' | 'transcribing' | 'thinking' | 'speaking') => {
+    walkPhaseRef.current = next;
+    setWalkPhaseState(next);
+  };
+
   useEffect(() => { walkOpenRef.current = walkOpen; }, [walkOpen]);
   useEffect(() => { walkPhaseRef.current = walkPhase; }, [walkPhase]);
   useEffect(() => { configRef.current = config; }, [config]);
@@ -349,8 +361,10 @@ export function VoiceCopilotSheets() {
       setLabOpen(false);
     };
     (window as any).__dshRefreshVoiceConfig = () => refreshConfig(true);
-    const applyNativeSpokenBriefings = (items: any[]) => {
+    const applyNativeSpokenBriefings = (items: any[], { triggerAutoListen = false } = {}) => {
       if (!Array.isArray(items) || items.length === 0) return true;
+      let latestFreshSpokenKind = '';
+      let latestFreshSpokenAt = 0;
       for (const item of items) {
         if (!item || typeof item !== 'object') continue;
         const kind = String(item.kind || '');
@@ -396,14 +410,32 @@ export function VoiceCopilotSheets() {
               : `✅ 后台已播报${item.summarizedByBrain ? ' · AI 摘要' : ''}`,
           );
         }
+        if (spokenAt > latestFreshSpokenAt && (kind === 'approval' || kind === 'completed')) {
+          latestFreshSpokenAt = spokenAt;
+          latestFreshSpokenKind = kind;
+        }
+      }
+      // If Native Swift zero-WebView briefing JUST finished speaking (e.g. locked-screen AirPods)
+      // and user has `autoListenAfterBriefing` enabled, open the mic immediately for hands-free reply!
+      const isFresh = latestFreshSpokenAt > 0 && Math.abs(Date.now() - latestFreshSpokenAt) < 4500;
+      if (
+        triggerAutoListen
+        && isFresh
+        && latestFreshSpokenKind
+        && walkOpenRef.current
+        && walkPhaseRef.current === 'idle'
+        && configRef.current?.prefs?.autoListenAfterBriefing
+      ) {
+        void startWalkListening({ isAutoFollowUp: true });
       }
       return true;
     };
-    (window as any).__dshOnNativeBackgroundBriefingsSynced = applyNativeSpokenBriefings;
+    (window as any).__dshOnNativeBackgroundBriefingsSynced = (items: any[]) =>
+      applyNativeSpokenBriefings(items, { triggerAutoListen: true });
     const onVisSyncNative = () => {
       if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
         void drainNativeSpokenBriefings().then(items => {
-          if (items.length > 0) applyNativeSpokenBriefings(items);
+          if (items.length > 0) applyNativeSpokenBriefings(items, { triggerAutoListen: false });
         });
       }
     };
@@ -854,9 +886,18 @@ export function VoiceCopilotSheets() {
         allowNativeFallback: nextItem.kind === 'approval',
       });
 
-      if (micReadyForAutoListen && walkOpenRef.current && walkPhaseRef.current === 'idle') {
+      const canListenAfterSpeak = wantsAutoListen
+        ? (micReadyForAutoListen || await canNativeAutoListenNow())
+        : false;
+      if (canListenAfterSpeak && walkOpenRef.current && walkPhaseRef.current === 'idle') {
         startedAutoListen = true;
+        postNativeVoiceDiag('auto_listen_after_briefing', `kind=${nextItem.kind} phase=${walkPhaseRef.current}`);
         void startWalkListening({ isAutoFollowUp: true });
+      } else if (wantsAutoListen) {
+        postNativeVoiceDiag(
+          'auto_listen_skipped',
+          `kind=${nextItem.kind} can=${canListenAfterSpeak ? 1 : 0} open=${walkOpenRef.current ? 1 : 0} phase=${walkPhaseRef.current}`,
+        );
       }
     } catch {
       if (configRef.current?.prefs?.duckMusicMode !== false && walkOpenRef.current) {
@@ -984,6 +1025,9 @@ export function VoiceCopilotSheets() {
         }
       },
     });
+    if (walkPhaseRef.current === 'speaking') {
+      setWalkPhase('idle');
+    }
   };
 
   const handleWalkUserText = async (spokenText: string, sttMs: number | null = null, wavKb: number | null = null) => {
@@ -1083,7 +1127,11 @@ export function VoiceCopilotSheets() {
         { keepAudioSessionAfter: shouldAutoListen },
       );
 
-      if (shouldAutoListen && walkOpenRef.current && walkPhaseRef.current === 'idle') {
+      const shouldAutoListenAfterSpeak = wantsAutoListen
+        ? (shouldAutoListen || await canNativeAutoListenNow())
+        : false;
+      if (shouldAutoListenAfterSpeak && walkOpenRef.current && walkPhaseRef.current === 'idle') {
+        postNativeVoiceDiag('auto_listen_after_turn', `phase=${walkPhaseRef.current}`);
         void startWalkListening({ isAutoFollowUp: true });
       } else if (walkOpenRef.current && walkPhaseRef.current === 'idle' && briefingQueueRef.current.length > 0) {
         setTimeout(() => { void drainBriefingQueue(); }, 350);
@@ -1105,10 +1153,13 @@ export function VoiceCopilotSheets() {
     const duckMusic = configRef.current?.prefs?.duckMusicMode !== false;
     if (rec.silentTimeout || (isAutoFollowUp && !rec.hadSpeech)) {
       // User stayed silent during auto-listen window -> quietly restore background music!
+      postNativeVoiceDiag('auto_listen_silent_exit', `timeout=${rec.silentTimeout ? 1 : 0} hadSpeech=${rec.hadSpeech ? 1 : 0} bytes=${rec.byteLength}`);
       setWalkPhase('idle');
       if (duckMusic) setWalkAudioSessionMode('ambient');
       if (walkOpenRef.current && briefingQueueRef.current.length > 0) {
         setTimeout(() => { void drainBriefingQueue(); }, 350);
+      } else {
+        notifyNativeBackgroundWakeDone();
       }
       return;
     }
@@ -1245,26 +1296,36 @@ export function VoiceCopilotSheets() {
       return;
     }
     try {
-      // Switch iOS Safari AudioSession BEFORE playing earcon or opening microphone
+      // Switch iOS Safari AudioSession BEFORE playing earcon or opening microphone.
+      // Play the 170ms listen chime FIRST and wait 210ms so the chime is clearly heard AND
+      // finishes before the mic/VAD arms (preventing speaker earcon bleed from false-triggering VAD!).
       setWalkAudioSessionMode('play-and-record');
-      playEarcon('listen');
       setWalkPhase('listening');
+      playEarcon('listen');
+      await new Promise(resolve => setTimeout(resolve, 210));
+      if (!walkOpenRef.current || walkPhaseRef.current !== 'listening') {
+        return;
+      }
       await recorderRef.current!.start({
         autoVad: isAutoFollowUp ? true : configRef.current.prefs.autoVad,
         vadSilenceMs: configRef.current.prefs.vadSilenceMs || 850,
-        noSpeechTimeoutMs: isAutoFollowUp ? 5500 : 0,
+        noSpeechTimeoutMs: isAutoFollowUp ? 7000 : 0,
         onLevel: lvl => setMicLevel(lvl),
         onAutoStop: res => {
           void handleWalkWavReady(res, isAutoFollowUp);
         },
       });
+      postNativeVoiceDiag('listen_started', `auto=${isAutoFollowUp ? 1 : 0} vad=${isAutoFollowUp ? 1 : (configRef.current.prefs.autoVad ? 1 : 0)}`);
     } catch (err: any) {
       setWalkPhase('idle');
+      postNativeVoiceDiag('listen_start_error', `auto=${isAutoFollowUp ? 1 : 0} err=${String(err?.message || 'unknown').slice(0, 120)}`);
       if (configRef.current?.prefs?.duckMusicMode !== false) {
         setWalkAudioSessionMode('ambient');
       }
       if (!isAutoFollowUp) {
         toast(err?.message || '无法打开麦克风，请检查浏览器权限');
+      } else {
+        notifyNativeBackgroundWakeDone();
       }
     }
   };

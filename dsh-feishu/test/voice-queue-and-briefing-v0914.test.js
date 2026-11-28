@@ -483,3 +483,34 @@ test('v0.9.45 native zero-WebView background briefing, /api/voice/diag ring buff
     assert.doesNotMatch(swiftSrc, /__dshOnBackgroundPushWake/)
   }
 })
+
+test('v0.9.48 Walk Mode auto-listen after briefing: synchronous walkPhaseRef update, earcon-before-mic guard, and live native-briefing auto-listen handoff', async () => {
+  const { readFileSync } = await import('node:fs')
+  const { resolve } = await import('node:path')
+  const rootDir = resolve(process.cwd())
+  const walkSrc = readFileSync(resolve(rootDir, 'hub/web/src/components/VoiceCopilotSheets.tsx'), 'utf8')
+  const walkAudioSrc = readFileSync(resolve(rootDir, 'hub/web/src/voice/walkAudio.ts'), 'utf8')
+
+  // 1. setWalkPhase & setWalkOpen MUST update their refs synchronously before Preact renders
+  assert.match(walkSrc, /const setWalkPhase\s*=\s*\([^)]*\)\s*=>\s*\{\s*walkPhaseRef\.current\s*=\s*next;\s*setWalkPhaseState\(next\)/)
+  assert.match(walkSrc, /const setWalkOpen\s*=\s*\([^)]*\)\s*=>\s*\{\s*walkOpenRef\.current\s*=\s*next;\s*setWalkOpenState\(next\)/)
+
+  // 2. speakWalkReply guarantees walkPhaseRef leaves 'speaking' even if chunk list was empty
+  assert.match(walkSrc, /if\s*\(walkPhaseRef\.current\s*===\s*'speaking'\)\s*\{\s*setWalkPhase\('idle'\)/)
+
+  // 3. playEarcon('listen') plays and settles (~210ms) BEFORE recorderRef.current.start() arms VAD
+  const earconPos = walkSrc.indexOf("playEarcon('listen');\n      await new Promise")
+  const recStartPos = walkSrc.indexOf('await recorderRef.current!.start({', earconPos)
+  assert.ok(earconPos > 0 && recStartPos > earconPos, 'listen earcon must complete before mic VAD arms')
+  assert.match(walkSrc, /noSpeechTimeoutMs:\s*isAutoFollowUp\s*\?\s*7000\s*:\s*0/)
+
+  // 4. Live native zero-WebView background briefing callback triggers auto-listen when fresh,
+  //    while stale visibilitychange drain does NOT hijack mic
+  assert.match(walkSrc, /__dshOnNativeBackgroundBriefingsSynced\s*=\s*\(items:\s*any\[\]\)\s*=>\s*applyNativeSpokenBriefings\(items,\s*\{\s*triggerAutoListen:\s*true\s*\}\)/)
+  assert.match(walkSrc, /applyNativeSpokenBriefings\(items,\s*\{\s*triggerAutoListen:\s*false\s*\}\)/)
+
+  // 5. Native diag tracing helper exported in walkAudio.ts and wired in VoiceCopilotSheets.tsx
+  assert.match(walkAudioSrc, /export function postNativeVoiceDiag/)
+  assert.match(walkSrc, /postNativeVoiceDiag\('auto_listen_after_briefing'/)
+  assert.match(walkSrc, /postNativeVoiceDiag\('listen_started'/)
+})
