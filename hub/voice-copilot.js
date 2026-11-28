@@ -825,8 +825,9 @@ export function formatApprovalBriefingSpeech(approval = {}, { totalCount = 1, hu
     return `${slotTag}提问，${who}问你：${qText}${optStr ? `。${optStr}。` : '。'}${suffix}`
   }
 
-  const cleanSummary = String(humanSummary || '').trim()
-    || translateApprovalDeterministic(approval).summary
+  const cleanSummary = (String(humanSummary || '').trim() || translateApprovalDeterministic(approval).summary)
+    .replace(/[。！？.!?]+$/g, '')
+    .trim()
   const opts = Array.isArray(approval.options) ? approval.options : []
   let optHint = ''
   if (opts.length === 2) {
